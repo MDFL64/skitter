@@ -1,6 +1,8 @@
 use crate::abi::POINTER_SIZE;
 use crate::abi::PointerSize;
+use crate::layout::IntSign;
 use crate::layout::Layout;
+use crate::layout::LayoutKind;
 
 use super::vm;
 use super::vm::instr::*;
@@ -8,9 +10,6 @@ use rustc_middle::mir;
 
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::Ty;
-use rustc_middle::ty::TyKind;
-use rustc_middle::ty::IntTy;
-use rustc_middle::ty::UintTy;
 
 use rustc_middle::mir::Rvalue;
 use rustc_middle::mir::Operand;
@@ -110,135 +109,164 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let lhs = self.operand_get_slot(&args.0);
                         let rhs = self.operand_get_slot(&args.1);
 
-                        let prim = PrimType::from(ty);
+                        let layout = Layout::from(ty);
 
                         let mut swap = false;
 
-                        let ctor = match (prim,op) {
-                            (PrimType::I8(_),BinOp::Eq) => Instr::I8_Eq,
-                            (PrimType::I8(_),BinOp::Ne) => Instr::I8_NotEq,
-                            (PrimType::I8(_),BinOp::Add) => Instr::I8_Add,
-                            (PrimType::I8(_),BinOp::Sub) => Instr::I8_Sub,
-                            (PrimType::I8(_),BinOp::Mul) => Instr::I8_Mul,
-                            (PrimType::I8(_),BinOp::BitOr) => Instr::I8_Or,
-                            (PrimType::I8(_),BinOp::BitAnd) => Instr::I8_And,
-                            (PrimType::I8(_),BinOp::BitXor) => Instr::I8_Xor,
-                            (PrimType::I8(_),BinOp::Shl) => Instr::I8_ShiftL,
-                            (PrimType::I8(IntSign::Signed),BinOp::Lt) => Instr::I8_S_Lt,
-                            (PrimType::I8(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I8_S_Lt },
-                            (PrimType::I8(IntSign::Signed),BinOp::Le) => Instr::I8_S_LtEq,
-                            (PrimType::I8(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I8_S_LtEq },
-                            (PrimType::I8(IntSign::Signed),BinOp::Div) => Instr::I8_S_Div,
-                            (PrimType::I8(IntSign::Signed),BinOp::Rem) => Instr::I8_S_Rem,
-                            (PrimType::I8(IntSign::Signed),BinOp::Shr) => Instr::I8_S_ShiftR,
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Lt) => Instr::I8_U_Lt,
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I8_U_Lt },
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Le) => Instr::I8_U_LtEq,
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I8_U_LtEq },
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Div) => Instr::I8_U_Div,
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Rem) => Instr::I8_U_Rem,
-                            (PrimType::I8(IntSign::Unsigned),BinOp::Shr) => Instr::I8_U_ShiftR,
+                        let ctor = match (&layout.kind,layout.size,op) {
+                            (LayoutKind::Int(_),1,BinOp::Eq) => Instr::I8_Eq,
+                            (LayoutKind::Int(_),1,BinOp::Ne) => Instr::I8_NotEq,
+                            (LayoutKind::Int(_),1,BinOp::Add) => Instr::I8_Add,
+                            (LayoutKind::Int(_),1,BinOp::Sub) => Instr::I8_Sub,
+                            (LayoutKind::Int(_),1,BinOp::Mul) => Instr::I8_Mul,
+                            (LayoutKind::Int(_),1,BinOp::BitOr) => Instr::I8_Or,
+                            (LayoutKind::Int(_),1,BinOp::BitAnd) => Instr::I8_And,
+                            (LayoutKind::Int(_),1,BinOp::BitXor) => Instr::I8_Xor,
+                            (LayoutKind::Int(_),1,BinOp::Shl) => Instr::I8_ShiftL,
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Lt) => Instr::I8_S_Lt,
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Gt) => { swap = true; Instr::I8_S_Lt },
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Le) => Instr::I8_S_LtEq,
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Ge) => { swap = true; Instr::I8_S_LtEq },
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Div) => Instr::I8_S_Div,
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Rem) => Instr::I8_S_Rem,
+                            (LayoutKind::Int(IntSign::Signed),1,BinOp::Shr) => Instr::I8_S_ShiftR,
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Lt) => Instr::I8_U_Lt,
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Gt) => { swap = true; Instr::I8_U_Lt },
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Le) => Instr::I8_U_LtEq,
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Ge) => { swap = true; Instr::I8_U_LtEq },
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Div) => Instr::I8_U_Div,
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Rem) => Instr::I8_U_Rem,
+                            (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Shr) => Instr::I8_U_ShiftR,
 
-                            (PrimType::I16(_),BinOp::Eq) => Instr::I16_Eq,
-                            (PrimType::I16(_),BinOp::Ne) => Instr::I16_NotEq,
-                            (PrimType::I16(_),BinOp::Add) => Instr::I16_Add,
-                            (PrimType::I16(_),BinOp::Sub) => Instr::I16_Sub,
-                            (PrimType::I16(_),BinOp::Mul) => Instr::I16_Mul,
-                            (PrimType::I16(_),BinOp::BitOr) => Instr::I16_Or,
-                            (PrimType::I16(_),BinOp::BitAnd) => Instr::I16_And,
-                            (PrimType::I16(_),BinOp::BitXor) => Instr::I16_Xor,
-                            (PrimType::I16(_),BinOp::Shl) => Instr::I16_ShiftL,
-                            (PrimType::I16(IntSign::Signed),BinOp::Lt) => Instr::I16_S_Lt,
-                            (PrimType::I16(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I16_S_Lt },
-                            (PrimType::I16(IntSign::Signed),BinOp::Le) => Instr::I16_S_LtEq,
-                            (PrimType::I16(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I16_S_LtEq },
-                            (PrimType::I16(IntSign::Signed),BinOp::Div) => Instr::I16_S_Div,
-                            (PrimType::I16(IntSign::Signed),BinOp::Rem) => Instr::I16_S_Rem,
-                            (PrimType::I16(IntSign::Signed),BinOp::Shr) => Instr::I16_S_ShiftR,
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Lt) => Instr::I16_U_Lt,
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I16_U_Lt },
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Le) => Instr::I16_U_LtEq,
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I16_U_LtEq },
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Div) => Instr::I16_U_Div,
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Rem) => Instr::I16_U_Rem,
-                            (PrimType::I16(IntSign::Unsigned),BinOp::Shr) => Instr::I16_U_ShiftR,
+                            (LayoutKind::Int(_),2,BinOp::Eq) => Instr::I16_Eq,
+                            (LayoutKind::Int(_),2,BinOp::Ne) => Instr::I16_NotEq,
+                            (LayoutKind::Int(_),2,BinOp::Add) => Instr::I16_Add,
+                            (LayoutKind::Int(_),2,BinOp::Sub) => Instr::I16_Sub,
+                            (LayoutKind::Int(_),2,BinOp::Mul) => Instr::I16_Mul,
+                            (LayoutKind::Int(_),2,BinOp::BitOr) => Instr::I16_Or,
+                            (LayoutKind::Int(_),2,BinOp::BitAnd) => Instr::I16_And,
+                            (LayoutKind::Int(_),2,BinOp::BitXor) => Instr::I16_Xor,
+                            (LayoutKind::Int(_),2,BinOp::Shl) => Instr::I16_ShiftL,
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Lt) => Instr::I16_S_Lt,
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Gt) => { swap = true; Instr::I16_S_Lt },
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Le) => Instr::I16_S_LtEq,
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Ge) => { swap = true; Instr::I16_S_LtEq },
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Div) => Instr::I16_S_Div,
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Rem) => Instr::I16_S_Rem,
+                            (LayoutKind::Int(IntSign::Signed),2,BinOp::Shr) => Instr::I16_S_ShiftR,
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Lt) => Instr::I16_U_Lt,
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Gt) => { swap = true; Instr::I16_U_Lt },
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Le) => Instr::I16_U_LtEq,
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Ge) => { swap = true; Instr::I16_U_LtEq },
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Div) => Instr::I16_U_Div,
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Rem) => Instr::I16_U_Rem,
+                            (LayoutKind::Int(IntSign::Unsigned),2,BinOp::Shr) => Instr::I16_U_ShiftR,
 
-                            (PrimType::I32(_),BinOp::Eq) => Instr::I32_Eq,
-                            (PrimType::I32(_),BinOp::Ne) => Instr::I32_NotEq,
-                            (PrimType::I32(_),BinOp::Add) => Instr::I32_Add,
-                            (PrimType::I32(_),BinOp::Sub) => Instr::I32_Sub,
-                            (PrimType::I32(_),BinOp::Mul) => Instr::I32_Mul,
-                            (PrimType::I32(_),BinOp::BitOr) => Instr::I32_Or,
-                            (PrimType::I32(_),BinOp::BitAnd) => Instr::I32_And,
-                            (PrimType::I32(_),BinOp::BitXor) => Instr::I32_Xor,
-                            (PrimType::I32(_),BinOp::Shl) => Instr::I32_ShiftL,
-                            (PrimType::I32(IntSign::Signed),BinOp::Lt) => Instr::I32_S_Lt,
-                            (PrimType::I32(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I32_S_Lt },
-                            (PrimType::I32(IntSign::Signed),BinOp::Le) => Instr::I32_S_LtEq,
-                            (PrimType::I32(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I32_S_LtEq },
-                            (PrimType::I32(IntSign::Signed),BinOp::Div) => Instr::I32_S_Div,
-                            (PrimType::I32(IntSign::Signed),BinOp::Rem) => Instr::I32_S_Rem,
-                            (PrimType::I32(IntSign::Signed),BinOp::Shr) => Instr::I32_S_ShiftR,
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Lt) => Instr::I32_U_Lt,
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I32_U_Lt },
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Le) => Instr::I32_U_LtEq,
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I32_U_LtEq },
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Div) => Instr::I32_U_Div,
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Rem) => Instr::I32_U_Rem,
-                            (PrimType::I32(IntSign::Unsigned),BinOp::Shr) => Instr::I32_U_ShiftR,
+                            (LayoutKind::Int(_),4,BinOp::Eq) => Instr::I32_Eq,
+                            (LayoutKind::Int(_),4,BinOp::Ne) => Instr::I32_NotEq,
+                            (LayoutKind::Int(_),4,BinOp::Add) => Instr::I32_Add,
+                            (LayoutKind::Int(_),4,BinOp::Sub) => Instr::I32_Sub,
+                            (LayoutKind::Int(_),4,BinOp::Mul) => Instr::I32_Mul,
+                            (LayoutKind::Int(_),4,BinOp::BitOr) => Instr::I32_Or,
+                            (LayoutKind::Int(_),4,BinOp::BitAnd) => Instr::I32_And,
+                            (LayoutKind::Int(_),4,BinOp::BitXor) => Instr::I32_Xor,
+                            (LayoutKind::Int(_),4,BinOp::Shl) => Instr::I32_ShiftL,
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Lt) => Instr::I32_S_Lt,
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Gt) => { swap = true; Instr::I32_S_Lt },
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Le) => Instr::I32_S_LtEq,
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Ge) => { swap = true; Instr::I32_S_LtEq },
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Div) => Instr::I32_S_Div,
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Rem) => Instr::I32_S_Rem,
+                            (LayoutKind::Int(IntSign::Signed),4,BinOp::Shr) => Instr::I32_S_ShiftR,
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Lt) => Instr::I32_U_Lt,
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Gt) => { swap = true; Instr::I32_U_Lt },
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Le) => Instr::I32_U_LtEq,
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Ge) => { swap = true; Instr::I32_U_LtEq },
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Div) => Instr::I32_U_Div,
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Rem) => Instr::I32_U_Rem,
+                            (LayoutKind::Int(IntSign::Unsigned),4,BinOp::Shr) => Instr::I32_U_ShiftR,
 
-                            (PrimType::I64(_),BinOp::Eq) => Instr::I64_Eq,
-                            (PrimType::I64(_),BinOp::Ne) => Instr::I64_NotEq,
-                            (PrimType::I64(_),BinOp::Add) => Instr::I64_Add,
-                            (PrimType::I64(_),BinOp::Sub) => Instr::I64_Sub,
-                            (PrimType::I64(_),BinOp::Mul) => Instr::I64_Mul,
-                            (PrimType::I64(_),BinOp::BitOr) => Instr::I64_Or,
-                            (PrimType::I64(_),BinOp::BitAnd) => Instr::I64_And,
-                            (PrimType::I64(_),BinOp::BitXor) => Instr::I64_Xor,
-                            (PrimType::I64(_),BinOp::Shl) => Instr::I64_ShiftL,
-                            (PrimType::I64(IntSign::Signed),BinOp::Lt) => Instr::I64_S_Lt,
-                            (PrimType::I64(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I64_S_Lt },
-                            (PrimType::I64(IntSign::Signed),BinOp::Le) => Instr::I64_S_LtEq,
-                            (PrimType::I64(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I64_S_LtEq },
-                            (PrimType::I64(IntSign::Signed),BinOp::Div) => Instr::I64_S_Div,
-                            (PrimType::I64(IntSign::Signed),BinOp::Rem) => Instr::I64_S_Rem,
-                            (PrimType::I64(IntSign::Signed),BinOp::Shr) => Instr::I64_S_ShiftR,
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Lt) => Instr::I64_U_Lt,
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I64_U_Lt },
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Le) => Instr::I64_U_LtEq,
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I64_U_LtEq },
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Div) => Instr::I64_U_Div,
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Rem) => Instr::I64_U_Rem,
-                            (PrimType::I64(IntSign::Unsigned),BinOp::Shr) => Instr::I64_U_ShiftR,
+                            (LayoutKind::Int(_),8,BinOp::Eq) => Instr::I64_Eq,
+                            (LayoutKind::Int(_),8,BinOp::Ne) => Instr::I64_NotEq,
+                            (LayoutKind::Int(_),8,BinOp::Add) => Instr::I64_Add,
+                            (LayoutKind::Int(_),8,BinOp::Sub) => Instr::I64_Sub,
+                            (LayoutKind::Int(_),8,BinOp::Mul) => Instr::I64_Mul,
+                            (LayoutKind::Int(_),8,BinOp::BitOr) => Instr::I64_Or,
+                            (LayoutKind::Int(_),8,BinOp::BitAnd) => Instr::I64_And,
+                            (LayoutKind::Int(_),8,BinOp::BitXor) => Instr::I64_Xor,
+                            (LayoutKind::Int(_),8,BinOp::Shl) => Instr::I64_ShiftL,
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Lt) => Instr::I64_S_Lt,
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Gt) => { swap = true; Instr::I64_S_Lt },
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Le) => Instr::I64_S_LtEq,
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Ge) => { swap = true; Instr::I64_S_LtEq },
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Div) => Instr::I64_S_Div,
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Rem) => Instr::I64_S_Rem,
+                            (LayoutKind::Int(IntSign::Signed),8,BinOp::Shr) => Instr::I64_S_ShiftR,
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Lt) => Instr::I64_U_Lt,
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Gt) => { swap = true; Instr::I64_U_Lt },
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Le) => Instr::I64_U_LtEq,
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Ge) => { swap = true; Instr::I64_U_LtEq },
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Div) => Instr::I64_U_Div,
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Rem) => Instr::I64_U_Rem,
+                            (LayoutKind::Int(IntSign::Unsigned),8,BinOp::Shr) => Instr::I64_U_ShiftR,
 
-                            (PrimType::I128(_),BinOp::Eq) => Instr::I128_Eq,
-                            (PrimType::I128(_),BinOp::Ne) => Instr::I128_NotEq,
-                            (PrimType::I128(_),BinOp::Add) => Instr::I128_Add,
-                            (PrimType::I128(_),BinOp::Sub) => Instr::I128_Sub,
-                            (PrimType::I128(_),BinOp::Mul) => Instr::I128_Mul,
-                            (PrimType::I128(_),BinOp::BitOr) => Instr::I128_Or,
-                            (PrimType::I128(_),BinOp::BitAnd) => Instr::I128_And,
-                            (PrimType::I128(_),BinOp::BitXor) => Instr::I128_Xor,
-                            (PrimType::I128(_),BinOp::Shl) => Instr::I128_ShiftL,
-                            (PrimType::I128(IntSign::Signed),BinOp::Lt) => Instr::I128_S_Lt,
-                            (PrimType::I128(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I128_S_Lt },
-                            (PrimType::I128(IntSign::Signed),BinOp::Le) => Instr::I128_S_LtEq,
-                            (PrimType::I128(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I128_S_LtEq },
-                            (PrimType::I128(IntSign::Signed),BinOp::Div) => Instr::I128_S_Div,
-                            (PrimType::I128(IntSign::Signed),BinOp::Rem) => Instr::I128_S_Rem,
-                            (PrimType::I128(IntSign::Signed),BinOp::Shr) => Instr::I128_S_ShiftR,
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Lt) => Instr::I128_U_Lt,
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I128_U_Lt },
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Le) => Instr::I128_U_LtEq,
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I128_U_LtEq },
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Div) => Instr::I128_U_Div,
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Rem) => Instr::I128_U_Rem,
-                            (PrimType::I128(IntSign::Unsigned),BinOp::Shr) => Instr::I128_U_ShiftR,
+                            (LayoutKind::Int(_),16,BinOp::Eq) => Instr::I128_Eq,
+                            (LayoutKind::Int(_),16,BinOp::Ne) => Instr::I128_NotEq,
+                            (LayoutKind::Int(_),16,BinOp::Add) => Instr::I128_Add,
+                            (LayoutKind::Int(_),16,BinOp::Sub) => Instr::I128_Sub,
+                            (LayoutKind::Int(_),16,BinOp::Mul) => Instr::I128_Mul,
+                            (LayoutKind::Int(_),16,BinOp::BitOr) => Instr::I128_Or,
+                            (LayoutKind::Int(_),16,BinOp::BitAnd) => Instr::I128_And,
+                            (LayoutKind::Int(_),16,BinOp::BitXor) => Instr::I128_Xor,
+                            (LayoutKind::Int(_),16,BinOp::Shl) => Instr::I128_ShiftL,
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Lt) => Instr::I128_S_Lt,
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Gt) => { swap = true; Instr::I128_S_Lt },
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Le) => Instr::I128_S_LtEq,
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Ge) => { swap = true; Instr::I128_S_LtEq },
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Div) => Instr::I128_S_Div,
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Rem) => Instr::I128_S_Rem,
+                            (LayoutKind::Int(IntSign::Signed),16,BinOp::Shr) => Instr::I128_S_ShiftR,
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Lt) => Instr::I128_U_Lt,
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Gt) => { swap = true; Instr::I128_U_Lt },
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Le) => Instr::I128_U_LtEq,
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Ge) => { swap = true; Instr::I128_U_LtEq },
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Div) => Instr::I128_U_Div,
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Rem) => Instr::I128_U_Rem,
+                            (LayoutKind::Int(IntSign::Unsigned),16,BinOp::Shr) => Instr::I128_U_ShiftR,
 
-                            (PrimType::Bool,BinOp::BitAnd) => Instr::Bool_And,
+                            (LayoutKind::Bool,1,BinOp::BitAnd) => Instr::I8_And,
+                            (LayoutKind::Bool,1,BinOp::BitOr) => Instr::I8_Or,
+                            (LayoutKind::Bool,1,BinOp::BitXor) => Instr::I8_Xor,
+                            (LayoutKind::Bool,1,BinOp::Eq) => Instr::I8_Eq,
+                            (LayoutKind::Bool,1,BinOp::Ne) => Instr::I8_NotEq,
+
+                            (LayoutKind::Float,4,BinOp::Eq) => Instr::F32_Eq,
+                            (LayoutKind::Float,4,BinOp::Ne) => Instr::F32_NotEq,
+                            (LayoutKind::Float,4,BinOp::Add) => Instr::F32_Add,
+                            (LayoutKind::Float,4,BinOp::Sub) => Instr::F32_Sub,
+                            (LayoutKind::Float,4,BinOp::Mul) => Instr::F32_Mul,
+                            (LayoutKind::Float,4,BinOp::Lt) => Instr::F32_Lt,
+                            (LayoutKind::Float,4,BinOp::Gt) => Instr::F32_Gt,
+                            (LayoutKind::Float,4,BinOp::Le) => Instr::F32_LtEq,
+                            (LayoutKind::Float,4,BinOp::Ge) => Instr::F32_GtEq,
+                            (LayoutKind::Float,4,BinOp::Div) => Instr::F32_Div,
+                            (LayoutKind::Float,4,BinOp::Rem) => Instr::F32_Rem,
+
+                            (LayoutKind::Float,8,BinOp::Eq) => Instr::F64_Eq,
+                            (LayoutKind::Float,8,BinOp::Ne) => Instr::F64_NotEq,
+                            (LayoutKind::Float,8,BinOp::Add) => Instr::F64_Add,
+                            (LayoutKind::Float,8,BinOp::Sub) => Instr::F64_Sub,
+                            (LayoutKind::Float,8,BinOp::Mul) => Instr::F64_Mul,
+                            (LayoutKind::Float,8,BinOp::Lt) => Instr::F64_Lt,
+                            (LayoutKind::Float,8,BinOp::Gt) => Instr::F64_Gt,
+                            (LayoutKind::Float,8,BinOp::Le) => Instr::F64_LtEq,
+                            (LayoutKind::Float,8,BinOp::Ge) => Instr::F64_GtEq,
+                            (LayoutKind::Float,8,BinOp::Div) => Instr::F64_Div,
+                            (LayoutKind::Float,8,BinOp::Rem) => Instr::F64_Rem,
+
                             //(PrimType::I32,BinOp::Div) => Instr::I32_Div,
 
-                            _ => panic!("no op: {:?} {:?}",prim,op)
+                            _ => panic!("no binary op: {:?} {:?} {:?}",layout.kind,layout.size,op)
                         };
 
                         if swap {
@@ -251,70 +279,156 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let ty = arg.ty(self.locals,self.tcx);
                         let arg = self.operand_get_slot(&arg);
 
-                        let prim = PrimType::from(ty);
+                        let layout = Layout::from(ty);
 
-                        let ctor = match (prim,op) {
-                            (PrimType::I8(IntSign::Signed),UnOp::Neg) => Instr::I8_Neg,
-                            (PrimType::I8(_),UnOp::Not) => Instr::I8_Not,
+                        let ctor = match (&layout.kind,layout.size,op) {
+                            (LayoutKind::Int(IntSign::Signed),1,UnOp::Neg) => Instr::I8_Neg,
+                            (LayoutKind::Int(_),1,UnOp::Not) => Instr::I8_Not,
 
-                            (PrimType::I16(IntSign::Signed),UnOp::Neg) => Instr::I16_Neg,
-                            (PrimType::I16(_),UnOp::Not) => Instr::I16_Not,
+                            (LayoutKind::Int(IntSign::Signed),2,UnOp::Neg) => Instr::I16_Neg,
+                            (LayoutKind::Int(_),2,UnOp::Not) => Instr::I16_Not,
 
-                            (PrimType::I32(IntSign::Signed),UnOp::Neg) => Instr::I32_Neg,
-                            (PrimType::I32(_),UnOp::Not) => Instr::I32_Not,
+                            (LayoutKind::Int(IntSign::Signed),4,UnOp::Neg) => Instr::I32_Neg,
+                            (LayoutKind::Int(_),4,UnOp::Not) => Instr::I32_Not,
 
-                            (PrimType::I64(IntSign::Signed),UnOp::Neg) => Instr::I64_Neg,
-                            (PrimType::I64(_),UnOp::Not) => Instr::I64_Not,
+                            (LayoutKind::Int(IntSign::Signed),8,UnOp::Neg) => Instr::I64_Neg,
+                            (LayoutKind::Int(_),8,UnOp::Not) => Instr::I64_Not,
 
-                            (PrimType::I128(IntSign::Signed),UnOp::Neg) => Instr::I128_Neg,
-                            (PrimType::I128(_),UnOp::Not) => Instr::I128_Not,
+                            (LayoutKind::Int(IntSign::Signed),16,UnOp::Neg) => Instr::I128_Neg,
+                            (LayoutKind::Int(_),16,UnOp::Not) => Instr::I128_Not,
 
-                            _ => panic!("no op: {:?} {:?}",prim,op)
+                            (LayoutKind::Bool,1,UnOp::Not) => Instr::Bool_Not,
+
+                            (LayoutKind::Float,4,UnOp::Neg) => Instr::F32_Neg,
+                            (LayoutKind::Float,8,UnOp::Neg) => Instr::F64_Neg,
+
+                            _ => panic!("no unary op: {:?} {:?} {:?}",layout.kind,layout.size,op)
                         };
 
                         self.out_func.instr.push(ctor(dst_slot,arg));
                     }
                     Rvalue::Cast(cast,arg,res_ty) => {
-                        let arg_ty = PrimType::from(arg.ty(self.locals,self.tcx));
-                        let res_ty = PrimType::from(*res_ty);
+                        let arg_layout = Layout::from(arg.ty(self.locals,self.tcx));
+                        let res_layout = Layout::from(*res_ty);
 
                         let arg = self.operand_get_slot(&arg);
 
-                        let ctor = match (cast,arg_ty,res_ty) {
+                        let ctor = match cast {
+                            CastKind::IntToInt => {
+                                
+                                let sign = arg_layout.sign();
 
-                            // widening
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I16(_)) => Instr::I16_S_Widen_8,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I16(_)) => Instr::I16_U_Widen_8,
+                                if arg_layout.size >= res_layout.size {
+                                    match res_layout.size {
+                                        1 => Instr::MovSS1,
+                                        2 => Instr::MovSS2,
+                                        4 => Instr::MovSS4,
+                                        8 => Instr::MovSS8,
+                                        16 => Instr::MovSS16,
+                                        _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                                    }
+                                } else {
+                                    match (arg_layout.size,res_layout.size,sign) {
+                                        (1,2,IntSign::Signed) => Instr::I16_S_Widen_8,
+                                        (1,2,IntSign::Unsigned) => Instr::I16_U_Widen_8,
+    
+                                        (2,4,IntSign::Signed) => Instr::I32_S_Widen_16,
+                                        (2,4,IntSign::Unsigned) => Instr::I32_U_Widen_16,
+                                        (1,4,IntSign::Signed) => Instr::I32_S_Widen_8,
+                                        (1,4,IntSign::Unsigned) => Instr::I32_U_Widen_8,
 
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I32(_)) => Instr::I32_S_Widen_16,
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I32(_)) => Instr::I32_U_Widen_16,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I32(_)) => Instr::I32_S_Widen_8,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I32(_)) => Instr::I32_U_Widen_8,
+                                        (4,8,IntSign::Signed) => Instr::I64_S_Widen_32,
+                                        (4,8,IntSign::Unsigned) => Instr::I64_U_Widen_32,
+                                        (2,8,IntSign::Signed) => Instr::I64_S_Widen_16,
+                                        (2,8,IntSign::Unsigned) => Instr::I64_U_Widen_16,
+                                        (1,8,IntSign::Signed) => Instr::I64_S_Widen_8,
+                                        (1,8,IntSign::Unsigned) => Instr::I64_U_Widen_8,
 
-                            (CastKind::IntToInt,PrimType::I32(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_32,
-                            (CastKind::IntToInt,PrimType::I32(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_32,
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_16,
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_16,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_8,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_8,
+                                        (8,16,IntSign::Signed) => Instr::I128_S_Widen_64,
+                                        (8,16,IntSign::Unsigned) => Instr::I128_U_Widen_64,
+                                        (4,16,IntSign::Signed) => Instr::I128_S_Widen_32,
+                                        (4,16,IntSign::Unsigned) => Instr::I128_U_Widen_32,
+                                        (2,16,IntSign::Signed) => Instr::I128_S_Widen_16,
+                                        (2,16,IntSign::Unsigned) => Instr::I128_U_Widen_16,
+                                        (1,16,IntSign::Signed) => Instr::I128_S_Widen_8,
+                                        (1,16,IntSign::Unsigned) => Instr::I128_U_Widen_8,
+    
+                                        _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                                    }
+                                }
+                            }
+                            CastKind::FloatToFloat => {
+                                match (arg_layout.size,res_layout.size) {
+                                    (4,8) => Instr::F64_From_F32,
+                                    (8,4) => Instr::F32_From_F64,
+                                    _ => panic!("no float2float cast for: {:?} {:?}",arg_layout.size,res_layout.size)
+                                }
+                            }
+                            CastKind::IntToFloat => {
+                                let sign = arg_layout.sign();
+                                match (arg_layout.size,res_layout.size,sign) {
 
-                            (CastKind::IntToInt,PrimType::I64(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_64,
-                            (CastKind::IntToInt,PrimType::I64(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_64,
-                            (CastKind::IntToInt,PrimType::I32(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_32,
-                            (CastKind::IntToInt,PrimType::I32(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_32,
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_16,
-                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_16,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_8,
-                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_8,
+                                    (1,4,IntSign::Signed) => Instr::F32_From_I8_S,
+                                    (1,4,IntSign::Unsigned) => Instr::F32_From_I8_U,
+                                    (1,8,IntSign::Signed) => Instr::F64_From_I8_S,
+                                    (1,8,IntSign::Unsigned) => Instr::F64_From_I8_U,
 
-                            // narrowing and same-width (no-ops)
-                            (CastKind::IntToInt,_,PrimType::I8(_)) if arg_ty.is_int() => Instr::MovSS1,
-                            (CastKind::IntToInt,_,PrimType::I16(_)) if arg_ty.is_int() => Instr::MovSS2,
-                            (CastKind::IntToInt,_,PrimType::I32(_)) if arg_ty.is_int() => Instr::MovSS4,
-                            (CastKind::IntToInt,_,PrimType::I64(_)) if arg_ty.is_int() => Instr::MovSS8,
-                            (CastKind::IntToInt,_,PrimType::I128(_)) if arg_ty.is_int() => Instr::MovSS16,
+                                    (2,4,IntSign::Signed) => Instr::F32_From_I16_S,
+                                    (2,4,IntSign::Unsigned) => Instr::F32_From_I16_U,
+                                    (2,8,IntSign::Signed) => Instr::F64_From_I16_S,
+                                    (2,8,IntSign::Unsigned) => Instr::F64_From_I16_U,
 
-                            _ => panic!("no cast: {:?} {:?} {:?}",cast,arg_ty,res_ty)
+                                    (4,4,IntSign::Signed) => Instr::F32_From_I32_S,
+                                    (4,4,IntSign::Unsigned) => Instr::F32_From_I32_U,
+                                    (4,8,IntSign::Signed) => Instr::F64_From_I32_S,
+                                    (4,8,IntSign::Unsigned) => Instr::F64_From_I32_U,
+
+                                    (8,4,IntSign::Signed) => Instr::F32_From_I64_S,
+                                    (8,4,IntSign::Unsigned) => Instr::F32_From_I64_U,
+                                    (8,8,IntSign::Signed) => Instr::F64_From_I64_S,
+                                    (8,8,IntSign::Unsigned) => Instr::F64_From_I64_U,
+
+                                    (16,4,IntSign::Signed) => Instr::F32_From_I128_S,
+                                    (16,4,IntSign::Unsigned) => Instr::F32_From_I128_U,
+                                    (16,8,IntSign::Signed) => Instr::F64_From_I128_S,
+                                    (16,8,IntSign::Unsigned) => Instr::F64_From_I128_U,
+
+                                    _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                                }
+                            }
+                            CastKind::FloatToInt => {
+                                let sign = res_layout.sign();
+                                match (arg_layout.size,res_layout.size,sign) {
+
+                                    (4,1,IntSign::Signed) => Instr::F32_Into_I8_S,
+                                    (4,1,IntSign::Unsigned) => Instr::F32_Into_I8_U,
+                                    (8,1,IntSign::Signed) => Instr::F64_Into_I8_S,
+                                    (8,1,IntSign::Unsigned) => Instr::F64_Into_I8_U,
+
+                                    (4,2,IntSign::Signed) => Instr::F32_Into_I16_S,
+                                    (4,2,IntSign::Unsigned) => Instr::F32_Into_I16_U,
+                                    (8,2,IntSign::Signed) => Instr::F64_Into_I16_S,
+                                    (8,2,IntSign::Unsigned) => Instr::F64_Into_I16_U,
+
+                                    (4,4,IntSign::Signed) => Instr::F32_Into_I32_S,
+                                    (4,4,IntSign::Unsigned) => Instr::F32_Into_I32_U,
+                                    (8,4,IntSign::Signed) => Instr::F64_Into_I32_S,
+                                    (8,4,IntSign::Unsigned) => Instr::F64_Into_I32_U,
+
+                                    (4,8,IntSign::Signed) => Instr::F32_Into_I64_S,
+                                    (4,8,IntSign::Unsigned) => Instr::F32_Into_I64_U,
+                                    (8,8,IntSign::Signed) => Instr::F64_Into_I64_S,
+                                    (8,8,IntSign::Unsigned) => Instr::F64_Into_I64_U,
+
+                                    (4,16,IntSign::Signed) => Instr::F32_Into_I128_S,
+                                    (4,16,IntSign::Unsigned) => Instr::F32_Into_I128_U,
+                                    (8,16,IntSign::Signed) => Instr::F64_Into_I128_S,
+                                    (8,16,IntSign::Unsigned) => Instr::F64_Into_I128_U,
+
+                                    _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                                }
+                            }
+                            _ => panic!("no cast: {:?}",cast)
                         };
 
                         self.out_func.instr.push(ctor(dst_slot,arg));
@@ -338,6 +452,10 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                     CallTarget::PrintUint
                 } else if name == "_builtin::print_bool" {
                     CallTarget::PrintBool
+                } else if name == "_builtin::print_float" {
+                    CallTarget::PrintFloat
+                } else if name == "_builtin::print_char" {
+                    CallTarget::PrintChar
                 } else {
                     panic!("todo call {:?}",func);
                 };
@@ -619,62 +737,4 @@ enum SlotId {
     LocalInternal(mir::Local),
     Temp,
     Dead
-}
-
-#[derive(Debug,Copy,Clone)]
-enum PrimType {
-    I8(IntSign),
-    I16(IntSign),
-    I32(IntSign),
-    I64(IntSign),
-    I128(IntSign),
-    Bool
-}
-
-#[derive(Debug,Copy,Clone)]
-enum IntSign {
-    Signed,
-    Unsigned
-}
-
-impl PrimType {
-    pub fn from(ty: Ty) -> Self {
-        let kind = ty.kind();
-        match kind {
-            TyKind::Int(IntTy::I8) => PrimType::I8(IntSign::Signed),
-            TyKind::Int(IntTy::I16) => PrimType::I16(IntSign::Signed),
-            TyKind::Int(IntTy::I32) => PrimType::I32(IntSign::Signed),
-            TyKind::Int(IntTy::I64) => PrimType::I64(IntSign::Signed),
-            TyKind::Int(IntTy::I128) => PrimType::I128(IntSign::Signed),
-
-            TyKind::Uint(UintTy::U8) => PrimType::I8(IntSign::Unsigned),
-            TyKind::Uint(UintTy::U16) => PrimType::I16(IntSign::Unsigned),
-            TyKind::Uint(UintTy::U32) => PrimType::I32(IntSign::Unsigned),
-            TyKind::Uint(UintTy::U64) => PrimType::I64(IntSign::Unsigned),
-            TyKind::Uint(UintTy::U128) => PrimType::I128(IntSign::Unsigned),
-
-            TyKind::Int(IntTy::Isize) => match POINTER_SIZE {
-                PointerSize::I32 => PrimType::I32(IntSign::Signed),
-                PointerSize::I64 => PrimType::I64(IntSign::Signed),
-            }
-            TyKind::Uint(UintTy::Usize) => match POINTER_SIZE {
-                PointerSize::I32 => PrimType::I32(IntSign::Unsigned),
-                PointerSize::I64 => PrimType::I64(IntSign::Unsigned),
-            }
-
-            TyKind::Bool => PrimType::Bool,
-            _ => panic!("can't convert {:?} to primitive type",ty)
-        }
-    }
-
-    pub fn is_int(&self) -> bool {
-        match self {
-            PrimType::I8(_) |
-            PrimType::I16(_) |
-            PrimType::I32(_) |
-            PrimType::I64(_) |
-            PrimType::I128(_) => true,
-            _ => false
-        }
-    }
 }

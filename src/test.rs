@@ -128,7 +128,11 @@ fn run_test(file_name: &Path, bin_name: &Path) -> Result<TestResult, String> {
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
-                return fail();
+                if let Some(code) = cmd_res.status.code() {
+                    return Err(format!("skitter failed ({})",code));
+                } else {
+                    return fail();
+                }
             } else {
                 cmd_res.stdout
             }

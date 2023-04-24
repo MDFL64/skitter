@@ -1,36 +1,62 @@
-use rustc_middle::ty::Ty;
-use rustc_middle::ty::TyKind;
-use rustc_middle::ty::IntTy;
-use rustc_middle::ty::UintTy;
+use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy};
 
 use crate::abi::POINTER_SIZE;
 
 #[derive(Debug)]
 pub struct Layout {
     pub size: usize,
-    pub align: usize
+    pub align: usize,
+    pub kind: LayoutKind
+}
+
+impl Layout {
+    pub fn sign(&self) -> IntSign {
+        match self.kind {
+            LayoutKind::Int(sign) => sign,
+            _ => IntSign::Unsigned
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum LayoutKind {
+    Int(IntSign),
+    Float,
+    Bool,
+    Void
+}
+
+#[derive(Debug,Copy,Clone)]
+pub enum IntSign {
+    Signed,
+    Unsigned
 }
 
 impl Layout {
     pub fn from(ty: Ty) -> Self {
         let kind = ty.kind();
         match kind {
-            TyKind::Int(IntTy::I8) => Layout::simple(1),
-            TyKind::Int(IntTy::I16) => Layout::simple(2),
-            TyKind::Int(IntTy::I32) => Layout::simple(4),
-            TyKind::Int(IntTy::I64) => Layout::simple(8),
-            TyKind::Int(IntTy::I128) => Layout::simple(16),
+            TyKind::Int(IntTy::I8) => Layout::simple(1, LayoutKind::Int(IntSign::Signed)),
+            TyKind::Int(IntTy::I16) => Layout::simple(2, LayoutKind::Int(IntSign::Signed)),
+            TyKind::Int(IntTy::I32) => Layout::simple(4, LayoutKind::Int(IntSign::Signed)),
+            TyKind::Int(IntTy::I64) => Layout::simple(8, LayoutKind::Int(IntSign::Signed)),
+            TyKind::Int(IntTy::I128) => Layout::simple(16, LayoutKind::Int(IntSign::Signed)),
 
-            TyKind::Uint(UintTy::U8) => Layout::simple(1),
-            TyKind::Uint(UintTy::U16) => Layout::simple(2),
-            TyKind::Uint(UintTy::U32) => Layout::simple(4),
-            TyKind::Uint(UintTy::U64) => Layout::simple(8),
-            TyKind::Uint(UintTy::U128) => Layout::simple(16),
+            TyKind::Uint(UintTy::U8) => Layout::simple(1, LayoutKind::Int(IntSign::Unsigned)),
+            TyKind::Uint(UintTy::U16) => Layout::simple(2, LayoutKind::Int(IntSign::Unsigned)),
+            TyKind::Uint(UintTy::U32) => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
+            TyKind::Uint(UintTy::U64) => Layout::simple(8, LayoutKind::Int(IntSign::Unsigned)),
+            TyKind::Uint(UintTy::U128) => Layout::simple(16, LayoutKind::Int(IntSign::Unsigned)),
 
-            TyKind::Int(IntTy::Isize) => Layout::simple(POINTER_SIZE.bytes()),
-            TyKind::Uint(UintTy::Usize) => Layout::simple(POINTER_SIZE.bytes()),
+            TyKind::Int(IntTy::Isize) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Int(IntSign::Signed)),
+            TyKind::Uint(UintTy::Usize) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Int(IntSign::Unsigned)),
 
-            TyKind::Bool => Layout::simple(1),
+            TyKind::Float(FloatTy::F32) => Layout::simple(4, LayoutKind::Float),
+            TyKind::Float(FloatTy::F64) => Layout::simple(8, LayoutKind::Float),
+
+            TyKind::Bool => Layout::simple(1, LayoutKind::Bool),
+            TyKind::Char => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
+
             TyKind::Tuple(list) => {
                 if list.len() == 0 {
                     Layout::zero()
@@ -43,17 +69,19 @@ impl Layout {
         }
     }
 
-    fn simple(size: usize) -> Self {
+    fn simple(size: usize, kind: LayoutKind) -> Self {
         Self {
             size,
-            align: size
+            align: size,
+            kind
         }
     }
 
     fn zero() -> Self {
         Self {
             size: 0,
-            align: 1
+            align: 1,
+            kind: LayoutKind::Void
         }
     }
 }

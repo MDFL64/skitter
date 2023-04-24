@@ -188,7 +188,6 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
 
 fn write_float_ops(ty: &str, source: &mut String) {
     let big = ty.to_uppercase();
-    write_immediate(&format!("{}_Const", big), ty, "*x", source);
     write_unary(&format!("{}_Neg", big), ty, "-x", source);
     write_binary(&format!("{}_Add", big), ty, "a + b", source);
     write_binary(&format!("{}_Sub", big), ty, "a - b", source);
@@ -215,16 +214,14 @@ fn write_exec_match() {
     write_int_ops("i64", "u64", &mut source);
     write_int_ops("i128", "u128", &mut source);
 
-    //write_float_ops("f64", &mut source);
-    //write_float_ops("f32", &mut source);
+    write_float_ops("f32", &mut source);
+    write_float_ops("f64", &mut source);
 
-    // Integer bitwise not won't work for bools
-    //write_unary("Bool_Not", "bool", "!x", &mut source);
-
-    write_binary("Bool_And","bool","a & b",&mut source);
+    // Integer not won't work for bools
+    write_unary("Bool_Not", "bool", "!x", &mut source);
 
     // float casts
-    /*write_cast("F64_From_F32", "f64", "f32", &mut source);
+    write_cast("F64_From_F32", "f64", "f32", &mut source);
     write_cast("F64_From_I8_S", "f64", "i8", &mut source);
     write_cast("F64_From_I8_U", "f64", "u8", &mut source);
     write_cast("F64_From_I16_S", "f64", "i16", &mut source);
@@ -268,7 +265,7 @@ fn write_exec_match() {
     write_cast("F32_Into_I64_S", "i64", "f32", &mut source);
     write_cast("F32_Into_I64_U", "u64", "f32", &mut source);
     write_cast("F32_Into_I128_S", "i128", "f32", &mut source);
-    write_cast("F32_Into_I128_U", "u128", "f32", &mut source);*/
+    write_cast("F32_Into_I128_U", "u128", "f32", &mut source);
 
     // widening operations
     write_widen(16, 8, true, &mut source);
@@ -349,6 +346,14 @@ fn write_exec_match() {
             }
             CallTarget::PrintBool => {
                 let x: bool = read_stack(stack, *base);
+                println!("{}",x);
+            }
+            CallTarget::PrintFloat => {
+                let x: f64 = read_stack(stack, *base);
+                println!("{}",x);
+            }
+            CallTarget::PrintChar => {
+                let x: char = read_stack(stack, *base);
                 println!("{}",x);
             }
             _ => panic!("call please")
