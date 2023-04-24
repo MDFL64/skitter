@@ -1,1 +1,1 @@
-include!("../../src/builtin/builtin.rs");
+include!("../_builtin.rs");

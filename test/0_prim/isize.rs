@@ -2,8 +2,8 @@ mod _builtin;
 
 pub fn main() {
     {
-        let x: isize = 1003258271295218035;
-        let y: isize = -258271295218035;
+        let x: isize = 1003258271;
+        let y: isize = -258271;
         
         _builtin::print_int((-x) as _);
         _builtin::print_int((x + y) as _);
@@ -42,8 +42,8 @@ pub fn main() {
     }
 
     {
-        let x: usize = 1003258271295218035;
-        let y: usize = 6482902100821;
+        let x: usize = 10032582712;
+        let y: usize = 6482902;
         
         _builtin::print_uint((x + y) as _);
         _builtin::print_uint((x - y) as _);

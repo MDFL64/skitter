@@ -2,8 +2,8 @@ mod _builtin;
 
 pub fn main() {
     {
-        let x: i8 = 110;
-        let y: i8 = -50;
+        let x: i8 = 11;
+        let y: i8 = -5;
         
         _builtin::print_int((-x) as _);
         _builtin::print_int((x + y) as _);
@@ -42,8 +42,8 @@ pub fn main() {
     }
 
     {
-        let x: u8 = 200;
-        let y: u8 = 44;
+        let x: u8 = 20;
+        let y: u8 = 4;
         
         _builtin::print_uint((x + y) as _);
         _builtin::print_uint((x - y) as _);

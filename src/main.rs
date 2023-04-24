@@ -18,6 +18,7 @@ mod mir_compiler;
 mod layout;
 mod cli;
 mod test;
+mod abi;
 
 use rustc_session::config;
 use rustc_span::source_map;

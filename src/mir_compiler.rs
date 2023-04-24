@@ -1,3 +1,5 @@
+use crate::abi::POINTER_SIZE;
+use crate::abi::PointerSize;
 use crate::layout::Layout;
 
 use super::vm;
@@ -113,18 +115,63 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let mut swap = false;
 
                         let ctor = match (prim,op) {
+                            (PrimType::I8(_),BinOp::Eq) => Instr::I8_Eq,
+                            (PrimType::I8(_),BinOp::Ne) => Instr::I8_NotEq,
+                            (PrimType::I8(_),BinOp::Add) => Instr::I8_Add,
+                            (PrimType::I8(_),BinOp::Sub) => Instr::I8_Sub,
+                            (PrimType::I8(_),BinOp::Mul) => Instr::I8_Mul,
+                            (PrimType::I8(_),BinOp::BitOr) => Instr::I8_Or,
+                            (PrimType::I8(_),BinOp::BitAnd) => Instr::I8_And,
+                            (PrimType::I8(_),BinOp::BitXor) => Instr::I8_Xor,
+                            (PrimType::I8(_),BinOp::Shl) => Instr::I8_ShiftL,
+                            (PrimType::I8(IntSign::Signed),BinOp::Lt) => Instr::I8_S_Lt,
+                            (PrimType::I8(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I8_S_Lt },
+                            (PrimType::I8(IntSign::Signed),BinOp::Le) => Instr::I8_S_LtEq,
+                            (PrimType::I8(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I8_S_LtEq },
+                            (PrimType::I8(IntSign::Signed),BinOp::Div) => Instr::I8_S_Div,
+                            (PrimType::I8(IntSign::Signed),BinOp::Rem) => Instr::I8_S_Rem,
+                            (PrimType::I8(IntSign::Signed),BinOp::Shr) => Instr::I8_S_ShiftR,
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Lt) => Instr::I8_U_Lt,
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I8_U_Lt },
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Le) => Instr::I8_U_LtEq,
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I8_U_LtEq },
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Div) => Instr::I8_U_Div,
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Rem) => Instr::I8_U_Rem,
+                            (PrimType::I8(IntSign::Unsigned),BinOp::Shr) => Instr::I8_U_ShiftR,
+
+                            (PrimType::I16(_),BinOp::Eq) => Instr::I16_Eq,
+                            (PrimType::I16(_),BinOp::Ne) => Instr::I16_NotEq,
+                            (PrimType::I16(_),BinOp::Add) => Instr::I16_Add,
+                            (PrimType::I16(_),BinOp::Sub) => Instr::I16_Sub,
+                            (PrimType::I16(_),BinOp::Mul) => Instr::I16_Mul,
+                            (PrimType::I16(_),BinOp::BitOr) => Instr::I16_Or,
+                            (PrimType::I16(_),BinOp::BitAnd) => Instr::I16_And,
+                            (PrimType::I16(_),BinOp::BitXor) => Instr::I16_Xor,
+                            (PrimType::I16(_),BinOp::Shl) => Instr::I16_ShiftL,
+                            (PrimType::I16(IntSign::Signed),BinOp::Lt) => Instr::I16_S_Lt,
+                            (PrimType::I16(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I16_S_Lt },
+                            (PrimType::I16(IntSign::Signed),BinOp::Le) => Instr::I16_S_LtEq,
+                            (PrimType::I16(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I16_S_LtEq },
+                            (PrimType::I16(IntSign::Signed),BinOp::Div) => Instr::I16_S_Div,
+                            (PrimType::I16(IntSign::Signed),BinOp::Rem) => Instr::I16_S_Rem,
+                            (PrimType::I16(IntSign::Signed),BinOp::Shr) => Instr::I16_S_ShiftR,
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Lt) => Instr::I16_U_Lt,
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I16_U_Lt },
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Le) => Instr::I16_U_LtEq,
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I16_U_LtEq },
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Div) => Instr::I16_U_Div,
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Rem) => Instr::I16_U_Rem,
+                            (PrimType::I16(IntSign::Unsigned),BinOp::Shr) => Instr::I16_U_ShiftR,
+
                             (PrimType::I32(_),BinOp::Eq) => Instr::I32_Eq,
                             (PrimType::I32(_),BinOp::Ne) => Instr::I32_NotEq,
-
                             (PrimType::I32(_),BinOp::Add) => Instr::I32_Add,
                             (PrimType::I32(_),BinOp::Sub) => Instr::I32_Sub,
                             (PrimType::I32(_),BinOp::Mul) => Instr::I32_Mul,
-
                             (PrimType::I32(_),BinOp::BitOr) => Instr::I32_Or,
                             (PrimType::I32(_),BinOp::BitAnd) => Instr::I32_And,
                             (PrimType::I32(_),BinOp::BitXor) => Instr::I32_Xor,
                             (PrimType::I32(_),BinOp::Shl) => Instr::I32_ShiftL,
-
                             (PrimType::I32(IntSign::Signed),BinOp::Lt) => Instr::I32_S_Lt,
                             (PrimType::I32(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I32_S_Lt },
                             (PrimType::I32(IntSign::Signed),BinOp::Le) => Instr::I32_S_LtEq,
@@ -132,7 +179,6 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                             (PrimType::I32(IntSign::Signed),BinOp::Div) => Instr::I32_S_Div,
                             (PrimType::I32(IntSign::Signed),BinOp::Rem) => Instr::I32_S_Rem,
                             (PrimType::I32(IntSign::Signed),BinOp::Shr) => Instr::I32_S_ShiftR,
-
                             (PrimType::I32(IntSign::Unsigned),BinOp::Lt) => Instr::I32_U_Lt,
                             (PrimType::I32(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I32_U_Lt },
                             (PrimType::I32(IntSign::Unsigned),BinOp::Le) => Instr::I32_U_LtEq,
@@ -140,6 +186,54 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                             (PrimType::I32(IntSign::Unsigned),BinOp::Div) => Instr::I32_U_Div,
                             (PrimType::I32(IntSign::Unsigned),BinOp::Rem) => Instr::I32_U_Rem,
                             (PrimType::I32(IntSign::Unsigned),BinOp::Shr) => Instr::I32_U_ShiftR,
+
+                            (PrimType::I64(_),BinOp::Eq) => Instr::I64_Eq,
+                            (PrimType::I64(_),BinOp::Ne) => Instr::I64_NotEq,
+                            (PrimType::I64(_),BinOp::Add) => Instr::I64_Add,
+                            (PrimType::I64(_),BinOp::Sub) => Instr::I64_Sub,
+                            (PrimType::I64(_),BinOp::Mul) => Instr::I64_Mul,
+                            (PrimType::I64(_),BinOp::BitOr) => Instr::I64_Or,
+                            (PrimType::I64(_),BinOp::BitAnd) => Instr::I64_And,
+                            (PrimType::I64(_),BinOp::BitXor) => Instr::I64_Xor,
+                            (PrimType::I64(_),BinOp::Shl) => Instr::I64_ShiftL,
+                            (PrimType::I64(IntSign::Signed),BinOp::Lt) => Instr::I64_S_Lt,
+                            (PrimType::I64(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I64_S_Lt },
+                            (PrimType::I64(IntSign::Signed),BinOp::Le) => Instr::I64_S_LtEq,
+                            (PrimType::I64(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I64_S_LtEq },
+                            (PrimType::I64(IntSign::Signed),BinOp::Div) => Instr::I64_S_Div,
+                            (PrimType::I64(IntSign::Signed),BinOp::Rem) => Instr::I64_S_Rem,
+                            (PrimType::I64(IntSign::Signed),BinOp::Shr) => Instr::I64_S_ShiftR,
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Lt) => Instr::I64_U_Lt,
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I64_U_Lt },
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Le) => Instr::I64_U_LtEq,
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I64_U_LtEq },
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Div) => Instr::I64_U_Div,
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Rem) => Instr::I64_U_Rem,
+                            (PrimType::I64(IntSign::Unsigned),BinOp::Shr) => Instr::I64_U_ShiftR,
+
+                            (PrimType::I128(_),BinOp::Eq) => Instr::I128_Eq,
+                            (PrimType::I128(_),BinOp::Ne) => Instr::I128_NotEq,
+                            (PrimType::I128(_),BinOp::Add) => Instr::I128_Add,
+                            (PrimType::I128(_),BinOp::Sub) => Instr::I128_Sub,
+                            (PrimType::I128(_),BinOp::Mul) => Instr::I128_Mul,
+                            (PrimType::I128(_),BinOp::BitOr) => Instr::I128_Or,
+                            (PrimType::I128(_),BinOp::BitAnd) => Instr::I128_And,
+                            (PrimType::I128(_),BinOp::BitXor) => Instr::I128_Xor,
+                            (PrimType::I128(_),BinOp::Shl) => Instr::I128_ShiftL,
+                            (PrimType::I128(IntSign::Signed),BinOp::Lt) => Instr::I128_S_Lt,
+                            (PrimType::I128(IntSign::Signed),BinOp::Gt) => { swap = true; Instr::I128_S_Lt },
+                            (PrimType::I128(IntSign::Signed),BinOp::Le) => Instr::I128_S_LtEq,
+                            (PrimType::I128(IntSign::Signed),BinOp::Ge) => { swap = true; Instr::I128_S_LtEq },
+                            (PrimType::I128(IntSign::Signed),BinOp::Div) => Instr::I128_S_Div,
+                            (PrimType::I128(IntSign::Signed),BinOp::Rem) => Instr::I128_S_Rem,
+                            (PrimType::I128(IntSign::Signed),BinOp::Shr) => Instr::I128_S_ShiftR,
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Lt) => Instr::I128_U_Lt,
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Gt) => { swap = true; Instr::I128_U_Lt },
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Le) => Instr::I128_U_LtEq,
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Ge) => { swap = true; Instr::I128_U_LtEq },
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Div) => Instr::I128_U_Div,
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Rem) => Instr::I128_U_Rem,
+                            (PrimType::I128(IntSign::Unsigned),BinOp::Shr) => Instr::I128_U_ShiftR,
 
                             (PrimType::Bool,BinOp::BitAnd) => Instr::Bool_And,
                             //(PrimType::I32,BinOp::Div) => Instr::I32_Div,
@@ -160,8 +254,21 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let prim = PrimType::from(ty);
 
                         let ctor = match (prim,op) {
+                            (PrimType::I8(IntSign::Signed),UnOp::Neg) => Instr::I8_Neg,
+                            (PrimType::I8(_),UnOp::Not) => Instr::I8_Not,
+
+                            (PrimType::I16(IntSign::Signed),UnOp::Neg) => Instr::I16_Neg,
+                            (PrimType::I16(_),UnOp::Not) => Instr::I16_Not,
+
                             (PrimType::I32(IntSign::Signed),UnOp::Neg) => Instr::I32_Neg,
                             (PrimType::I32(_),UnOp::Not) => Instr::I32_Not,
+
+                            (PrimType::I64(IntSign::Signed),UnOp::Neg) => Instr::I64_Neg,
+                            (PrimType::I64(_),UnOp::Not) => Instr::I64_Not,
+
+                            (PrimType::I128(IntSign::Signed),UnOp::Neg) => Instr::I128_Neg,
+                            (PrimType::I128(_),UnOp::Not) => Instr::I128_Not,
+
                             _ => panic!("no op: {:?} {:?}",prim,op)
                         };
 
@@ -174,8 +281,14 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let arg = self.operand_get_slot(&arg);
 
                         let ctor = match (cast,arg_ty,res_ty) {
+                            (CastKind::IntToInt,PrimType::I64(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_64,
+                            (CastKind::IntToInt,PrimType::I64(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_64,
                             (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_32,
                             (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_32,
+                            (CastKind::IntToInt,PrimType::I16(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_16,
+                            (CastKind::IntToInt,PrimType::I16(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_16,
+                            (CastKind::IntToInt,PrimType::I8(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_8,
+                            (CastKind::IntToInt,PrimType::I8(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_8,
                             _ => panic!("no cast: {:?} {:?} {:?}",cast,arg_ty,res_ty)
                         };
 
@@ -254,7 +367,11 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let size = scalar_int.size();
                         let raw = scalar_int.assert_bits(size);
                         match size.bytes() {
+                            1 => self.out_func.instr.push(Instr::I8_Const(dst_slot, raw as i8)),
+                            2 => self.out_func.instr.push(Instr::I16_Const(dst_slot, raw as i16)),
                             4 => self.out_func.instr.push(Instr::I32_Const(dst_slot, raw as i32)),
+                            8 => self.out_func.instr.push(Instr::I64_Const(dst_slot, raw as i64)),
+                            16 => self.out_func.instr.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
                             _ => panic!("const size {:?}",size)
                         }
 
@@ -281,7 +398,9 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
 
                 match size {
                     1 => self.out_func.instr.push(Instr::MovSS1(dst_slot,src_slot)),
+                    2 => self.out_func.instr.push(Instr::MovSS2(dst_slot,src_slot)),
                     4 => self.out_func.instr.push(Instr::MovSS4(dst_slot,src_slot)),
+                    8 => self.out_func.instr.push(Instr::MovSS8(dst_slot,src_slot)),
                     16 => self.out_func.instr.push(Instr::MovSS16(dst_slot,src_slot)),
                     _ => panic!("todo move {:?} -> {:?} / {}",src_slot,dst_slot,size)
                 }
@@ -292,7 +411,11 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let size = scalar_int.size();
                         let raw = scalar_int.assert_bits(size);
                         match size.bytes() {
+                            1 => self.out_func.instr.push(Instr::I8_Const(dst_slot, raw as i8)),
+                            2 => self.out_func.instr.push(Instr::I16_Const(dst_slot, raw as i16)),
                             4 => self.out_func.instr.push(Instr::I32_Const(dst_slot, raw as i32)),
+                            8 => self.out_func.instr.push(Instr::I64_Const(dst_slot, raw as i64)),
+                            16 => self.out_func.instr.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
                             _ => panic!("const size {:?}",size)
                         }
                     }
@@ -475,7 +598,10 @@ enum SlotId {
 
 #[derive(Debug,Copy,Clone)]
 enum PrimType {
+    I8(IntSign),
+    I16(IntSign),
     I32(IntSign),
+    I64(IntSign),
     I128(IntSign),
     Bool
 }
@@ -490,12 +616,26 @@ impl PrimType {
     pub fn from(ty: Ty) -> Self {
         let kind = ty.kind();
         match kind {
-            //TyKind::
+            TyKind::Int(IntTy::I8) => PrimType::I8(IntSign::Signed),
+            TyKind::Int(IntTy::I16) => PrimType::I16(IntSign::Signed),
             TyKind::Int(IntTy::I32) => PrimType::I32(IntSign::Signed),
+            TyKind::Int(IntTy::I64) => PrimType::I64(IntSign::Signed),
             TyKind::Int(IntTy::I128) => PrimType::I128(IntSign::Signed),
 
+            TyKind::Uint(UintTy::U8) => PrimType::I8(IntSign::Unsigned),
+            TyKind::Uint(UintTy::U16) => PrimType::I16(IntSign::Unsigned),
             TyKind::Uint(UintTy::U32) => PrimType::I32(IntSign::Unsigned),
+            TyKind::Uint(UintTy::U64) => PrimType::I64(IntSign::Unsigned),
             TyKind::Uint(UintTy::U128) => PrimType::I128(IntSign::Unsigned),
+
+            TyKind::Int(IntTy::Isize) => match POINTER_SIZE {
+                PointerSize::I32 => PrimType::I32(IntSign::Signed),
+                PointerSize::I64 => PrimType::I64(IntSign::Signed),
+            }
+            TyKind::Uint(UintTy::Usize) => match POINTER_SIZE {
+                PointerSize::I32 => PrimType::I32(IntSign::Unsigned),
+                PointerSize::I64 => PrimType::I64(IntSign::Unsigned),
+            }
 
             TyKind::Bool => PrimType::Bool,
             _ => panic!("can't convert {:?} to primitive type",ty)

@@ -2,8 +2,8 @@ mod _builtin;
 
 pub fn main() {
     {
-        let x: i64 = 1003258271295218035;
-        let y: i64 = -258271295218035;
+        let x: i64 = 1003258271;
+        let y: i64 = -258271295;
         
         _builtin::print_int((-x) as _);
         _builtin::print_int((x + y) as _);
@@ -42,8 +42,8 @@ pub fn main() {
     }
 
     {
-        let x: u64 = 1003258271295218035;
-        let y: u64 = 6482902100821;
+        let x: u64 = 10032582712;
+        let y: u64 = 64829021;
         
         _builtin::print_uint((x + y) as _);
         _builtin::print_uint((x - y) as _);

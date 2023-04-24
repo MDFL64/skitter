@@ -209,11 +209,11 @@ fn write_exec_match() {
     let mut source = String::new();
     source.push_str("match instr {");
 
-    //write_int_ops("i8", "u8", &mut source);
-    //write_int_ops("i16", "u16", &mut source);
+    write_int_ops("i8", "u8", &mut source);
+    write_int_ops("i16", "u16", &mut source);
     write_int_ops("i32", "u32", &mut source);
-    //write_int_ops("i64", "u64", &mut source);
-    //write_int_ops("i128", "u128", &mut source);
+    write_int_ops("i64", "u64", &mut source);
+    write_int_ops("i128", "u128", &mut source);
 
     //write_float_ops("f64", &mut source);
     //write_float_ops("f32", &mut source);
@@ -271,7 +271,7 @@ fn write_exec_match() {
     write_cast("F32_Into_I128_U", "u128", "f32", &mut source);*/
 
     // widening operations
-    /*write_widen(16, 8, true, &mut source);
+    write_widen(16, 8, true, &mut source);
     write_widen(16, 8, false, &mut source);
 
     write_widen(32, 16, true, &mut source);
@@ -284,17 +284,18 @@ fn write_exec_match() {
     write_widen(64, 16, true, &mut source);
     write_widen(64, 16, false, &mut source);
     write_widen(64, 8, true, &mut source);
-    write_widen(64, 8, false, &mut source);*/
+    write_widen(64, 8, false, &mut source);
 
-    //write_widen(128, 64, true, &mut source);
-    //write_widen(128, 64, false, &mut source);
+    write_widen(128, 64, true, &mut source);
+    write_widen(128, 64, false, &mut source);
     write_widen(128, 32, true, &mut source);
     write_widen(128, 32, false, &mut source);
-    //write_widen(128, 16, true, &mut source);
-    //write_widen(128, 16, false, &mut source);
-    //write_widen(128, 8, true, &mut source);
-    //write_widen(128, 8, false, &mut source);
+    write_widen(128, 16, true, &mut source);
+    write_widen(128, 16, false, &mut source);
+    write_widen(128, 8, true, &mut source);
+    write_widen(128, 8, false, &mut source);
 
+    // moves
     write_unary("MovSS1", "u8", "x", &mut source);
     write_unary("MovSS2", "u16", "x", &mut source);
     write_unary("MovSS4", "u32", "x", &mut source);
@@ -340,6 +341,14 @@ fn write_exec_match() {
         match func {
             CallTarget::PrintInt => {
                 let x: i128 = read_stack(stack, *base);
+                println!("{}",x);
+            }
+            CallTarget::PrintUint => {
+                let x: u128 = read_stack(stack, *base);
+                println!("{}",x);
+            }
+            CallTarget::PrintBool => {
+                let x: bool = read_stack(stack, *base);
                 println!("{}",x);
             }
             _ => panic!("call please")

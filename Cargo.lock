@@ -255,7 +255,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "skitter-rustc"
+name = "skitter"
 version = "0.1.0"
 dependencies = [
  "clap",
