@@ -5,6 +5,10 @@ impl Slot {
     pub fn new(id: u32) -> Self {
         Self(id)
     }
+
+    pub fn offset(&self) -> usize {
+        self.0 as usize
+    }
 }
 
 #[allow(non_camel_case_types)]
@@ -40,7 +44,9 @@ pub enum Instr {
     I128_U_Widen_32(Slot, Slot),
 
     MovSS1(Slot, Slot),
+    MovSS2(Slot, Slot),
     MovSS4(Slot, Slot),
+    MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
 
     Call(Slot, CallTarget),

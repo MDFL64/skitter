@@ -27,6 +27,7 @@ use rustc_hir::ItemKind;
 use rustc_hir::def_id::LocalDefId;
 
 use crate::mir_compiler::MirCompiler;
+use crate::vm::exec::exec_main;
 
 fn main() {
     
@@ -99,8 +100,12 @@ fn main() {
                 println!("mir took {:?}",t.elapsed());
                 
                 let t = Instant::now();
-                MirCompiler::compile(tcx,&mir);
+                let func = MirCompiler::compile(tcx,&mir);
                 println!("bc took {:?}",t.elapsed());
+
+                let t = Instant::now();
+                exec_main(&func.instr);
+                println!("eval took {:?}",t.elapsed());
             })
         });
     });

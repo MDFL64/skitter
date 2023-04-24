@@ -29,7 +29,7 @@ pub struct MirCompiler<'a,'tcx> {
 }
 
 impl<'a,'tcx> MirCompiler<'a,'tcx> {
-    pub fn compile(tcx: TyCtxt<'tcx>, mir: &'a mir::Body<'tcx>) -> () {
+    pub fn compile(tcx: TyCtxt<'tcx>, mir: &'a mir::Body<'tcx>) -> vm::function::Function {
         let mut compiler = Self {
             tcx,
             current_block: 0,
@@ -48,6 +48,8 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
         for (i,block) in mir.basic_blocks.iter().enumerate() {
             compiler.compile_block(i,&block);
         }
+
+        compiler.out_func
     }
 
     fn compile_block(&mut self, block_n: usize, block: &mir::BasicBlockData<'tcx>) {
