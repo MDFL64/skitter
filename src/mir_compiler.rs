@@ -281,14 +281,39 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let arg = self.operand_get_slot(&arg);
 
                         let ctor = match (cast,arg_ty,res_ty) {
-                            (CastKind::IntToInt,PrimType::I64(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_64,
-                            (CastKind::IntToInt,PrimType::I64(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_64,
-                            (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_32,
-                            (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_32,
-                            (CastKind::IntToInt,PrimType::I16(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_16,
-                            (CastKind::IntToInt,PrimType::I16(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_16,
-                            (CastKind::IntToInt,PrimType::I8(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_8,
-                            (CastKind::IntToInt,PrimType::I8(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_8,
+
+                            // widening
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I16(_)) => Instr::I16_S_Widen_8,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I16(_)) => Instr::I16_U_Widen_8,
+
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I32(_)) => Instr::I32_S_Widen_16,
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I32(_)) => Instr::I32_U_Widen_16,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I32(_)) => Instr::I32_S_Widen_8,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I32(_)) => Instr::I32_U_Widen_8,
+
+                            (CastKind::IntToInt,PrimType::I32(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_32,
+                            (CastKind::IntToInt,PrimType::I32(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_32,
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_16,
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_16,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I64(_)) => Instr::I64_S_Widen_8,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I64(_)) => Instr::I64_U_Widen_8,
+
+                            (CastKind::IntToInt,PrimType::I64(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_64,
+                            (CastKind::IntToInt,PrimType::I64(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_64,
+                            (CastKind::IntToInt,PrimType::I32(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_32,
+                            (CastKind::IntToInt,PrimType::I32(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_32,
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_16,
+                            (CastKind::IntToInt,PrimType::I16(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_16,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Signed),PrimType::I128(_)) => Instr::I128_S_Widen_8,
+                            (CastKind::IntToInt,PrimType::I8(IntSign::Unsigned),PrimType::I128(_)) => Instr::I128_U_Widen_8,
+
+                            // narrowing and same-width (no-ops)
+                            (CastKind::IntToInt,_,PrimType::I8(_)) if arg_ty.is_int() => Instr::MovSS1,
+                            (CastKind::IntToInt,_,PrimType::I16(_)) if arg_ty.is_int() => Instr::MovSS2,
+                            (CastKind::IntToInt,_,PrimType::I32(_)) if arg_ty.is_int() => Instr::MovSS4,
+                            (CastKind::IntToInt,_,PrimType::I64(_)) if arg_ty.is_int() => Instr::MovSS8,
+                            (CastKind::IntToInt,_,PrimType::I128(_)) if arg_ty.is_int() => Instr::MovSS16,
+
                             _ => panic!("no cast: {:?} {:?} {:?}",cast,arg_ty,res_ty)
                         };
 
@@ -639,6 +664,17 @@ impl PrimType {
 
             TyKind::Bool => PrimType::Bool,
             _ => panic!("can't convert {:?} to primitive type",ty)
+        }
+    }
+
+    pub fn is_int(&self) -> bool {
+        match self {
+            PrimType::I8(_) |
+            PrimType::I16(_) |
+            PrimType::I32(_) |
+            PrimType::I64(_) |
+            PrimType::I128(_) => true,
+            _ => false
         }
     }
 }
