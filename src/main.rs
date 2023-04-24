@@ -16,8 +16,8 @@ extern crate rustc_mir_dataflow;
 mod vm;
 mod mir_compiler;
 mod layout;
-
-use std::{path, process, str, time::Instant};
+mod cli;
+mod test;
 
 use rustc_session::config;
 use rustc_span::source_map;
@@ -26,25 +26,21 @@ use rustc_middle::ty::TyCtxt;
 use rustc_hir::ItemKind;
 use rustc_hir::def_id::LocalDefId;
 
+use clap::Parser;
+
 use crate::mir_compiler::MirCompiler;
 use crate::vm::exec::exec_main;
 
 fn main() {
     
-    //std::env::set_var("STD_ENV_ARCH", "x86_64");
-    //std::env::set_var("RUSTC_BOOTSTRAP", "1");
+    let args = cli::CliArgs::parse();
 
-    //let bootstrap = std::env::var("RUSTC_BOOTSTRAP");
-    //let is_nightly = rustc_feature::UnstableFeatures::from_environment(None).is_nightly_build();
-    //println!("{}",is_nightly);
-    //panic!();
+    let source_root = args.file_name;
 
-    let t_start = Instant::now();
-    
-    let mut args = std::env::args();
-    args.next();
+    if args.test {
+        test::test(&source_root);
+    }
 
-    let source_root = args.next().expect("no source file");
     //println!("? {}",source_root);
 
     //let source_root = "/home/cogg/.rustup/toolchains/nightly-2023-04-12-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/lib.rs";
@@ -56,6 +52,8 @@ fn main() {
         .unwrap();
     let sysroot = str::from_utf8(&out.stdout).unwrap().trim();*/
 
+    let self_profile = if args.profile { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
+
     let config = rustc_interface::Config {
         opts: config::Options {
             //maybe_sysroot: Some(path::PathBuf::from(sysroot)), //Some(path::PathBuf::from("./bunk/")), // sysroot
@@ -64,6 +62,10 @@ fn main() {
             cg: config::CodegenOptions {
                 overflow_checks: Some(false),
                 ..config::CodegenOptions::default()
+            },
+            unstable_opts: config::UnstableOptions {
+                self_profile,
+                ..config::UnstableOptions::default()
             },
             ..config::Options::default()
         },
@@ -83,33 +85,22 @@ fn main() {
         registry: rustc_errors::registry::Registry::new(&rustc_error_codes::DIAGNOSTICS),
     };
 
-    let t = Instant::now();
-
     rustc_interface::run_compiler(config, |compiler| {
         compiler.enter(|queries| {
             queries.global_ctxt().unwrap().enter(|tcx| {
-
-                println!("startup took {:?}",t.elapsed());
 
                 let skitter = SkitterCompiler::new(tcx);
 
                 let main_did = skitter.find_main().expect("no main");
 
-                let t = Instant::now();
                 let mir = tcx.mir_built(WithOptConstParam::unknown(main_did)).borrow();
-                println!("mir took {:?}",t.elapsed());
                 
-                let t = Instant::now();
                 let func = MirCompiler::compile(tcx,&mir);
-                println!("bc took {:?}",t.elapsed());
 
-                let t = Instant::now();
                 exec_main(&func.instr);
-                println!("eval took {:?}",t.elapsed());
             })
         });
     });
-    println!("done in {:?}",t_start.elapsed());
 }
 
 struct SkitterCompiler<'a> {

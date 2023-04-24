@@ -174,7 +174,8 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let arg = self.operand_get_slot(&arg);
 
                         let ctor = match (cast,arg_ty,res_ty) {
-                            (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(_)) => Instr::I128_S_Widen_32,
+                            (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Signed)) => Instr::I128_S_Widen_32,
+                            (CastKind::IntToInt,PrimType::I32(_),PrimType::I128(IntSign::Unsigned)) => Instr::I128_U_Widen_32,
                             _ => panic!("no cast: {:?} {:?} {:?}",cast,arg_ty,res_ty)
                         };
 
