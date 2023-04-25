@@ -335,30 +335,7 @@ fn write_exec_match() {
         }
     }*/
     Instr::Call(base,func) => {
-        match func {
-            CallTarget::PrintInt => {
-                let x: i128 = read_stack(stack, *base);
-                println!("{}",x);
-            }
-            CallTarget::PrintUint => {
-                let x: u128 = read_stack(stack, *base);
-                println!("{}",x);
-            }
-            CallTarget::PrintBool => {
-                let x: bool = read_stack(stack, *base);
-                println!("{}",x);
-            }
-            CallTarget::PrintFloat => {
-                let x: f64 = read_stack(stack, *base);
-                println!("{}",x);
-            }
-            CallTarget::PrintChar => {
-                let x: char = read_stack(stack, *base);
-                println!("{}",x);
-            }
-            _ => panic!("call please")
-        }
-        //crate::vm::exec(func,stack.offset(*base as isize));
+        self.call(func,stack_offset + base.offset() as u32);
     }
     /*Instr::SlotPtr(out,arg) => {
         let res = stack.add(*arg as usize) as usize;

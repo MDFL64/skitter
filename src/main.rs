@@ -28,9 +28,9 @@ use rustc_hir::ItemKind;
 use rustc_hir::def_id::LocalDefId;
 
 use clap::Parser;
+use vm::vm::VM;
 
 use crate::mir_compiler::MirCompiler;
-use crate::vm::exec::exec_main;
 
 fn main() {
     
@@ -90,44 +90,29 @@ fn main() {
         compiler.enter(|queries| {
             queries.global_ctxt().unwrap().enter(|tcx| {
 
-                let skitter = SkitterCompiler::new(tcx);
+                let vm = VM::new(tcx);
 
-                let main_did = skitter.find_main().expect("no main");
+                let main_did = find_main(tcx).expect("no main");
 
-                let mir = tcx.mir_built(WithOptConstParam::unknown(main_did)).borrow();
-                
-                let func = MirCompiler::compile(tcx,&mir);
-
-                exec_main(&func.instr);
+                let func = vm.get_func(main_did.into());
+                vm.call(&func,0);
             })
         });
     });
 }
 
-struct SkitterCompiler<'a> {
-    tcx: TyCtxt<'a>
-}
+fn find_main(tcx: TyCtxt) -> Option<LocalDefId> {
+    let hir = tcx.hir();
 
-impl<'a> SkitterCompiler<'a> {
-    pub fn new(tcx: TyCtxt<'a>) -> Self {
-        SkitterCompiler{
-            tcx
-        }
-    }
+    let root = hir.root_module();
 
-    pub fn find_main(&self) -> Option<LocalDefId> {
-        let hir = self.tcx.hir();
-
-        let root = hir.root_module();
-
-        for child_id in root.item_ids {
-            let child = hir.item(*child_id);
-            if child.ident.as_str() == "main" {
-                if let ItemKind::Fn(..) = child.kind {
-                    return Some(child_id.owner_id.def_id);
-                }
+    for child_id in root.item_ids {
+        let child = hir.item(*child_id);
+        if child.ident.as_str() == "main" {
+            if let ItemKind::Fn(..) = child.kind {
+                return Some(child_id.owner_id.def_id);
             }
         }
-        None
     }
+    None
 }

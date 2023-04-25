@@ -1,8 +1,7 @@
-use crate::abi::POINTER_SIZE;
-use crate::abi::PointerSize;
 use crate::layout::IntSign;
 use crate::layout::Layout;
 use crate::layout::LayoutKind;
+use crate::vm::vm::VM;
 
 use super::vm;
 use super::vm::instr::*;
@@ -10,6 +9,8 @@ use rustc_middle::mir;
 
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::Ty;
+
+use rustc_hir::def_id::LocalDefId;
 
 use rustc_middle::mir::Rvalue;
 use rustc_middle::mir::Operand;
@@ -22,20 +23,21 @@ use rustc_middle::mir::interpret::ConstValue;
 
 pub struct MirCompiler<'a,'tcx> {
     //mir: mir::Body<'tcx>,
-    tcx: TyCtxt<'tcx>,
+    //tcx: TyCtxt<'tcx>,
+    vm: &'a VM<'tcx>,
     current_block: usize,
     locals: &'a mir::LocalDecls<'tcx>,
     stack_info: StackInfo,
-    out_func: vm::function::Function,
+    out_bc: Vec<vm::instr::Instr>,
 }
 
 impl<'a,'tcx> MirCompiler<'a,'tcx> {
-    pub fn compile(tcx: TyCtxt<'tcx>, mir: &'a mir::Body<'tcx>) -> vm::function::Function {
+    pub fn compile(vm: &'a VM<'tcx>, mir: &'a mir::Body<'tcx>) -> Vec<vm::instr::Instr> {
         let mut compiler = Self {
-            tcx,
+            vm,
             current_block: 0,
             locals: &mir.local_decls,
-            out_func: vm::function::Function::default(),
+            out_bc: Vec::new(),
             stack_info: StackInfo::default(),
         };
 
@@ -50,7 +52,11 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
             compiler.compile_block(i,&block);
         }
 
-        compiler.out_func
+        compiler.out_bc
+    }
+
+    fn tcx(&self) -> TyCtxt<'tcx> {
+        self.vm.tcx
     }
 
     fn compile_block(&mut self, block_n: usize, block: &mir::BasicBlockData<'tcx>) {
@@ -85,18 +91,7 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
             }
             StatementKind::Assign(assign) => {
                 let place = assign.0;
-                let dst_slot = if let Some(local) = place.as_local() {
-                    let local_info = &self.locals[local];
-                    self.stack_info.get_local_slot(local).unwrap_or_else(|| {
-                        if local_info.internal {
-                            self.stack_info.alloc_slot(SlotId::LocalInternal(local), local_info.ty)
-                        } else {
-                            panic!("destination slot not allocated -- {:?}",local);
-                        }
-                    })
-                } else {
-                    panic!("non-trivial assigns not supported");
-                };
+                let dst_slot = self.prepare_slot_for_local(place);
 
                 let source = &assign.1;
                 match source {
@@ -104,7 +99,7 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         self.operand_move_to_slot(op, dst_slot);
                     }
                     Rvalue::BinaryOp(op,args) => {
-                        let ty = args.0.ty(self.locals,self.tcx);
+                        let ty = args.0.ty(self.locals,self.tcx());
 
                         let lhs = self.operand_get_slot(&args.0);
                         let rhs = self.operand_get_slot(&args.1);
@@ -270,13 +265,13 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         };
 
                         if swap {
-                            self.out_func.instr.push(ctor(dst_slot,rhs,lhs));
+                            self.out_bc.push(ctor(dst_slot,rhs,lhs));
                         } else {
-                            self.out_func.instr.push(ctor(dst_slot,lhs,rhs));
+                            self.out_bc.push(ctor(dst_slot,lhs,rhs));
                         }
                     }
                     Rvalue::UnaryOp(op,arg) => {
-                        let ty = arg.ty(self.locals,self.tcx);
+                        let ty = arg.ty(self.locals,self.tcx());
                         let arg = self.operand_get_slot(&arg);
 
                         let layout = Layout::from(ty);
@@ -305,10 +300,10 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                             _ => panic!("no unary op: {:?} {:?} {:?}",layout.kind,layout.size,op)
                         };
 
-                        self.out_func.instr.push(ctor(dst_slot,arg));
+                        self.out_bc.push(ctor(dst_slot,arg));
                     }
                     Rvalue::Cast(cast,arg,res_ty) => {
-                        let arg_layout = Layout::from(arg.ty(self.locals,self.tcx));
+                        let arg_layout = Layout::from(arg.ty(self.locals,self.tcx()));
                         let res_layout = Layout::from(*res_ty);
 
                         let arg = self.operand_get_slot(&arg);
@@ -431,7 +426,7 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                             _ => panic!("no cast: {:?}",cast)
                         };
 
-                        self.out_func.instr.push(ctor(dst_slot,arg));
+                        self.out_bc.push(ctor(dst_slot,arg));
                     }
                     _ => panic!("r-value unsupported {:?}",source)
                 }
@@ -445,54 +440,82 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
         use mir::TerminatorKind;
         match &term.kind {
             TerminatorKind::Call{func,args,destination,target,..} => {
-                let name = format!("{:?}",func);
-                let ct = if name == "_builtin::print_int" {
-                    CallTarget::PrintInt
-                } else if name == "_builtin::print_uint" {
-                    CallTarget::PrintUint
-                } else if name == "_builtin::print_bool" {
-                    CallTarget::PrintBool
-                } else if name == "_builtin::print_float" {
-                    CallTarget::PrintFloat
-                } else if name == "_builtin::print_char" {
-                    CallTarget::PrintChar
-                } else {
-                    panic!("todo call {:?}",func);
-                };
+                let (func_id,_subs) = func.const_fn_def().expect("non-trivial call");
+                let dst_slot = self.prepare_slot_for_local(*destination);
+
+                if func_id.krate != rustc_hir::def_id::LOCAL_CRATE {
+                    panic!("non-local call");
+                }
+
+                let func = self.vm.get_func(LocalDefId{ local_def_index: func_id.index });
 
                 let base_slot = self.stack_info.align_for_call();
-                // todo dst slot
+                // destination slot
+                let (tmp_dst,size_dst) = {
+                    let dst_ty = destination.ty(self.locals,self.tcx());
+                    assert!(dst_ty.variant_index.is_none());
+                    let size_dst = Layout::from(dst_ty.ty).size;
+                    (self.stack_info.alloc_slot(SlotId::Temp, dst_ty.ty),size_dst)
+                };
+                // arg slots
                 let arg_slots: Vec<_> = args.iter().map(|arg| {
-                    let ty = arg.ty(self.locals,self.tcx);
+                    let ty = arg.ty(self.locals,self.tcx());
                     self.stack_info.alloc_slot(SlotId::Temp, ty)
                 }).collect();
-
-                //println!("> {:?}",arg_slots);
 
                 for (arg,slot) in args.iter().zip(arg_slots.iter()) {
                     self.operand_move_to_slot(arg, *slot);
                 }
 
-                self.out_func.instr.push(Instr::Call(base_slot, ct));
+                self.out_bc.push(Instr::Call(base_slot, func));
+
+                self.move_slots(tmp_dst, dst_slot, size_dst);
             }
             TerminatorKind::Assert{cond,expected,msg,target,..} => {
                 // todo asserts
                 self.compile_goto(*target);
             }
             TerminatorKind::Return => {
-                self.out_func.instr.push(Instr::Return);
+                self.out_bc.push(Instr::Return);
             }
             TerminatorKind::Resume => {
-                self.out_func.instr.push(Instr::Bad);
+                self.out_bc.push(Instr::Bad);
             }
             _ => panic!("? {:?}",term.kind)
         }
         self.stack_info.free_all_temporary();
     }
 
+    fn prepare_slot_for_local(&mut self, place: mir::Place) -> Slot {
+        if let Some(local) = place.as_local() {
+            let local_info = &self.locals[local];
+            self.stack_info.get_local_slot(local).unwrap_or_else(|| {
+                if local_info.internal {
+                    self.stack_info.alloc_slot(SlotId::LocalInternal(local), local_info.ty)
+                } else {
+                    panic!("destination slot not allocated -- {:?}",local);
+                }
+            })
+        } else {
+            panic!("non-trivial assigns not supported");
+        }
+    }
+
     fn compile_goto(&mut self, target: mir::BasicBlock) {
         if self.current_block + 1 != target.index() {
             panic!("todo jump");
+        }
+    }
+
+    fn move_slots(&mut self, src_slot: Slot, dst_slot: Slot, size: usize) {
+        match size {
+            0 => (),
+            1 => self.out_bc.push(Instr::MovSS1(dst_slot,src_slot)),
+            2 => self.out_bc.push(Instr::MovSS2(dst_slot,src_slot)),
+            4 => self.out_bc.push(Instr::MovSS4(dst_slot,src_slot)),
+            8 => self.out_bc.push(Instr::MovSS8(dst_slot,src_slot)),
+            16 => self.out_bc.push(Instr::MovSS16(dst_slot,src_slot)),
+            _ => panic!("todo move {:?} -> {:?} / {}",src_slot,dst_slot,size)
         }
     }
 
@@ -510,11 +533,11 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let size = scalar_int.size();
                         let raw = scalar_int.assert_bits(size);
                         match size.bytes() {
-                            1 => self.out_func.instr.push(Instr::I8_Const(dst_slot, raw as i8)),
-                            2 => self.out_func.instr.push(Instr::I16_Const(dst_slot, raw as i16)),
-                            4 => self.out_func.instr.push(Instr::I32_Const(dst_slot, raw as i32)),
-                            8 => self.out_func.instr.push(Instr::I64_Const(dst_slot, raw as i64)),
-                            16 => self.out_func.instr.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
+                            1 => self.out_bc.push(Instr::I8_Const(dst_slot, raw as i8)),
+                            2 => self.out_bc.push(Instr::I16_Const(dst_slot, raw as i16)),
+                            4 => self.out_bc.push(Instr::I32_Const(dst_slot, raw as i32)),
+                            8 => self.out_bc.push(Instr::I64_Const(dst_slot, raw as i64)),
+                            16 => self.out_bc.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
                             _ => panic!("const size {:?}",size)
                         }
 
@@ -539,14 +562,7 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                     panic!("non-trivial assigns not supported");
                 };
 
-                match size {
-                    1 => self.out_func.instr.push(Instr::MovSS1(dst_slot,src_slot)),
-                    2 => self.out_func.instr.push(Instr::MovSS2(dst_slot,src_slot)),
-                    4 => self.out_func.instr.push(Instr::MovSS4(dst_slot,src_slot)),
-                    8 => self.out_func.instr.push(Instr::MovSS8(dst_slot,src_slot)),
-                    16 => self.out_func.instr.push(Instr::MovSS16(dst_slot,src_slot)),
-                    _ => panic!("todo move {:?} -> {:?} / {}",src_slot,dst_slot,size)
-                }
+                self.move_slots(src_slot,dst_slot,size);
             }
             Operand::Constant(constant) => {
                 match constant.literal {
@@ -554,11 +570,11 @@ impl<'a,'tcx> MirCompiler<'a,'tcx> {
                         let size = scalar_int.size();
                         let raw = scalar_int.assert_bits(size);
                         match size.bytes() {
-                            1 => self.out_func.instr.push(Instr::I8_Const(dst_slot, raw as i8)),
-                            2 => self.out_func.instr.push(Instr::I16_Const(dst_slot, raw as i16)),
-                            4 => self.out_func.instr.push(Instr::I32_Const(dst_slot, raw as i32)),
-                            8 => self.out_func.instr.push(Instr::I64_Const(dst_slot, raw as i64)),
-                            16 => self.out_func.instr.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
+                            1 => self.out_bc.push(Instr::I8_Const(dst_slot, raw as i8)),
+                            2 => self.out_bc.push(Instr::I16_Const(dst_slot, raw as i16)),
+                            4 => self.out_bc.push(Instr::I32_Const(dst_slot, raw as i32)),
+                            8 => self.out_bc.push(Instr::I64_Const(dst_slot, raw as i64)),
+                            16 => self.out_bc.push(Instr::I128_Const(dst_slot, Box::new(raw as i128))),
                             _ => panic!("const size {:?}",size)
                         }
                     }

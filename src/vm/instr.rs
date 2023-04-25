@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use super::vm::Function;
+
 #[derive(Debug,Clone,Copy)]
 pub struct Slot(u32);
 
@@ -235,17 +239,8 @@ pub enum Instr {
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
 
-    Call(Slot, CallTarget),
+    Call(Slot, Arc<Function>),
 
     Return,
     Bad,
-}
-
-#[derive(Debug)]
-pub enum CallTarget {
-    PrintInt,
-    PrintUint,
-    PrintBool,
-    PrintFloat,
-    PrintChar
 }

@@ -1,3 +1,2 @@
-pub mod function;
+pub mod vm;
 pub mod instr;
-pub mod exec;
