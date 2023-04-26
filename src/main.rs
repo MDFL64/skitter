@@ -12,25 +12,23 @@ extern crate rustc_span;
 extern crate rustc_middle;
 extern crate rustc_feature;
 extern crate rustc_mir_dataflow;
+extern crate rustc_ast;
 
 mod vm;
-mod mir_compiler;
+//mod mir_compiler;
+mod hir_compiler;
+mod bytecode_select;
 mod layout;
 mod cli;
 mod test;
 mod abi;
 
 use rustc_session::config;
-use rustc_span::source_map;
-use rustc_middle::ty::WithOptConstParam;
 use rustc_middle::ty::TyCtxt;
 use rustc_hir::ItemKind;
 use rustc_hir::def_id::LocalDefId;
 
 use clap::Parser;
-use vm::vm::VM;
-
-use crate::mir_compiler::MirCompiler;
 
 fn main() {
     
@@ -90,7 +88,7 @@ fn main() {
         compiler.enter(|queries| {
             queries.global_ctxt().unwrap().enter(|tcx| {
 
-                let vm = VM::new(tcx);
+                let vm = vm::VM::new(tcx);
 
                 let main_did = find_main(tcx).expect("no main");
 

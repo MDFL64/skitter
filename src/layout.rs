@@ -4,8 +4,8 @@ use crate::abi::POINTER_SIZE;
 
 #[derive(Debug)]
 pub struct Layout {
-    pub size: usize,
-    pub align: usize,
+    pub size: u32,
+    pub align: u32,
     pub kind: LayoutKind
 }
 
@@ -69,7 +69,7 @@ impl Layout {
         }
     }
 
-    fn simple(size: usize, kind: LayoutKind) -> Self {
+    fn simple(size: u32, kind: LayoutKind) -> Self {
         Self {
             size,
             align: size,

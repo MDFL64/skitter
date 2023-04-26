@@ -4,7 +4,7 @@ use rustc_middle::ty::WithOptConstParam;
 
 use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
-use crate::mir_compiler::MirCompiler;
+use crate::hir_compiler::HirCompiler;
 use crate::vm::instr::Slot;
 
 use super::instr::Instr;
@@ -58,8 +58,12 @@ impl<'tcx> VM<'tcx> {
 
         // fetch bytecode
         let bc = func.bytecode.get_or_init(|| {
-            let mir = self.tcx.mir_built(WithOptConstParam::unknown(func.def_id)).borrow();
-            MirCompiler::compile(self, &mir)
+            //let mir = self.tcx.mir_built(WithOptConstParam::unknown(func.def_id)).borrow();
+            //MirCompiler::compile(self, &mir)
+            let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(func.def_id)).expect("type check failed");
+            let thir_body = thir_body.borrow();
+            HirCompiler::compile(self,func.def_id,&thir_body,root_expr);
+            panic!("GO!");
         });
 
         // run

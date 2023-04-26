@@ -12,7 +12,7 @@ pub enum PointerSize {
 }
 
 impl PointerSize {
-    pub const fn bytes(&self) -> usize {
+    pub const fn bytes(&self) -> u32 {
         match self {
             PointerSize::I32 => 4,
             PointerSize::I64 => 8,

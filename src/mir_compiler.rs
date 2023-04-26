@@ -1,7 +1,7 @@
 use crate::layout::IntSign;
 use crate::layout::Layout;
 use crate::layout::LayoutKind;
-use crate::vm::vm::VM;
+use crate::vm::VM;
 
 use super::vm;
 use super::vm::instr::*;
