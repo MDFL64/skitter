@@ -348,6 +348,7 @@ fn write_exec_match() {
     }*/
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
+    Instr::Debug(_) => (),
     _ => panic!("NYI {:?}",instr)
 }"#,
     );

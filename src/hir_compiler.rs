@@ -39,22 +39,40 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             thir::BodyTy::Fn(sig) => sig,
             _ => panic!("const not supported")
         };
-        println!("{:?}",fn_sig);
-
-        //in_func.exprs[root_expr];
+        //println!("{:?}",fn_sig);
 
         compiler.lower_expr(root_expr,Some(Slot::new(0)));
+        compiler.out_bc.push(Instr::Return);
 
-        panic!("stop");
+        if compiler.vm.is_verbose {
+            println!("compiled {:?}",in_func_id);
+            for (i,bc) in compiler.out_bc.iter().enumerate() {
+                println!("{} {:?}",i,bc);
+            }
+        }
+
+        //println!("{:?}",compiler.out_bc);
+        compiler.out_bc
     }
 
-    fn lower_block(&mut self, id: BlockId) -> ! {
+    fn debug<S: Into<String>>(&mut self, f: impl Fn()->S) {
+        if self.vm.is_verbose {
+            let bc = Instr::Debug(Box::new(f().into()));
+            self.out_bc.push(bc);
+        }
+    }
+
+    fn lower_block(&mut self, id: BlockId, dst_slot: Option<Slot>) -> Slot {
         let block = &self.in_func.blocks[id];
         for stmt_id in block.stmts.iter() {
             self.lower_stmt(*stmt_id);
         }
-        assert!(block.expr.is_none());
-        panic!("exit block");
+        if let Some(expr) = block.expr {
+            self.lower_expr(expr, dst_slot)
+        } else {
+            // use a dummy slot
+            dst_slot.unwrap_or(Slot::new(0))
+        }
     }
 
     fn lower_stmt(&mut self, id: StmtId) {
@@ -70,7 +88,6 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             StmtKind::Expr{scope, expr} => {
                 self.lower_expr(*expr, None);
             }
-            _ => panic!("stmt {:?}",stmt.kind)
         }
     }
 
@@ -82,10 +99,16 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.lower_expr(*value, dst_slot)
             }
             ExprKind::Block{block} => {
-                self.lower_block(*block);
+                self.lower_block(*block, dst_slot)
             }
             ExprKind::ValueTypeAscription{source,..} => {
                 self.lower_expr(*source, dst_slot)
+            }
+            ExprKind::Use{source} => {
+                self.debug(|| "use start");
+                let res = self.lower_expr(*source, dst_slot);
+                self.debug(|| "use end");
+                res
             }
             ExprKind::VarRef{id} => {
                 let hir_id = id.0;
@@ -94,7 +117,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let local_slot = self.find_local(hir_id.local_id);
 
                 if let Some(dst_slot) = dst_slot {
-                    panic!("todo move var");
+                    let size = Layout::from(expr.ty).size;
+
+                    self.out_bc.push(bytecode_select::copy(dst_slot, local_slot, size));
+                    dst_slot
                 } else {
                     local_slot
                 }
@@ -107,7 +133,6 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let layout = Layout::from(expr.ty);
                 
                 self.out_bc.push(bytecode_select::literal(&lit.node, layout.size, dst_slot, *neg));
-
                 dst_slot
             }
             ExprKind::Unary{op, arg} => {
@@ -155,6 +180,25 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
                 dst_slot
             }
+            ExprKind::AssignOp{op,lhs,rhs} => {
+                
+                if let Some(lhs_slot) = self.expr_to_slot(*lhs) {
+                    let rhs_slot = self.lower_expr(*rhs, None);
+
+                    let layout = Layout::from(self.expr_ty(*lhs));
+                    
+                    let (ctor,swap) = bytecode_select::binary(*op, &layout);
+                    assert!(!swap);
+
+                    self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
+                } else {
+                    //let lhs_slot = self.lower_expr(*lhs, None);
+                    //panic!("nontrivial assign");
+                }
+
+                // the destination is (), just return a dummy value
+                dst_slot.unwrap_or(Slot::new(0))
+            }
             ExprKind::Call{ty,args,..} => {
                 let func = self.ty_to_func(*ty).expect("can't find function");
 
@@ -181,6 +225,25 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
             }
             _ => panic!("expr {:?}",expr.kind)
+        }
+    }
+
+    /// Try converting an expression to a local slot. Should only work for locals and their fields.
+    fn expr_to_slot(&mut self, id: ExprId) -> Option<Slot> {
+        let expr = &self.in_func.exprs[id];
+
+        match &expr.kind {
+            ExprKind::Scope{region_scope,value,..} => {
+                self.expr_to_slot(*value)
+            }
+            ExprKind::VarRef{id} => {
+                let hir_id = id.0;
+                assert_eq!(hir_id.owner.def_id,self.in_func_id);
+
+                let local_slot = self.find_local(hir_id.local_id);
+                Some(local_slot)
+            }
+            _ => panic!("expr_to_slot {:?}",expr.kind)
         }
     }
 
@@ -255,7 +318,6 @@ impl CompilerStack {
         let size = layout.size;
 
         self.entries.push(StackEntry { base, size });
-        println!("alloc {}",base);
         self.top += size;
         Slot::new(base)
     }

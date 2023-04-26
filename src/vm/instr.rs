@@ -243,4 +243,5 @@ pub enum Instr {
 
     Return,
     Bad,
+    Debug(Box<String>)
 }

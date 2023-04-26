@@ -10,9 +10,10 @@ use crate::vm::instr::Slot;
 use super::instr::Instr;
 
 pub struct VM<'tcx> {
-    pub tcx: TyCtxt<'tcx>,
+    tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
-    functions: Mutex<HashMap<LocalDefId,Arc<Function>>>
+    functions: Mutex<HashMap<LocalDefId,Arc<Function>>>,
+    pub is_verbose: bool
 }
 
 impl<'tcx> VM<'tcx> {
@@ -21,7 +22,8 @@ impl<'tcx> VM<'tcx> {
             tcx,
             // 64k stack - TODO move out of this struct, this is not safe
             stack: vec!(0;4096),
-            functions: Default::default()
+            functions: Default::default(),
+            is_verbose: false
         }
     }
 
@@ -62,8 +64,7 @@ impl<'tcx> VM<'tcx> {
             //MirCompiler::compile(self, &mir)
             let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(func.def_id)).expect("type check failed");
             let thir_body = thir_body.borrow();
-            HirCompiler::compile(self,func.def_id,&thir_body,root_expr);
-            panic!("GO!");
+            HirCompiler::compile(self,func.def_id,&thir_body,root_expr)
         });
 
         // run
@@ -88,7 +89,6 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
     *(base.add(slot.offset()) as *mut _)
 }
 
-#[derive(Debug)]
 pub struct Function {
     pub def_id: LocalDefId,
     pub native: Option<unsafe fn(*mut u8)>,
@@ -102,6 +102,12 @@ impl Function {
             native: None,
             bytecode: Default::default()
         }
+    }
+}
+
+impl std::fmt::Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Function").field("def_id", &self.def_id).finish()
     }
 }
 

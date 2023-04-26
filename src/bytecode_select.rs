@@ -26,6 +26,17 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
     }
 }
 
+pub fn copy(dst: Slot, src: Slot, size: u32) -> Instr {
+    match size {
+        1  => Instr::MovSS1(dst, src),
+        2  => Instr::MovSS2(dst, src),
+        4  => Instr::MovSS4(dst, src),
+        8  => Instr::MovSS8(dst, src),
+        16 => Instr::MovSS16(dst, src),
+        _ => panic!("copy {}",size)
+    }
+}
+
 pub fn unary(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr {
     match (op,&layout.kind,layout.size) {
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_Neg,
@@ -48,24 +59,6 @@ pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) 
 
     let mut swap = false;
     let ctor = match (op,&layout.kind,layout.size) {
-        /*(LayoutKind::Int(_),1,BinOp::Eq) => Instr::I8_Eq,
-        (LayoutKind::Int(_),1,BinOp::Ne) => Instr::I8_NotEq,
-
-        (LayoutKind::Int(_),1,BinOp::Shl) => Instr::I8_ShiftL,
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Lt) => Instr::I8_S_Lt,
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Gt) => { swap = true; Instr::I8_S_Lt },
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Le) => Instr::I8_S_LtEq,
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Ge) => { swap = true; Instr::I8_S_LtEq },
-
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Rem) => Instr::I8_S_Rem,
-        (LayoutKind::Int(IntSign::Signed),1,BinOp::Shr) => Instr::I8_S_ShiftR,
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Lt) => Instr::I8_U_Lt,
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Gt) => { swap = true; Instr::I8_U_Lt },
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Le) => Instr::I8_U_LtEq,
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Ge) => { swap = true; Instr::I8_U_LtEq },
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Div) => Instr::I8_U_Div,
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Rem) => Instr::I8_U_Rem,
-        (LayoutKind::Int(IntSign::Unsigned),1,BinOp::Shr) => Instr::I8_U_ShiftR,*/
 
         (BinOp::Eq,LayoutKind::Int(_),1) => Instr::I8_Eq,
         (BinOp::Eq,LayoutKind::Int(_),2) => Instr::I16_Eq,
@@ -152,6 +145,44 @@ pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) 
         (BinOp::Shr,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_ShiftR,
         (BinOp::Shr,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_ShiftR,
         (BinOp::Shr,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_ShiftR,
+
+        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Lt,
+        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Lt,
+        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Lt,
+        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Lt,
+        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Lt,
+        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_Lt }
+        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_Lt }
+        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_Lt }
+        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_Lt }
+        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_Lt }
+        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_LtEq,
+        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_LtEq,
+        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_LtEq,
+        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_LtEq,
+        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_LtEq,
+        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_LtEq }
+        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_LtEq }
+        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_LtEq }
+        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_LtEq }
+        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_LtEq }
+
+        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Div,
+        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Div,
+        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Div,
+        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Div,
+        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Div,
+        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Rem,
+        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Rem,
+        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Rem,
+        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Rem,
+        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Rem,
+
+        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_ShiftR,
+        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_ShiftR,
+        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_ShiftR,
+        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_ShiftR,
+        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_ShiftR,
 
         _ => panic!("no binary op: {:?} {:?} {:?}",&layout.kind,layout.size,op)
     };

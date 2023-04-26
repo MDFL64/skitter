@@ -88,7 +88,8 @@ fn main() {
         compiler.enter(|queries| {
             queries.global_ctxt().unwrap().enter(|tcx| {
 
-                let vm = vm::VM::new(tcx);
+                let mut vm = vm::VM::new(tcx);
+                vm.is_verbose = args.verbose;
 
                 let main_did = find_main(tcx).expect("no main");
 
