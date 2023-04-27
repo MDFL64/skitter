@@ -353,5 +353,6 @@ fn write_exec_match() {
 }"#,
     );
 
-    std::fs::write("src/vm/_exec_match.txt", source).unwrap();
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    std::fs::write(format!("{out_dir}/exec_match.rs"), source).unwrap();
 }

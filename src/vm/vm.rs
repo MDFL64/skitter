@@ -74,7 +74,7 @@ impl<'tcx> VM<'tcx> {
     
             loop {
                 let instr = &bc[pc];
-                include!("_exec_match.txt");
+                include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
                 pc += 1;
             }
         }
