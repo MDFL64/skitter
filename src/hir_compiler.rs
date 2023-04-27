@@ -35,11 +35,17 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             locals: Vec::new()
         };
 
-        let fn_sig = match in_func.body_type {
-            thir::BodyTy::Fn(sig) => sig,
+        let out_ty = match in_func.body_type {
+            thir::BodyTy::Fn(sig) => {
+                sig.output()
+            }
             _ => panic!("const not supported")
         };
-        //println!("{:?}",fn_sig);
+        let ret_slot = compiler.stack.alloc(out_ty);
+        assert_eq!(ret_slot.offset(),0);
+        for param in &in_func.params {
+            compiler.alloc_pattern(param.pat.as_ref().unwrap());
+        }
 
         compiler.lower_expr(root_expr,Some(Slot::new(0)));
         compiler.out_bc.push(Instr::Return);
@@ -47,7 +53,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         if compiler.vm.is_verbose {
             println!("compiled {:?}",in_func_id);
             for (i,bc) in compiler.out_bc.iter().enumerate() {
-                println!("{} {:?}",i,bc);
+                println!("  {} {:?}",i,bc);
             }
         }
 
@@ -180,6 +186,20 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
                 dst_slot
             }
+            ExprKind::Assign{lhs, rhs} => {
+                if let Some(lhs_slot) = self.expr_to_slot(*lhs) {
+                    let rhs_slot = self.lower_expr(*rhs, None);
+
+                    let layout = Layout::from(self.expr_ty(*lhs));
+
+                    self.out_bc.push(bytecode_select::copy(lhs_slot, rhs_slot, layout.size));
+                } else {
+                    panic!("nontrivial assign");
+                }
+
+                // the destination is (), just return a dummy value
+                dst_slot.unwrap_or(Slot::new(0))
+            }
             ExprKind::AssignOp{op,lhs,rhs} => {
                 
                 if let Some(lhs_slot) = self.expr_to_slot(*lhs) {
@@ -192,8 +212,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                     self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
                 } else {
-                    //let lhs_slot = self.lower_expr(*lhs, None);
-                    //panic!("nontrivial assign");
+                    panic!("nontrivial assign");
                 }
 
                 // the destination is (), just return a dummy value
@@ -207,7 +226,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // we need space to store the temporaries that won't get overridden
                 // I think the old interpreter accounted for this (somehow lol)
                 let base_slot = self.stack.align_for_call();
-                // todo alloc slot for return
+                let ret_slot = self.stack.alloc(expr.ty);
+                assert_eq!(ret_slot, base_slot);
                 let arg_slots: Vec<_> = args.iter().map(|arg| {
                     let arg_ty = self.expr_ty(*arg);
                     self.stack.alloc(arg_ty)
@@ -217,11 +237,13 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     self.lower_expr(*arg, Some(*slot));
                 }
 
-                self.out_bc.push(Instr::Call(base_slot, func));
+                self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
-                    panic!("todo move to result");
+                    let layout = Layout::from(expr.ty);
+                    self.out_bc.push(bytecode_select::copy(dst_slot, ret_slot, layout.size));
+                    dst_slot
                 } else {
-                    base_slot
+                    ret_slot
                 }
             }
             _ => panic!("expr {:?}",expr.kind)

@@ -4,6 +4,8 @@ use rustc_ast::ast::LitKind;
 use rustc_middle::mir::{UnOp, BinOp};
 use rustc_middle::ty::Ty;
 
+use std::str::FromStr;
+
 use crate::{vm::instr::{Slot, Instr}, layout::{Layout, LayoutKind, IntSign}};
 
 pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
@@ -21,6 +23,34 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
                 16 => Instr::I128_Const(slot, Box::new(n)),
                 _ => panic!("int size {}",size)
             }
+        }
+        LitKind::Float(sym,_) => {
+            match size {
+                4 => {
+                    let mut n = f32::from_str(sym.as_str()).unwrap();
+                    if neg {
+                        n = -n;
+                    }
+                    let x: i32 = unsafe { std::mem::transmute(n) };
+                    Instr::I32_Const(slot, x)
+                }
+                8 => {
+                    let mut n = f64::from_str(sym.as_str()).unwrap();
+                    if neg {
+                        n = -n;
+                    }
+                    let x: i64 = unsafe { std::mem::transmute(n) };
+                    Instr::I64_Const(slot, x)
+                }
+                _ => panic!("float size {}",size)
+            }
+        }
+        LitKind::Char(c) => {
+            let n = *c as i32;
+            Instr::I32_Const(slot, n)
+        }
+        LitKind::Bool(b) => {
+            Instr::I8_Const(slot, *b as i8)
         }
         _ => panic!("pick literal {:?}",lit)
     }
@@ -50,6 +80,11 @@ pub fn unary(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr {
         (UnOp::Not,LayoutKind::Int(_),4) => Instr::I32_Not,
         (UnOp::Not,LayoutKind::Int(_),8) => Instr::I64_Not,
         (UnOp::Not,LayoutKind::Int(_),16) => Instr::I128_Not,
+
+        (UnOp::Neg,LayoutKind::Float,4) => Instr::F32_Neg,
+        (UnOp::Neg,LayoutKind::Float,8) => Instr::F64_Neg,
+
+        (UnOp::Not,LayoutKind::Bool,1) => Instr::Bool_Not,
 
         _ => panic!("no unary op: {:?} {:?} {:?}",op,&layout.kind,layout.size)
     }
@@ -184,6 +219,38 @@ pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) 
         (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_ShiftR,
         (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_ShiftR,
 
+        (BinOp::Eq,LayoutKind::Float,4) => Instr::F32_Eq,
+        (BinOp::Eq,LayoutKind::Float,8) => Instr::F64_Eq,
+        (BinOp::Ne,LayoutKind::Float,4) => Instr::F32_NotEq,
+        (BinOp::Ne,LayoutKind::Float,8) => Instr::F64_NotEq,
+        (BinOp::Lt,LayoutKind::Float,4) => Instr::F32_Lt,
+        (BinOp::Lt,LayoutKind::Float,8) => Instr::F64_Lt,
+        (BinOp::Gt,LayoutKind::Float,4) => Instr::F32_Gt,
+        (BinOp::Gt,LayoutKind::Float,8) => Instr::F64_Gt,
+
+        (BinOp::Le,LayoutKind::Float,4) => Instr::F32_LtEq,
+        (BinOp::Le,LayoutKind::Float,8) => Instr::F64_LtEq,
+        (BinOp::Ge,LayoutKind::Float,4) => Instr::F32_GtEq,
+        (BinOp::Ge,LayoutKind::Float,8) => Instr::F64_GtEq,
+
+        (BinOp::Add,LayoutKind::Float,4) => Instr::F32_Add,
+        (BinOp::Add,LayoutKind::Float,8) => Instr::F64_Add,
+        (BinOp::Sub,LayoutKind::Float,4) => Instr::F32_Sub,
+        (BinOp::Sub,LayoutKind::Float,8) => Instr::F64_Sub,
+        (BinOp::Mul,LayoutKind::Float,4) => Instr::F32_Mul,
+        (BinOp::Mul,LayoutKind::Float,8) => Instr::F64_Mul,
+        (BinOp::Div,LayoutKind::Float,4) => Instr::F32_Div,
+        (BinOp::Div,LayoutKind::Float,8) => Instr::F64_Div,
+        (BinOp::Rem,LayoutKind::Float,4) => Instr::F32_Rem,
+        (BinOp::Rem,LayoutKind::Float,8) => Instr::F64_Rem,
+
+        (BinOp::Eq,LayoutKind::Bool,1) => Instr::I8_Eq,
+        (BinOp::Ne,LayoutKind::Bool,1) => Instr::I8_NotEq,
+
+        (BinOp::BitOr,LayoutKind::Bool,1) => Instr::I8_Or,
+        (BinOp::BitAnd,LayoutKind::Bool,1) => Instr::I8_And,
+        (BinOp::BitXor,LayoutKind::Bool,1) => Instr::I8_Xor,
+
         _ => panic!("no binary op: {:?} {:?} {:?}",&layout.kind,layout.size,op)
     };
 
@@ -195,7 +262,8 @@ pub fn cast<'tcx>(arg_ty: Ty<'tcx>, res_ty: Ty<'tcx>) -> fn(Slot,Slot) -> Instr 
     let res_layout = Layout::from(res_ty);
 
     match (&arg_layout.kind,&res_layout.kind) {
-        (LayoutKind::Int(_),LayoutKind::Int(_)) => {
+        (LayoutKind::Int(_),LayoutKind::Int(_)) |
+        (LayoutKind::Bool,LayoutKind::Int(_)) => {
             
             let sign = arg_layout.sign();
 

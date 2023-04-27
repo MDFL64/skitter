@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::vm::Function;
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug,Clone,Copy,PartialEq)]
 pub struct Slot(u32);
 
 impl Slot {
