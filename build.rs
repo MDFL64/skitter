@@ -1,4 +1,5 @@
-// I do not like macros.
+// I do not like proc macros, but in retrospect this whole thing
+// could probably be accomplished with some trivial macros.
 
 pub fn main() {
     println!("cargo:rerun-if-changed=build.rs");

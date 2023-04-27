@@ -7,7 +7,7 @@ use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
 use rustc_middle::ty::{Ty, TyKind};
-use rustc_middle::thir::{self, Thir, ExprId, ExprKind, StmtId, StmtKind, BlockId, Pat, PatKind};
+use rustc_middle::thir::{self, Thir, ExprId, ExprKind, StmtId, StmtKind, BlockId, Pat, PatKind, LogicalOp};
 
 use rustc_hir::hir_id::ItemLocalId;
 use rustc_hir::def_id::LocalDefId;
@@ -289,6 +289,30 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     res
                 }
             }
+            ExprKind::LogicalOp{op,lhs,rhs} => {
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr.ty)
+                });
+
+                self.lower_expr(*lhs, Some(dst_slot));
+
+                let jump_index_1 = self.skip_instr();
+
+                self.lower_expr(*rhs, Some(dst_slot));
+
+                let jump_offset_1 = -self.get_jump_offset(jump_index_1);
+                
+                match op {
+                    LogicalOp::And => {
+                        self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, dst_slot);
+                    }
+                    LogicalOp::Or => {
+                        self.out_bc[jump_index_1] = Instr::JumpT(jump_offset_1, dst_slot);
+                    }
+                }
+
+                dst_slot
+            }
             ExprKind::Loop{body} => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr.ty)
@@ -324,7 +348,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let loop_id = label.id;
 
                 let (_,loop_slot,_) = self.loops.iter().find(|x| x.0 == loop_id).unwrap();
-                
+
                 if let Some(value) = value {
                     self.lower_expr(*value, Some(*loop_slot));
                 }
