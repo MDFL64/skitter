@@ -1,4 +1,5 @@
 #![feature(rustc_private)]
+#![feature(drain_filter)]
 
 extern crate rustc_ast_pretty;
 extern crate rustc_driver;

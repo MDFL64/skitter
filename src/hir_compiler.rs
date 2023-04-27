@@ -20,7 +20,10 @@ pub struct HirCompiler<'a,'tcx> {
     out_bc: Vec<vm::instr::Instr>,
     vm: &'a vm::VM<'tcx>,
     stack: CompilerStack,
-    locals: Vec<(ItemLocalId,Slot)>
+    locals: Vec<(ItemLocalId,Slot)>,
+    last_scope: ItemLocalId,
+    loops: Vec<(ItemLocalId,Slot,usize)>,
+    loop_breaks: Vec<(ItemLocalId,usize)>
 }
 
 impl<'a,'tcx> HirCompiler<'a,'tcx> {
@@ -32,7 +35,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             out_bc: Vec::new(),
             vm,
             stack: Default::default(),
-            locals: Vec::new()
+            locals: Vec::new(),
+            last_scope: ItemLocalId::MAX,
+            loops: Vec::new(),
+            loop_breaks: Vec::new()
         };
 
         let out_ty = match in_func.body_type {
@@ -98,9 +104,11 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
     fn lower_expr(&mut self, id: ExprId, dst_slot: Option<Slot>) -> Slot {
         let expr = &self.in_func.exprs[id];
+        //println!("{:?}",expr.kind);
 
         match &expr.kind {
             ExprKind::Scope{region_scope,value,..} => {
+                self.last_scope = region_scope.id;
                 self.lower_expr(*value, dst_slot)
             }
             ExprKind::Block{block} => {
@@ -110,10 +118,13 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.lower_expr(*source, dst_slot)
             }
             ExprKind::Use{source} => {
-                self.debug(|| "use start");
+                //self.debug(|| "use start");
                 let res = self.lower_expr(*source, dst_slot);
-                self.debug(|| "use end");
+                //self.debug(|| "use end");
                 res
+            }
+            ExprKind::NeverToAny{source} => {
+                self.lower_expr(*source, dst_slot)
             }
             ExprKind::VarRef{id} => {
                 let hir_id = id.0;
@@ -274,9 +285,68 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                     let jump_offset_1 = -self.get_jump_offset(jump_index_1);
                     self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, cond_slot);
-                    
+
                     res
                 }
+            }
+            ExprKind::Loop{body} => {
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr.ty)
+                });
+
+                let loop_id = self.last_scope;
+
+                let loop_index = self.out_bc.len();
+
+                self.loops.push((loop_id,dst_slot,0));
+                let loop_count = self.loops.len();
+
+                self.lower_expr(*body, Some(Slot::DUMMY));
+
+                assert_eq!(loop_count,self.loops.len());
+                self.loops.pop();
+
+                // ending jump
+                let offset = self.get_jump_offset(loop_index);
+                self.out_bc.push(Instr::Jump(offset));
+
+                // fix breaks
+                let break_indices: Vec<_> = self.loop_breaks.drain_filter(|(id,_)| *id == loop_id).map(|(_,x)| x).collect();
+                for break_index in break_indices {
+                    let offset = -self.get_jump_offset(break_index);
+                    self.out_bc[break_index] = Instr::Jump(offset);
+                }
+
+                dst_slot
+            }
+            ExprKind::Break{label, value} => {
+
+                let loop_id = label.id;
+
+                let (_,loop_slot,_) = self.loops.iter().find(|x| x.0 == loop_id).unwrap();
+                
+                if let Some(value) = value {
+                    self.lower_expr(*value, Some(*loop_slot));
+                }
+
+                let break_index = self.out_bc.len();
+                self.loop_breaks.push((loop_id,break_index));
+
+                self.out_bc.push(Instr::Bad);
+
+                // the destination is (), just return a dummy value
+                dst_slot.unwrap_or(Slot::DUMMY)
+            }
+            ExprKind::Continue{label} => {
+                let loop_id = label.id;
+
+                let (_,_,loop_start) = self.loops.iter().find(|x| x.0 == loop_id).unwrap();
+
+                let offset = self.get_jump_offset(*loop_start) + 1;
+                self.out_bc.push(Instr::Jump(offset));
+
+                // the destination is (), just return a dummy value
+                dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Tuple{fields} => {
                 if fields.len() == 0 {
