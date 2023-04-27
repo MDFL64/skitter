@@ -316,7 +316,7 @@ fn write_exec_match() {
 
     source.push_str(
         r#"
-    /*Instr::Jump(offset) => {
+    Instr::Jump(offset) => {
         pc = (pc as isize + *offset as isize) as usize;
         continue;
     }
@@ -333,7 +333,7 @@ fn write_exec_match() {
             pc = (pc as isize + *offset as isize) as usize;
             continue;
         }
-    }*/
+    }
     Instr::Call(base,func) => {
         self.call(func,stack_offset + base.offset() as u32);
     }

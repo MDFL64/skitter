@@ -2,7 +2,8 @@
 name = "skitter"
 version = "0.0.0"
 edition = "2021"
-description = "Reserving this name. If I don't publish soon-ish free to harass me for this."
+description = "An experimental Rust interpreter."
+license = "MIT OR Apache-2.0"
 
 include = [
     "Cargo.toml",

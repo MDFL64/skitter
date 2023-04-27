@@ -6,6 +6,8 @@ use super::vm::Function;
 pub struct Slot(u32);
 
 impl Slot {
+    pub const DUMMY: Self = Self(0);
+
     pub fn new(id: u32) -> Self {
         Self(id)
     }
@@ -238,6 +240,10 @@ pub enum Instr {
     MovSS4(Slot, Slot),
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
+
+    Jump(i32),
+    JumpF(i32, Slot),
+    JumpT(i32, Slot),
 
     Call(Slot, Arc<Function>),
 

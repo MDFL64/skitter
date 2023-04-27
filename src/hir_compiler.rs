@@ -76,8 +76,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         if let Some(expr) = block.expr {
             self.lower_expr(expr, dst_slot)
         } else {
-            // use a dummy slot
-            dst_slot.unwrap_or(Slot::new(0))
+            dst_slot.unwrap_or(Slot::DUMMY)
         }
     }
 
@@ -198,7 +197,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
 
                 // the destination is (), just return a dummy value
-                dst_slot.unwrap_or(Slot::new(0))
+                dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::AssignOp{op,lhs,rhs} => {
                 
@@ -216,7 +215,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
 
                 // the destination is (), just return a dummy value
-                dst_slot.unwrap_or(Slot::new(0))
+                dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Call{ty,args,..} => {
                 let func = self.ty_to_func(*ty).expect("can't find function");
@@ -244,6 +243,47 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     dst_slot
                 } else {
                     ret_slot
+                }
+            }
+            ExprKind::If{cond,then,else_opt,..} => {
+                let cond_slot = self.lower_expr(*cond, None);
+                
+                let jump_index_1 = self.skip_instr();
+                
+                if let Some(else_expr) = else_opt {
+                    let dst_slot = dst_slot.unwrap_or_else(|| {
+                        self.stack.alloc(expr.ty)
+                    });
+
+                    self.lower_expr(*then, Some(dst_slot));
+
+                    let jump_index_2 = self.skip_instr();
+
+                    let jump_offset_1 = -self.get_jump_offset(jump_index_1);
+                    self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, cond_slot);
+
+                    self.lower_expr(*else_expr, Some(dst_slot));
+
+                    let jump_offset_2 = -self.get_jump_offset(jump_index_2);
+                    self.out_bc[jump_index_2] = Instr::Jump(jump_offset_2);
+
+                    dst_slot
+                } else {
+                    // note: dst_slot should be void
+                    let res = self.lower_expr(*then, dst_slot);
+
+                    let jump_offset_1 = -self.get_jump_offset(jump_index_1);
+                    self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, cond_slot);
+                    
+                    res
+                }
+            }
+            ExprKind::Tuple{fields} => {
+                if fields.len() == 0 {
+                    // no-op
+                    dst_slot.unwrap_or(Slot::DUMMY)
+                } else {
+                    panic!("non-trivial tuple");
                 }
             }
             _ => panic!("expr {:?}",expr.kind)
@@ -320,6 +360,16 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             }
         }
         panic!("failed to find local");
+    }
+
+    fn skip_instr(&mut self) -> usize {
+        let index = self.out_bc.len();
+        self.out_bc.push(Instr::Bad);
+        index
+    }
+
+    fn get_jump_offset(&mut self, other: usize) -> i32 {
+        other as i32 - self.out_bc.len() as i32
     }
 }
 
