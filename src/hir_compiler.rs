@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
 use crate::layout::Layout;
 use crate::vm::Function;
@@ -80,7 +81,13 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             self.lower_stmt(*stmt_id);
         }
         if let Some(expr) = block.expr {
-            self.lower_expr(expr, dst_slot)
+            // ALWAYS have a slot allocated for the final expression
+            // prevents wrongly aliasing locals
+            let dst_slot = dst_slot.unwrap_or_else(|| {
+                self.stack.alloc(self.expr_ty(expr))
+            });
+
+            self.lower_expr(expr, Some(dst_slot))
         } else {
             dst_slot.unwrap_or(Slot::DUMMY)
         }
@@ -118,10 +125,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.lower_expr(*source, dst_slot)
             }
             ExprKind::Use{source} => {
-                //self.debug(|| "use start");
-                let res = self.lower_expr(*source, dst_slot);
-                //self.debug(|| "use end");
-                res
+                self.lower_expr(*source, dst_slot)
             }
             ExprKind::NeverToAny{source} => {
                 self.lower_expr(*source, dst_slot)
@@ -200,34 +204,47 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 dst_slot
             }
             ExprKind::Assign{lhs, rhs} => {
-                if let Some(lhs_slot) = self.expr_to_slot(*lhs) {
-                    let rhs_slot = self.lower_expr(*rhs, None);
+                let rhs_slot = self.lower_expr(*rhs, None);
 
-                    let layout = Layout::from(self.expr_ty(*lhs));
+                let layout = Layout::from(self.expr_ty(*lhs));
 
-                    if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, layout.size) {
-                        self.out_bc.push(instr);
+                match self.expr_to_place(*lhs) {
+                    Place::Local(lhs_slot) => {
+                        if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, layout.size) {
+                            self.out_bc.push(instr);
+                        }
                     }
-                } else {
-                    panic!("nontrivial assign");
+                    Place::Ptr(ptr_slot,offset) => {
+                        assert_eq!(offset,0);
+                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, layout.size) {
+                            self.out_bc.push(instr);
+                        }
+                    }
                 }
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::AssignOp{op,lhs,rhs} => {
+                let rhs_slot = self.lower_expr(*rhs, None);
+
+                let layout = Layout::from(self.expr_ty(*lhs));
                 
-                if let Some(lhs_slot) = self.expr_to_slot(*lhs) {
-                    let rhs_slot = self.lower_expr(*rhs, None);
+                let (ctor,swap) = bytecode_select::binary(*op, &layout);
+                assert!(!swap);
 
-                    let layout = Layout::from(self.expr_ty(*lhs));
-                    
-                    let (ctor,swap) = bytecode_select::binary(*op, &layout);
-                    assert!(!swap);
-
-                    self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
-                } else {
-                    panic!("nontrivial assign");
+                match self.expr_to_place(*lhs) {
+                    Place::Local(lhs_slot) => {
+                        self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
+                    }
+                    Place::Ptr(ptr_slot,offset) => {
+                        assert_eq!(offset,0);
+                        let tmp_slot = self.stack.alloc(self.expr_ty(*lhs));
+                        
+                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.size).unwrap());
+                        self.out_bc.push(ctor(tmp_slot,tmp_slot,rhs_slot));
+                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.size).unwrap());
+                    }
                 }
 
                 // the destination is (), just return a dummy value
@@ -388,6 +405,60 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
+            /*ExprKind::AddressOf{arg,..} => {
+                self.debug(|| "enter address");
+                let res = self.lower_expr(*arg, dst_slot);
+                self.debug(|| "exit address");
+                res
+            }*/
+            ExprKind::Borrow{arg,..} | ExprKind::AddressOf{arg,..} => {
+
+                self.debug(|| format!("enter borrow"));
+
+                let place = self.expr_to_place(*arg);
+
+                let res = match place {
+                    Place::Local(src_slot) => {
+                        let dst_slot = dst_slot.unwrap_or_else(|| {
+                            self.stack.alloc(expr.ty)
+                        });
+
+                        self.out_bc.push(Instr::SlotAddr(dst_slot,src_slot));
+                        dst_slot
+                    }
+                    Place::Ptr(src_slot, offset) => {
+                        assert_eq!(offset,0);
+
+                        if let Some(dst_slot) = dst_slot {
+                            self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, POINTER_SIZE.bytes()).unwrap());
+
+                            dst_slot
+                        } else {
+                            src_slot
+                        }
+                    }
+                };
+
+                self.debug(|| format!("exit borrow"));
+
+                res
+            }
+            ExprKind::Deref{arg} => {
+                self.debug(|| format!("enter deref"));
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr.ty)
+                });
+
+                let ptr = self.lower_expr(*arg, None);
+
+                let size = Layout::from(expr.ty).size;
+
+                if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size) {
+                    self.out_bc.push(instr);
+                }
+                self.debug(|| format!("exit deref"));
+                dst_slot
+            }
             ExprKind::Tuple{fields} => {
                 if fields.len() == 0 {
                     // no-op
@@ -400,22 +471,32 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         }
     }
 
-    /// Try converting an expression to a local slot. Should only work for locals and their fields.
-    fn expr_to_slot(&mut self, id: ExprId) -> Option<Slot> {
+    fn expr_to_place(&mut self, id: ExprId) -> Place {
         let expr = &self.in_func.exprs[id];
 
         match &expr.kind {
             ExprKind::Scope{region_scope,value,..} => {
-                self.expr_to_slot(*value)
+                self.expr_to_place(*value)
+            }
+            ExprKind::Deref{arg} => {
+                let addr_slot = self.lower_expr(*arg, None);
+                Place::Ptr(addr_slot, 0)
             }
             ExprKind::VarRef{id} => {
                 let hir_id = id.0;
                 assert_eq!(hir_id.owner.def_id,self.in_func_id);
 
                 let local_slot = self.find_local(hir_id.local_id);
-                Some(local_slot)
+                Place::Local(local_slot)
             }
-            _ => panic!("expr_to_slot {:?}",expr.kind)
+            // (todo) All other expressions without special handling:
+            ExprKind::Block{..} |
+            ExprKind::Tuple{..} |
+            ExprKind::Literal{..} => {
+                let res = self.lower_expr(id, None);
+                Place::Local(res)
+            }
+            _ => panic!("expr_to_place {:?}",expr.kind)
         }
     }
 
@@ -481,6 +562,13 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     fn get_jump_offset(&mut self, other: usize) -> i32 {
         other as i32 - self.out_bc.len() as i32
     }
+}
+
+#[derive(Debug)]
+enum Place {
+    Local(Slot),
+    /// Pointer with offset
+    Ptr(Slot,i32)
 }
 
 #[derive(Default)]

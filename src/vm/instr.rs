@@ -241,6 +241,20 @@ pub enum Instr {
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
 
+    MovSP1(Slot, Slot),
+    MovSP2(Slot, Slot),
+    MovSP4(Slot, Slot),
+    MovSP8(Slot, Slot),
+    MovSP16(Slot, Slot),
+
+    MovPS1(Slot, Slot),
+    MovPS2(Slot, Slot),
+    MovPS4(Slot, Slot),
+    MovPS8(Slot, Slot),
+    MovPS16(Slot, Slot),
+
+    SlotAddr(Slot, Slot),
+
     Jump(i32),
     JumpF(i32, Slot),
     JumpT(i32, Slot),

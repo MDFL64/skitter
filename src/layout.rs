@@ -23,7 +23,9 @@ pub enum LayoutKind {
     Int(IntSign),
     Float,
     Bool,
-    Void
+    Void,
+    Ref,
+    Ptr
 }
 
 #[derive(Debug,Copy,Clone)]
@@ -56,6 +58,9 @@ impl Layout {
 
             TyKind::Bool => Layout::simple(1, LayoutKind::Bool),
             TyKind::Char => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
+
+            TyKind::Ref(..)  => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ref),
+            TyKind::RawPtr(..) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ptr),
 
             TyKind::Tuple(list) => {
                 if list.len() == 0 {

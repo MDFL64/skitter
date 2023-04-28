@@ -300,7 +300,7 @@ fn write_exec_match() {
     write_unary("MovSS8", "u64", "x", &mut source);
     write_unary("MovSS16", "u128", "x", &mut source);
 
-    /*write_unary("MovSP1", "&u8", "*x", &mut source);
+    write_unary("MovSP1", "&u8", "*x", &mut source);
     write_unary("MovSP2", "&u16", "*x", &mut source);
     write_unary("MovSP4", "&u32", "*x", &mut source);
     write_unary("MovSP8", "&u64", "*x", &mut source);
@@ -312,8 +312,8 @@ fn write_exec_match() {
     write_pointer("MovPS8", "u64", "x", &mut source);
     write_pointer("MovPS16", "u128", "x", &mut source);
 
-    write_bulk_move_ss("MovSS4N", "u32", &mut source);
-    write_bulk_move_ps("MovPS4N", "u32", &mut source);*/
+    //write_bulk_move_ss("MovSS4N", "u32", &mut source);
+    //write_bulk_move_ps("MovPS4N", "u32", &mut source);
 
     source.push_str(
         r#"
@@ -338,15 +338,10 @@ fn write_exec_match() {
     Instr::Call(base,func) => {
         self.call(func,stack_offset + base.offset() as u32);
     }
-    /*Instr::SlotPtr(out,arg) => {
-        let res = stack.add(*arg as usize) as usize;
+    Instr::SlotAddr(out,arg) => {
+        let res = stack.add(arg.offset()) as usize;
         write_stack(stack, *out, res);
     }
-    Instr::OffsetPtr(out,arg,offset) => {
-        let val: u64 = read_stack(stack, *arg);
-        let res = val + *offset as u64;
-        write_stack(stack, *out, res);
-    }*/
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),
