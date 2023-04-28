@@ -71,31 +71,31 @@ pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
     }
 }
 
-pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
+pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
     if size == 0 {
         None
     } else {
         Some(match size {
-            1  => Instr::MovSP1(dst, src),
-            2  => Instr::MovSP2(dst, src),
-            4  => Instr::MovSP4(dst, src),
-            8  => Instr::MovSP8(dst, src),
-            16 => Instr::MovSP16(dst, src),
+            1  => Instr::MovSP1(dst, src, offset),
+            2  => Instr::MovSP2(dst, src, offset),
+            4  => Instr::MovSP4(dst, src, offset),
+            8  => Instr::MovSP8(dst, src, offset),
+            16 => Instr::MovSP16(dst, src, offset),
             _ => panic!("copy {}",size)
         })
     }
 }
 
-pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
+pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
     if size == 0 {
         None
     } else {
         Some(match size {
-            1  => Instr::MovPS1(dst, src),
-            2  => Instr::MovPS2(dst, src),
-            4  => Instr::MovPS4(dst, src),
-            8  => Instr::MovPS8(dst, src),
-            16 => Instr::MovPS16(dst, src),
+            1  => Instr::MovPS1(dst, src, offset),
+            2  => Instr::MovPS2(dst, src, offset),
+            4  => Instr::MovPS4(dst, src, offset),
+            8  => Instr::MovPS8(dst, src, offset),
+            16 => Instr::MovPS16(dst, src, offset),
             _ => panic!("copy {}",size)
         })
     }

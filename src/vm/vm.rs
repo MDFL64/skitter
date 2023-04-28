@@ -10,7 +10,7 @@ use crate::vm::instr::Slot;
 use super::instr::Instr;
 
 pub struct VM<'tcx> {
-    tcx: TyCtxt<'tcx>,
+    pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
     functions: Mutex<HashMap<LocalDefId,Arc<Function>>>,
     pub is_verbose: bool
@@ -82,11 +82,11 @@ impl<'tcx> VM<'tcx> {
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
-    *(base.add(slot.offset()) as *mut _) = x;
+    *(base.add(slot.index()) as *mut _) = x;
 }
 
 unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
-    *(base.add(slot.offset()) as *mut _)
+    *(base.add(slot.index()) as *mut _)
 }
 
 pub struct Function {

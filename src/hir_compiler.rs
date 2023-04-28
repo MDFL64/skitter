@@ -49,7 +49,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             _ => panic!("const not supported")
         };
         let ret_slot = compiler.stack.alloc(out_ty);
-        assert_eq!(ret_slot.offset(),0);
+        assert_eq!(ret_slot.index(),0);
         for param in &in_func.params {
             compiler.alloc_pattern(param.pat.as_ref().unwrap());
         }
@@ -131,7 +131,36 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.lower_expr(*source, dst_slot)
             }
             // PLACES:
-            ExprKind::VarRef{id} => {
+            ExprKind::VarRef{..} |
+            ExprKind::Field{..} => {
+                let size = Layout::from(expr.ty).size;
+
+                match self.expr_to_place(id) {
+                    Place::Local(local_slot) => {
+                        if let Some(dst_slot) = dst_slot {
+                            if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, size) {
+                                self.out_bc.push(instr);
+                            }
+                            
+                            dst_slot
+                        } else {
+                            local_slot
+                        }
+                    }
+                    Place::Ptr(ptr_slot, offset) => {
+                        let dst_slot = dst_slot.unwrap_or_else(|| {
+                            self.stack.alloc(expr.ty)
+                        });
+
+                        if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr_slot, size, offset) {
+                            self.out_bc.push(instr);
+                        }
+
+                        dst_slot
+                    }
+                }
+            }
+            /*ExprKind::VarRef{id} => {
                 let hir_id = id.0;
                 assert_eq!(hir_id.owner.def_id,self.in_func_id);
 
@@ -150,11 +179,25 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
             }
             ExprKind::Field{lhs,variant_index,name} => {
-                let expr_ty = self.expr_ty(*lhs);
-                let layout = Layout::from(expr_ty);
-                println!("-> {:?}",layout);
-                panic!("= stop");
-            }
+
+                let lhs_ty = self.expr_ty(*lhs);
+                let layout = Layout::from(lhs_ty);
+                let field_offset = layout.field_offsets[name.index()];
+
+                match self.expr_to_place(*lhs) {
+                    Place::Local(base_slot) => {
+                        let slot = base_slot.offset_by(field_offset);
+                        panic!("--- {:?}",slot);
+                    }
+                    Place::Ptr(ptr_slot, offset) => {
+                        panic!("todo ptr");
+                    }
+                }
+
+                //let name: () = name.index();
+                //println!("-> {:?}",layout);
+                //panic!("= stop");
+            }*/
             ExprKind::Literal{lit,neg} => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr.ty)
@@ -222,8 +265,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                         }
                     }
                     Place::Ptr(ptr_slot,offset) => {
-                        assert_eq!(offset,0);
-                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, layout.size) {
+                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, layout.size, offset) {
                             self.out_bc.push(instr);
                         }
                     }
@@ -245,12 +287,11 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                         self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
                     }
                     Place::Ptr(ptr_slot,offset) => {
-                        assert_eq!(offset,0);
                         let tmp_slot = self.stack.alloc(self.expr_ty(*lhs));
                         
-                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.size).unwrap());
+                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.size, offset).unwrap());
                         self.out_bc.push(ctor(tmp_slot,tmp_slot,rhs_slot));
-                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.size).unwrap());
+                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.size, offset).unwrap());
                     }
                 }
 
@@ -451,19 +492,26 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let size = Layout::from(expr.ty).size;
 
-                if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size) {
+                if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size, 0) {
                     self.out_bc.push(instr);
                 }
 
                 dst_slot
             }
             ExprKind::Tuple{fields} => {
-                if fields.len() == 0 {
-                    // no-op
-                    dst_slot.unwrap_or(Slot::DUMMY)
-                } else {
-                    panic!("non-trivial tuple");
+
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr.ty)
+                });
+
+                let layout = Layout::from(expr.ty);
+
+                for (field,offset) in fields.iter().zip(layout.field_offsets.iter()) {
+                    let field_slot = dst_slot.offset_by(*offset);
+                    self.lower_expr(*field, Some(field_slot));
                 }
+
+                dst_slot
             }
             _ => panic!("expr {:?}",expr.kind)
         }
@@ -487,10 +535,28 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let local_slot = self.find_local(hir_id.local_id);
                 Place::Local(local_slot)
             }
+            ExprKind::Field{lhs,variant_index,name} => {
+
+                assert!(variant_index.index() == 0);
+
+                let lhs_ty = self.expr_ty(*lhs);
+                let layout = Layout::from(lhs_ty);
+                let field_offset = layout.field_offsets[name.index()];
+
+                match self.expr_to_place(*lhs) {
+                    Place::Local(base_slot) => {
+                        Place::Local(base_slot.offset_by(field_offset))
+                    }
+                    Place::Ptr(ptr_slot, offset) => {
+                        Place::Ptr(ptr_slot, offset + field_offset as i32)
+                    }
+                }
+            }
             // (todo) All other expressions without special handling:
             ExprKind::Block{..} |
             ExprKind::Tuple{..} |
             ExprKind::Binary{..} |
+            ExprKind::Borrow{..} | // TODO special case? is *& a no-op or does it create a temporary?
             ExprKind::Literal{..} => {
                 let res = self.lower_expr(id, None);
                 Place::Local(res)

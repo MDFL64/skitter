@@ -19,8 +19,12 @@ impl Slot {
         Self(id + Self::SUB_OFFSET)
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.0 as usize
+    }
+
+    pub fn offset_by(&self, offset: u32) -> Self {
+        Self(self.0 + offset)
     }
 }
 
@@ -248,19 +252,20 @@ pub enum Instr {
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
 
-    MovSP1(Slot, Slot),
-    MovSP2(Slot, Slot),
-    MovSP4(Slot, Slot),
-    MovSP8(Slot, Slot),
-    MovSP16(Slot, Slot),
+    MovSP1(Slot, Slot, i32),
+    MovSP2(Slot, Slot, i32),
+    MovSP4(Slot, Slot, i32),
+    MovSP8(Slot, Slot, i32),
+    MovSP16(Slot, Slot, i32),
 
-    MovPS1(Slot, Slot),
-    MovPS2(Slot, Slot),
-    MovPS4(Slot, Slot),
-    MovPS8(Slot, Slot),
-    MovPS16(Slot, Slot),
+    MovPS1(Slot, Slot, i32),
+    MovPS2(Slot, Slot, i32),
+    MovPS4(Slot, Slot, i32),
+    MovPS8(Slot, Slot, i32),
+    MovPS16(Slot, Slot, i32),
 
     SlotAddr(Slot, Slot),
+    //OffsetPtr(Slot, Slot, i32),
 
     Jump(i32),
     JumpF(i32, Slot),
@@ -491,23 +496,25 @@ impl Instr {
             Instr::F64_Into_I64_U(x, _) |
             Instr::F64_Into_I128_U(x, _) => Some(x),
 
-            Instr::MovSS1(x, _) |
-            Instr::MovSS2(x, _) |
-            Instr::MovSS4(x, _) |
-            Instr::MovSS8(x, _) |
-            Instr::MovSS16(x, _) |
-            Instr::MovSP1(x, _) |
-            Instr::MovSP2(x, _) |
-            Instr::MovSP4(x, _) |
-            Instr::MovSP8(x, _) |
-            Instr::MovSP16(x, _) => Some(x),
+            Instr::MovSS1(x,_) |
+            Instr::MovSS2(x,_) |
+            Instr::MovSS4(x,_) |
+            Instr::MovSS8(x,_) |
+            Instr::MovSS16(x,_) |
+            Instr::MovSP1(x,_,_) |
+            Instr::MovSP2(x,_,_) |
+            Instr::MovSP4(x,_,_) |
+            Instr::MovSP8(x,_,_) |
+            Instr::MovSP16(x,_,_) => Some(x),
 
-            Instr::MovPS1(_, _) |
-            Instr::MovPS2(_, _) |
-            Instr::MovPS4(_, _) |
-            Instr::MovPS8(_, _) |
-            Instr::MovPS16(_, _) |
-            Instr::SlotAddr(_, _) |
+            //Instr::OffsetPtr(x,_,_) => Some(x),
+
+            Instr::MovPS1(_,_,_) |
+            Instr::MovPS2(_,_,_) |
+            Instr::MovPS4(_,_,_) |
+            Instr::MovPS8(_,_,_) |
+            Instr::MovPS16(_,_,_) |
+            Instr::SlotAddr(_,_) | // TODO does this have a normal result?
             Instr::Jump(_) |
             Instr::JumpF(_, _) |
             Instr::JumpT(_, _) |

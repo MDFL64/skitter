@@ -17,14 +17,25 @@ fn write_unary(instr: &str, ty: &str, op: &str, source: &mut String) {
     ));
 }
 
-fn write_pointer(instr: &str, ty: &str, op: &str, source: &mut String) {
+fn read_pointer(instr: &str, ty: &str, source: &mut String) {
     source.push_str(&format!(
         "
-    Instr::{instr}(out, src) => {{
-        let x: {ty} = read_stack(stack, *src);
-        let res = {op};
+    Instr::{instr}(out, src, offset) => {{
+        let ptr: *mut u8 = read_stack(stack, *src);
+        let ptr = ptr.offset(*offset as isize) as *mut {ty};
+        let res = *ptr;
+        write_stack(stack, *out, res);
+    }}"
+    ));
+}
 
-        let ptr: *mut {ty} = read_stack(stack, *out);
+fn write_pointer(instr: &str, ty: &str, source: &mut String) {
+    source.push_str(&format!(
+        "
+    Instr::{instr}(out, src, offset) => {{
+        let res: {ty} = read_stack(stack, *src);
+        let ptr: *mut u8 = read_stack(stack, *out);
+        let ptr = ptr.offset(*offset as isize) as *mut {ty};
         *ptr = res;
     }}"
     ));
@@ -300,17 +311,17 @@ fn write_exec_match() {
     write_unary("MovSS8", "u64", "x", &mut source);
     write_unary("MovSS16", "u128", "x", &mut source);
 
-    write_unary("MovSP1", "&u8", "*x", &mut source);
-    write_unary("MovSP2", "&u16", "*x", &mut source);
-    write_unary("MovSP4", "&u32", "*x", &mut source);
-    write_unary("MovSP8", "&u64", "*x", &mut source);
-    write_unary("MovSP16", "&u128", "*x", &mut source);
+    read_pointer("MovSP1", "u8", &mut source);
+    read_pointer("MovSP2", "u16", &mut source);
+    read_pointer("MovSP4", "u32", &mut source);
+    read_pointer("MovSP8", "u64", &mut source);
+    read_pointer("MovSP16", "u128", &mut source);
 
-    write_pointer("MovPS1", "u8", "x", &mut source);
-    write_pointer("MovPS2", "u16", "x", &mut source);
-    write_pointer("MovPS4", "u32", "x", &mut source);
-    write_pointer("MovPS8", "u64", "x", &mut source);
-    write_pointer("MovPS16", "u128", "x", &mut source);
+    write_pointer("MovPS1", "u8", &mut source);
+    write_pointer("MovPS2", "u16", &mut source);
+    write_pointer("MovPS4", "u32", &mut source);
+    write_pointer("MovPS8", "u64", &mut source);
+    write_pointer("MovPS16", "u128", &mut source);
 
     //write_bulk_move_ss("MovSS4N", "u32", &mut source);
     //write_bulk_move_ps("MovPS4N", "u32", &mut source);
@@ -336,10 +347,10 @@ fn write_exec_match() {
         }
     }
     Instr::Call(base,func) => {
-        self.call(func,stack_offset + base.offset() as u32);
+        self.call(func,stack_offset + base.index() as u32);
     }
     Instr::SlotAddr(out,arg) => {
-        let res = stack.add(arg.offset()) as usize;
+        let res = stack.add(arg.index()) as usize;
         write_stack(stack, *out, res);
     }
     Instr::Return => break,

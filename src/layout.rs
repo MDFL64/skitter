@@ -91,6 +91,8 @@ impl Layout {
             offset
         }).collect();
 
+        assert_eq!(size % align,0);
+
         Layout {
             size,
             align,
