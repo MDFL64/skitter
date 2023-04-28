@@ -56,14 +56,18 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
     }
 }
 
-pub fn copy(dst: Slot, src: Slot, size: u32) -> Instr {
-    match size {
-        1  => Instr::MovSS1(dst, src),
-        2  => Instr::MovSS2(dst, src),
-        4  => Instr::MovSS4(dst, src),
-        8  => Instr::MovSS8(dst, src),
-        16 => Instr::MovSS16(dst, src),
-        _ => panic!("copy {}",size)
+pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
+    if size == 0 {
+        None
+    } else {
+        Some(match size {
+            1  => Instr::MovSS1(dst, src),
+            2  => Instr::MovSS2(dst, src),
+            4  => Instr::MovSS4(dst, src),
+            8  => Instr::MovSS8(dst, src),
+            16 => Instr::MovSS16(dst, src),
+            _ => panic!("copy {}",size)
+        })
     }
 }
 

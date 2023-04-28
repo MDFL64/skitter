@@ -135,7 +135,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 if let Some(dst_slot) = dst_slot {
                     let size = Layout::from(expr.ty).size;
 
-                    self.out_bc.push(bytecode_select::copy(dst_slot, local_slot, size));
+                    if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, size) {
+                        self.out_bc.push(instr);
+                    }
+                    
                     dst_slot
                 } else {
                     local_slot
@@ -202,7 +205,9 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                     let layout = Layout::from(self.expr_ty(*lhs));
 
-                    self.out_bc.push(bytecode_select::copy(lhs_slot, rhs_slot, layout.size));
+                    if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, layout.size) {
+                        self.out_bc.push(instr);
+                    }
                 } else {
                     panic!("nontrivial assign");
                 }
@@ -250,7 +255,9 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
                     let layout = Layout::from(expr.ty);
-                    self.out_bc.push(bytecode_select::copy(dst_slot, ret_slot, layout.size));
+                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, layout.size) {
+                        self.out_bc.push(instr);
+                    }
                     dst_slot
                 } else {
                     ret_slot
@@ -368,6 +375,15 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let offset = self.get_jump_offset(*loop_start) + 1;
                 self.out_bc.push(Instr::Jump(offset));
+
+                // the destination is (), just return a dummy value
+                dst_slot.unwrap_or(Slot::DUMMY)
+            }
+            ExprKind::Return{value} => {
+                if let Some(value) = value {
+                    self.lower_expr(*value, Some(Slot::new(0)));
+                }
+                self.out_bc.push(Instr::Return);
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
