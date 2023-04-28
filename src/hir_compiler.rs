@@ -253,20 +253,23 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::Call{ty,args,..} => {
                 let func = self.ty_to_func(*ty).expect("can't find function");
 
-                // TODO this stack layout is NOT robust, consider:
-                // f(&(x+1),&(y+1),&(z+1))
-                // we need space to store the temporaries that won't get overridden
-                // I think the old interpreter accounted for this (somehow lol)
+                let call_start_instr = self.out_bc.len();
+                for (i,arg) in args.iter().enumerate() {
+                    let arg_slot = Slot::new_arg_sub(i as u32);
+                    self.lower_expr(*arg, Some(arg_slot));
+                }
+
                 let base_slot = self.stack.align_for_call();
                 let ret_slot = self.stack.alloc(expr.ty);
                 assert_eq!(ret_slot, base_slot);
-                let arg_slots: Vec<_> = args.iter().map(|arg| {
-                    let arg_ty = self.expr_ty(*arg);
-                    self.stack.alloc(arg_ty)
-                }).collect();
 
-                for (arg, slot) in args.iter().zip(arg_slots.iter()) {
-                    self.lower_expr(*arg, Some(*slot));
+                // amend the previous code to write args into the correct slots
+                for (i,arg) in args.iter().enumerate() {
+                    let arg_ty = self.expr_ty(*arg);
+                    let arg_slot = self.stack.alloc(arg_ty);
+                    for index in call_start_instr..self.out_bc.len() {
+                        self.out_bc[index].replace_arg(i as u32, arg_slot);
+                    }
                 }
 
                 self.out_bc.push(Instr::Call(ret_slot, func));
@@ -405,19 +408,11 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            /*ExprKind::AddressOf{arg,..} => {
-                self.debug(|| "enter address");
-                let res = self.lower_expr(*arg, dst_slot);
-                self.debug(|| "exit address");
-                res
-            }*/
             ExprKind::Borrow{arg,..} | ExprKind::AddressOf{arg,..} => {
-
-                self.debug(|| format!("enter borrow"));
 
                 let place = self.expr_to_place(*arg);
 
-                let res = match place {
+                match place {
                     Place::Local(src_slot) => {
                         let dst_slot = dst_slot.unwrap_or_else(|| {
                             self.stack.alloc(expr.ty)
@@ -437,14 +432,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                             src_slot
                         }
                     }
-                };
-
-                self.debug(|| format!("exit borrow"));
-
-                res
+                }
             }
             ExprKind::Deref{arg} => {
-                self.debug(|| format!("enter deref"));
+
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr.ty)
                 });
@@ -456,7 +447,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size) {
                     self.out_bc.push(instr);
                 }
-                self.debug(|| format!("exit deref"));
+
                 dst_slot
             }
             ExprKind::Tuple{fields} => {
@@ -492,6 +483,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             // (todo) All other expressions without special handling:
             ExprKind::Block{..} |
             ExprKind::Tuple{..} |
+            ExprKind::Binary{..} |
             ExprKind::Literal{..} => {
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
