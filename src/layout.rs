@@ -6,7 +6,8 @@ use crate::abi::POINTER_SIZE;
 pub struct Layout {
     pub size: u32,
     pub align: u32,
-    pub kind: LayoutKind
+    pub kind: LayoutKind,
+    pub field_offsets: Vec<u32>
 }
 
 impl Layout {
@@ -23,9 +24,9 @@ pub enum LayoutKind {
     Int(IntSign),
     Float,
     Bool,
-    Void,
     Ref,
-    Ptr
+    Ptr,
+    Tuple
 }
 
 #[derive(Debug,Copy,Clone)]
@@ -63,14 +64,38 @@ impl Layout {
             TyKind::RawPtr(..) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ptr),
 
             TyKind::Tuple(list) => {
-                if list.len() == 0 {
-                    Layout::zero()
-                } else {
-                    println!("? {:?}",list);
-                    panic!("non-trivial tuple");
-                }
+                // should be quick if this is ()
+                Layout::compound(list.iter(),LayoutKind::Tuple)
             }
             _ => panic!("can't layout: {:?}",kind)
+        }
+    }
+
+    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind) -> Self {
+        let mut size = 0;
+        let mut align = 1;
+
+        let field_offsets = fields.map(|ty| {
+            let layout = Layout::from(ty);
+
+            // dumb
+            while (size % layout.align) != 0 {
+                size += 1;
+            }
+
+            let offset = size;
+
+            size += layout.size;
+            align = align.max(layout.align);
+
+            offset
+        }).collect();
+
+        Layout {
+            size,
+            align,
+            kind,
+            field_offsets
         }
     }
 
@@ -78,15 +103,8 @@ impl Layout {
         Self {
             size,
             align: size,
-            kind
-        }
-    }
-
-    fn zero() -> Self {
-        Self {
-            size: 0,
-            align: 1,
-            kind: LayoutKind::Void
+            kind,
+            field_offsets: Vec::new()
         }
     }
 }

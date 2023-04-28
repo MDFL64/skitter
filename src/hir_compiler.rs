@@ -130,6 +130,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::NeverToAny{source} => {
                 self.lower_expr(*source, dst_slot)
             }
+            // PLACES:
             ExprKind::VarRef{id} => {
                 let hir_id = id.0;
                 assert_eq!(hir_id.owner.def_id,self.in_func_id);
@@ -147,6 +148,12 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 } else {
                     local_slot
                 }
+            }
+            ExprKind::Field{lhs,variant_index,name} => {
+                let expr_ty = self.expr_ty(*lhs);
+                let layout = Layout::from(expr_ty);
+                println!("-> {:?}",layout);
+                panic!("= stop");
             }
             ExprKind::Literal{lit,neg} => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
