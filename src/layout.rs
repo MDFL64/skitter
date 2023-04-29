@@ -1,6 +1,7 @@
-use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy};
+use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, AdtKind};
+use rustc_abi::VariantIdx;
 
-use crate::abi::POINTER_SIZE;
+use crate::{abi::POINTER_SIZE, vm::VM};
 
 #[derive(Debug)]
 pub struct Layout {
@@ -24,9 +25,13 @@ pub enum LayoutKind {
     Int(IntSign),
     Float,
     Bool,
+
     Ref,
     Ptr,
-    Tuple
+    Tuple,
+    Struct,
+
+    Never
 }
 
 #[derive(Debug,Copy,Clone)]
@@ -36,7 +41,7 @@ pub enum IntSign {
 }
 
 impl Layout {
-    pub fn from(ty: Ty) -> Self {
+    pub fn from<'tcx>(ty: Ty<'tcx>, vm: &VM<'tcx>) -> Self {
         let kind = ty.kind();
         match kind {
             TyKind::Int(IntTy::I8) => Layout::simple(1, LayoutKind::Int(IntSign::Signed)),
@@ -60,23 +65,36 @@ impl Layout {
             TyKind::Bool => Layout::simple(1, LayoutKind::Bool),
             TyKind::Char => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
 
+            TyKind::Never => Layout::simple(0,LayoutKind::Never),
+
             TyKind::Ref(..)  => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ref),
             TyKind::RawPtr(..) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ptr),
 
             TyKind::Tuple(list) => {
                 // should be quick if this is ()
-                Layout::compound(list.iter(),LayoutKind::Tuple)
+                Layout::compound(list.iter(),LayoutKind::Tuple,vm)
+            }
+            TyKind::Adt(def,subs) => {
+                match def.adt_kind() {
+                    AdtKind::Struct => {
+                        let variant = def.variant(VariantIdx::from_u32(0));
+                        let fields = variant.fields.iter().map(|f| f.ty(vm.tcx,subs));
+                        Layout::compound(fields,LayoutKind::Struct,vm)
+                    }
+                    AdtKind::Enum => panic!("enum"),
+                    AdtKind::Union => panic!("union"),
+                }
             }
             _ => panic!("can't layout: {:?}",kind)
         }
     }
 
-    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind) -> Self {
+    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind, vm: &VM<'tcx>) -> Self {
         let mut size = 0;
         let mut align = 1;
 
         let field_offsets = fields.map(|ty| {
-            let layout = Layout::from(ty);
+            let layout = Layout::from(ty,vm);
 
             // dumb
             while (size % layout.align) != 0 {
@@ -91,7 +109,10 @@ impl Layout {
             offset
         }).collect();
 
-        assert_eq!(size % align,0);
+        // dumb
+        while (size % align) != 0 {
+            size += 1;
+        }
 
         Layout {
             size,
@@ -104,7 +125,7 @@ impl Layout {
     fn simple(size: u32, kind: LayoutKind) -> Self {
         Self {
             size,
-            align: size,
+            align: size.max(1),
             kind,
             field_offsets: Vec::new()
         }

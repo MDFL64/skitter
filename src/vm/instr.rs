@@ -507,14 +507,13 @@ impl Instr {
             Instr::MovSP8(x,_,_) |
             Instr::MovSP16(x,_,_) => Some(x),
 
-            //Instr::OffsetPtr(x,_,_) => Some(x),
+            Instr::SlotAddr(x,_) => Some(x),
 
             Instr::MovPS1(_,_,_) |
             Instr::MovPS2(_,_,_) |
             Instr::MovPS4(_,_,_) |
             Instr::MovPS8(_,_,_) |
             Instr::MovPS16(_,_,_) |
-            Instr::SlotAddr(_,_) | // TODO does this have a normal result?
             Instr::Jump(_) |
             Instr::JumpF(_, _) |
             Instr::JumpT(_, _) |

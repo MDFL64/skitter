@@ -291,9 +291,7 @@ pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) 
     (ctor,swap)
 }
 
-pub fn cast<'tcx>(arg_ty: Ty<'tcx>, res_ty: Ty<'tcx>) -> fn(Slot,Slot) -> Instr {
-    let arg_layout = Layout::from(arg_ty);
-    let res_layout = Layout::from(res_ty);
+pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> Instr {
 
     match (&arg_layout.kind,&res_layout.kind) {
         (LayoutKind::Int(_),LayoutKind::Int(_)) |

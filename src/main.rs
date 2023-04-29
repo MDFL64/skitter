@@ -14,6 +14,7 @@ extern crate rustc_middle;
 extern crate rustc_feature;
 extern crate rustc_mir_dataflow;
 extern crate rustc_ast;
+extern crate rustc_abi;
 
 mod vm;
 //mod mir_compiler;
