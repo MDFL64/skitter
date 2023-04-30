@@ -10,6 +10,7 @@ pub fn test(dir_name: &str) -> ! {
     let bin_name = Path::new("/tmp/skitter_test_1");
     let mut count_success = 0;
     let count_total = test_files.len();
+    let mut time_skitter_total: Duration = Default::default();
     for file in test_files {
         let res = run_test(&file, bin_name);
         let res_str: String = match res {
@@ -25,15 +26,17 @@ pub fn test(dir_name: &str) -> ! {
                     percent.yellow()
                 };
 
+                time_skitter_total += res.time_skitter;
+
                 format!("{} {} ({:?} / {:?})", "GOOD:".green(), speedup_str, res.time_skitter, res.time_rustc)
             }
         };
 
         println!("{:40} {}", file.to_str().unwrap(), res_str);
-        //println!();
     }
-
+    
     println!("=> {} / {} tests passed", count_success, count_total);
+    println!("=> skitter took {:?} total", time_skitter_total);
 
     std::process::exit(0)
 }

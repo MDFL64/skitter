@@ -32,6 +32,11 @@ use rustc_hir::def_id::LocalDefId;
 
 use clap::Parser;
 
+// doesn't seem to make a huge difference, todo more tests
+//use mimalloc::MiMalloc;
+//#[global_allocator]
+//static GLOBAL: MiMalloc = MiMalloc;
+
 fn main() {
     
     let args = cli::CliArgs::parse();

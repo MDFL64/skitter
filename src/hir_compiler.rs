@@ -594,13 +594,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     fn ty_to_func(&self, ty: Ty<'tcx>) -> Option<Arc<Function<'tcx>>> {
         match ty.kind() {
             TyKind::FnDef(func_id,subs) => {
-                if func_id.krate != rustc_hir::def_id::LOCAL_CRATE {
-                    panic!("non-local call {:?} {:?}",func_id,subs);
-                }
-                
-                let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: func_id.index };
-
-                let func = self.vm.get_func(local_id, subs);
+                let func = self.vm.get_func(*func_id, subs);
                 Some(func)
             }
             _ => None

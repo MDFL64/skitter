@@ -1,4 +1,4 @@
-use rustc_hir::def_id::LocalDefId;
+use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::WithOptConstParam;
 use rustc_middle::ty::SubstsRef;
@@ -13,7 +13,7 @@ use super::instr::Instr;
 pub struct VM<'tcx> {
     pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
-    functions: Mutex<HashMap<(LocalDefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
+    functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     pub is_verbose: bool
 }
 
@@ -29,20 +29,24 @@ impl<'tcx> VM<'tcx> {
         }
     }
 
-    pub fn get_func(&self, def_id: LocalDefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
+    pub fn get_func(&self, def_id: DefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
         let mut functions = self.functions.lock().unwrap();
         functions.entry((def_id,subs)).or_insert_with(|| {
             let mut res = Function::new(def_id,subs);
 
-            let path = self.tcx.hir().def_path(def_id).to_string_no_crate_verbose();
-            if path.starts_with("::_builtin::") {
-                match path.as_str() {
-                    "::_builtin::print_int" => res.native = Some(builtin_print_int),
-                    "::_builtin::print_uint" => res.native = Some(builtin_print_uint),
-                    "::_builtin::print_float" => res.native = Some(builtin_print_float),
-                    "::_builtin::print_bool" => res.native = Some(builtin_print_bool),
-                    "::_builtin::print_char" => res.native = Some(builtin_print_char),
-                    _ => panic!("unknown builtin {}",path)
+            // builtin hack
+            if def_id.krate == rustc_hir::def_id::LOCAL_CRATE {
+                let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: def_id.index };
+                let path = self.tcx.hir().def_path(local_id).to_string_no_crate_verbose();
+                if path.starts_with("::_builtin::") {
+                    match path.as_str() {
+                        "::_builtin::print_int" => res.native = Some(builtin_print_int),
+                        "::_builtin::print_uint" => res.native = Some(builtin_print_uint),
+                        "::_builtin::print_float" => res.native = Some(builtin_print_float),
+                        "::_builtin::print_bool" => res.native = Some(builtin_print_bool),
+                        "::_builtin::print_char" => res.native = Some(builtin_print_char),
+                        _ => panic!("unknown builtin {}",path)
+                    }
                 }
             }
 
@@ -106,14 +110,14 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
 }
 
 pub struct Function<'tcx> {
-    pub def_id: LocalDefId,
+    pub def_id: DefId,
     pub subs: SubstsRef<'tcx>,
     pub native: Option<unsafe fn(*mut u8)>,
     pub bytecode: OnceLock<Vec<Instr<'tcx>>>
 }
 
 impl<'tcx> Function<'tcx> {
-    fn new(def_id: LocalDefId, subs: SubstsRef<'tcx>) -> Self {
+    fn new(def_id: DefId, subs: SubstsRef<'tcx>) -> Self {
         Function {
             def_id,
             subs,
