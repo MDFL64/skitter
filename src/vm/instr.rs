@@ -251,6 +251,7 @@ pub enum Instr<'tcx> {
     MovSS4(Slot, Slot),
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
+    MovSSN(Slot, Slot, u32),
 
     MovSP1(Slot, Slot, i32),
     MovSP2(Slot, Slot, i32),
@@ -501,6 +502,8 @@ impl<'tcx> Instr<'tcx> {
             Instr::MovSS4(x,_) |
             Instr::MovSS8(x,_) |
             Instr::MovSS16(x,_) |
+            Instr::MovSSN(x,_,_) |
+
             Instr::MovSP1(x,_,_) |
             Instr::MovSP2(x,_,_) |
             Instr::MovSP4(x,_,_) |

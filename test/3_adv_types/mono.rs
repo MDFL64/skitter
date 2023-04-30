@@ -10,7 +10,7 @@ fn pick<T>(s: bool, x: T, y: T) -> T {
 
 struct S<T>(T);
 
-impl<T> S<T> {
+impl<T: Copy> S<T> {
     fn new(x: T) -> Self {
         Self(x)
     }

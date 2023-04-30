@@ -64,9 +64,23 @@ impl<'tcx> VM<'tcx> {
         let bc = func.bytecode.get_or_init(|| {
             //let mir = self.tcx.mir_built(WithOptConstParam::unknown(func.def_id)).borrow();
             //MirCompiler::compile(self, &mir)
-            let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(func.def_id)).expect("type check failed");
+
+            // resolve trait methods to a specific instance
+            let resolve_arg = rustc_middle::ty::ParamEnv::reveal_all().and((func.def_id.into(),func.subs));
+            let resolved = self.tcx.resolve_instance(resolve_arg).unwrap().unwrap();
+
+            let resolve_id = resolved.def_id();
+            let resolve_subs = resolved.substs;
+
+            if resolve_id.krate != rustc_hir::def_id::LOCAL_CRATE {
+                panic!("non-local call {:?} {:?}",resolve_id,resolve_subs);
+            }
+            
+            let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: resolve_id.index };
+
+            let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(local_id)).expect("type check failed");
             let thir_body = thir_body.borrow();
-            HirCompiler::compile(self,func.def_id,func.subs,&thir_body,root_expr)
+            HirCompiler::compile(self,local_id,resolve_subs,&thir_body,root_expr)
         });
 
         // run

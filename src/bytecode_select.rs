@@ -66,7 +66,7 @@ pub fn copy<'tcx>(dst: Slot, src: Slot, size: u32) -> Option<Instr<'tcx>> {
             4  => Instr::MovSS4(dst, src),
             8  => Instr::MovSS8(dst, src),
             16 => Instr::MovSS16(dst, src),
-            _ => panic!("copy {}",size)
+            _ => Instr::MovSSN(dst, src, size)
         })
     }
 }
@@ -81,7 +81,7 @@ pub fn copy_from_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Opti
             4  => Instr::MovSP4(dst, src, offset),
             8  => Instr::MovSP8(dst, src, offset),
             16 => Instr::MovSP16(dst, src, offset),
-            _ => panic!("copy {}",size)
+            _ => panic!("copy from ptr {}",size)
         })
     }
 }
@@ -96,7 +96,7 @@ pub fn copy_to_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option
             4  => Instr::MovPS4(dst, src, offset),
             8  => Instr::MovPS8(dst, src, offset),
             16 => Instr::MovPS16(dst, src, offset),
-            _ => panic!("copy {}",size)
+            _ => panic!("copy to ptr {}",size)
         })
     }
 }
