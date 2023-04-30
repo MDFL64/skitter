@@ -302,7 +302,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Call{ty,args,..} => {
-                let func = self.ty_to_func(*ty).expect("can't find function");
+                let ty = self.apply_subs(*ty);
+                let func = self.ty_to_func(ty).expect("can't find function");
 
                 let call_start_instr = self.out_bc.len();
                 for (i,arg) in args.iter().enumerate() {
