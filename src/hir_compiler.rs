@@ -2,23 +2,22 @@ use std::sync::Arc;
 
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
-use crate::layout::Layout;
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
 use rustc_middle::ty::{Ty, TyKind};
+use rustc_middle::ty::SubstsRef;
 use rustc_middle::thir::{self, Thir, ExprId, ExprKind, StmtId, StmtKind, BlockId, Pat, PatKind, LogicalOp};
 
 use rustc_hir::hir_id::ItemLocalId;
 use rustc_hir::def_id::LocalDefId;
 
 pub struct HirCompiler<'a,'tcx> {
-    //mir: mir::Body<'tcx>,
-    //tcx: TyCtxt<'tcx>,
     in_func_id: LocalDefId,
+    in_func_subs: SubstsRef<'tcx>,
     in_func: &'a Thir<'tcx>,
-    out_bc: Vec<vm::instr::Instr>,
+    out_bc: Vec<vm::instr::Instr<'tcx>>,
     vm: &'a vm::VM<'tcx>,
     stack: CompilerStack,
     locals: Vec<(ItemLocalId,Slot)>,
@@ -28,10 +27,11 @@ pub struct HirCompiler<'a,'tcx> {
 }
 
 impl<'a,'tcx> HirCompiler<'a,'tcx> {
-    pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func: &'a Thir<'tcx>, root_expr: ExprId) -> Vec<vm::instr::Instr> {
+    pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func_subs: SubstsRef<'tcx>, in_func: &'a Thir<'tcx>, root_expr: ExprId) -> Vec<vm::instr::Instr<'tcx>> {
 
         let mut compiler = HirCompiler {
             in_func_id,
+            in_func_subs,
             in_func,
             out_bc: Vec::new(),
             vm,
@@ -48,7 +48,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             }
             _ => panic!("const not supported")
         };
-        let out_layout = Layout::from(out_ty,vm);
+
+        let out_ty = compiler.apply_subs(out_ty);
+        let out_layout = crate::layout::Layout::from(out_ty,vm);
+
         let ret_slot = compiler.stack.alloc(&out_layout);
         assert_eq!(ret_slot.index(),0);
         for param in &in_func.params {
@@ -135,7 +138,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             // PLACES:
             ExprKind::VarRef{..} |
             ExprKind::Field{..} => {
-                let size = Layout::from(expr.ty,self.vm).size;
+                let size = expr_layout.size;
 
                 match self.expr_to_place(id) {
                     Place::Local(local_slot) => {
@@ -204,10 +207,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
-
-                let layout = Layout::from(expr.ty,self.vm);
                 
-                self.out_bc.push(bytecode_select::literal(&lit.node, layout.size, dst_slot, *neg));
+                self.out_bc.push(bytecode_select::literal(&lit.node, expr_layout.size, dst_slot, *neg));
                 dst_slot
             }
             ExprKind::Unary{op, arg} => {
@@ -217,7 +218,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let arg_slot = self.lower_expr(*arg, None);
 
-                let layout = Layout::from(self.expr_ty(*arg),self.vm);
+                let layout = self.expr_layout(*arg);
 
                 let ctor = bytecode_select::unary(*op, &layout);
                 self.out_bc.push(ctor(dst_slot,arg_slot));
@@ -245,7 +246,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let lhs_slot = self.lower_expr(*lhs, None);
                 let rhs_slot = self.lower_expr(*rhs, None);
 
-                let layout = Layout::from(self.expr_ty(*lhs),self.vm);
+                let layout = self.expr_layout(*lhs);
 
                 let (ctor,swap) = bytecode_select::binary(*op, &layout);
                 if swap {
@@ -258,7 +259,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::Assign{lhs, rhs} => {
                 let rhs_slot = self.lower_expr(*rhs, None);
 
-                let layout = Layout::from(self.expr_ty(*lhs),self.vm);
+                let layout = self.expr_layout(*lhs);
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(lhs_slot) => {
@@ -279,7 +280,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::AssignOp{op,lhs,rhs} => {
                 let rhs_slot = self.lower_expr(*rhs, None);
 
-                let layout = Layout::from(self.expr_ty(*lhs),self.vm);
+                let layout = self.expr_layout(*lhs);
                 
                 let (ctor,swap) = bytecode_select::binary(*op, &layout);
                 assert!(!swap);
@@ -324,8 +325,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
-                    let layout = Layout::from(expr.ty,self.vm);
-                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, layout.size) {
+                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_layout.size) {
                         self.out_bc.push(instr);
                     }
                     dst_slot
@@ -492,7 +492,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let ptr = self.lower_expr(*arg, None);
 
-                let size = Layout::from(expr.ty,self.vm).size;
+                let size = expr_layout.size;
 
                 if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size, 0) {
                     self.out_bc.push(instr);
@@ -554,8 +554,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 assert!(variant_index.index() == 0);
 
-                let lhs_ty = self.expr_ty(*lhs);
-                let layout = Layout::from(lhs_ty,self.vm);
+                let layout = self.expr_layout(*lhs);
                 let field_offset = layout.field_offsets[name.index()];
 
                 match self.expr_to_place(*lhs) {
@@ -580,27 +579,27 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         }
     }
 
-    fn expr_ty(&self, id: ExprId) -> Ty<'tcx> {
-        self.in_func.exprs[id].ty
+    fn apply_subs(&self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        let binder = rustc_middle::ty::subst::EarlyBinder(ty);
+        binder.subst(self.vm.tcx,self.in_func_subs)
     }
 
-    fn expr_layout(&self, id: ExprId) -> Layout {
-        let ty = self.expr_ty(id);
-        Layout::from(ty, self.vm)
+    fn expr_layout(&self, id: ExprId) -> crate::layout::Layout {
+        let ty = self.in_func.exprs[id].ty;
+        let ty = self.apply_subs(ty);
+        crate::layout::Layout::from(ty, self.vm)
     }
 
-    fn ty_to_func(&self, ty: Ty<'tcx>) -> Option<Arc<Function>> {
+    fn ty_to_func(&self, ty: Ty<'tcx>) -> Option<Arc<Function<'tcx>>> {
         match ty.kind() {
             TyKind::FnDef(func_id,subs) => {
-                assert_eq!(subs.len(),0);
-    
                 if func_id.krate != rustc_hir::def_id::LOCAL_CRATE {
-                    panic!("non-local call");
+                    panic!("non-local call {:?} {:?}",func_id,subs);
                 }
-    
+                
                 let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: func_id.index };
 
-                let func = self.vm.get_func(local_id);
+                let func = self.vm.get_func(local_id, subs);
                 Some(func)
             }
             _ => None
@@ -620,8 +619,9 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let var_id = hir_id.local_id;
 
                 assert!(subpattern.is_none());
-
-                let layout = Layout::from(*ty, self.vm);
+                
+                let ty = self.apply_subs(*ty);
+                let layout = crate::layout::Layout::from(ty, self.vm);
 
                 let slot = self.stack.alloc(&layout);
                 self.locals.push((var_id,slot));
@@ -665,7 +665,7 @@ struct CompilerStack {
 }
 
 impl CompilerStack {
-    fn alloc(&mut self, layout: &Layout) -> Slot {
+    fn alloc(&mut self, layout: &crate::layout::Layout) -> Slot {
 
         self.align(layout.align);
         

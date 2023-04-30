@@ -1,6 +1,7 @@
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::ty::TyCtxt;
 use rustc_middle::ty::WithOptConstParam;
+use rustc_middle::ty::SubstsRef;
 
 use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
@@ -12,9 +13,10 @@ use super::instr::Instr;
 pub struct VM<'tcx> {
     pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
-    functions: Mutex<HashMap<LocalDefId,Arc<Function>>>,
+    functions: Mutex<HashMap<(LocalDefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     pub is_verbose: bool
 }
+
 
 impl<'tcx> VM<'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
@@ -27,10 +29,10 @@ impl<'tcx> VM<'tcx> {
         }
     }
 
-    pub fn get_func(&self, def_id: LocalDefId) -> Arc<Function> {
+    pub fn get_func(&self, def_id: LocalDefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
         let mut functions = self.functions.lock().unwrap();
-        functions.entry(def_id).or_insert_with(|| {
-            let mut res = Function::new(def_id);
+        functions.entry((def_id,subs)).or_insert_with(|| {
+            let mut res = Function::new(def_id,subs);
 
             let path = self.tcx.hir().def_path(def_id).to_string_no_crate_verbose();
             if path.starts_with("::_builtin::") {
@@ -48,7 +50,7 @@ impl<'tcx> VM<'tcx> {
         }).clone()
     }
 
-    pub fn call(&self, func: &Function, stack_offset: u32) {
+    pub fn call(&self, func: &Function<'tcx>, stack_offset: u32) {
 
         if let Some(native) = func.native {
             unsafe {
@@ -64,7 +66,7 @@ impl<'tcx> VM<'tcx> {
             //MirCompiler::compile(self, &mir)
             let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(func.def_id)).expect("type check failed");
             let thir_body = thir_body.borrow();
-            HirCompiler::compile(self,func.def_id,&thir_body,root_expr)
+            HirCompiler::compile(self,func.def_id,func.subs,&thir_body,root_expr)
         });
 
         // run
@@ -89,25 +91,30 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
     *(base.add(slot.index()) as *mut _)
 }
 
-pub struct Function {
+pub struct Function<'tcx> {
     pub def_id: LocalDefId,
+    pub subs: SubstsRef<'tcx>,
     pub native: Option<unsafe fn(*mut u8)>,
-    pub bytecode: OnceLock<Vec<Instr>>
+    pub bytecode: OnceLock<Vec<Instr<'tcx>>>
 }
 
-impl Function {
-    fn new(def_id: LocalDefId) -> Self {
+impl<'tcx> Function<'tcx> {
+    fn new(def_id: LocalDefId, subs: SubstsRef<'tcx>) -> Self {
         Function {
             def_id,
+            subs,
             native: None,
             bytecode: Default::default()
         }
     }
 }
 
-impl std::fmt::Debug for Function {
+impl<'tcx> std::fmt::Debug for Function<'tcx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Function").field("def_id", &self.def_id).finish()
+        f.debug_struct("Function")
+            .field("def_id", &self.def_id)
+            .field("subs", &self.subs)
+            .finish()
     }
 }
 

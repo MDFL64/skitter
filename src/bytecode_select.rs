@@ -56,7 +56,7 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
     }
 }
 
-pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
+pub fn copy<'tcx>(dst: Slot, src: Slot, size: u32) -> Option<Instr<'tcx>> {
     if size == 0 {
         None
     } else {
@@ -71,7 +71,7 @@ pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
     }
 }
 
-pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
+pub fn copy_from_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'tcx>> {
     if size == 0 {
         None
     } else {
@@ -86,7 +86,7 @@ pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Ins
     }
 }
 
-pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
+pub fn copy_to_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'tcx>> {
     if size == 0 {
         None
     } else {
@@ -101,7 +101,7 @@ pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr
     }
 }
 
-pub fn unary(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr {
+pub fn unary<'tcx>(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
     match (op,&layout.kind,layout.size) {
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_Neg,
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_Neg,
@@ -124,7 +124,7 @@ pub fn unary(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr {
     }
 }
 
-pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) {
+pub fn binary<'tcx>(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr<'tcx>,bool) {
 
     let mut swap = false;
     let ctor = match (op,&layout.kind,layout.size) {
@@ -291,7 +291,7 @@ pub fn binary(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr,bool) 
     (ctor,swap)
 }
 
-pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> Instr {
+pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
 
     match (&arg_layout.kind,&res_layout.kind) {
         (LayoutKind::Int(_),LayoutKind::Int(_)) |

@@ -21,14 +21,3 @@ fn main() {
         _builtin::print_int(*tuple.1);
     }
 }
-
-/* TODO
-
-    propagation tests, such as:
-    let x: (&i32,&i32) = if meme() {
-        (&mut b,&mut a)
-    } else {
-        (&mut a,&mut b)
-    };
-
-*/

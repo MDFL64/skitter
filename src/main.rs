@@ -94,8 +94,9 @@ fn main() {
                 vm.is_verbose = args.verbose;
 
                 let main_did = find_main(tcx).expect("no main");
+                let main_subs = tcx.mk_substs(&[]);
 
-                let func = vm.get_func(main_did.into());
+                let func = vm.get_func(main_did.into(),main_subs);
                 vm.call(&func,0);
             })
         });

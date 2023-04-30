@@ -31,7 +31,7 @@ impl Slot {
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u16)]
-pub enum Instr {
+pub enum Instr<'tcx> {
     I8_Const(Slot, i8),
     I8_Neg(Slot, Slot),
     I8_Not(Slot, Slot),
@@ -271,14 +271,14 @@ pub enum Instr {
     JumpF(i32, Slot),
     JumpT(i32, Slot),
 
-    Call(Slot, Arc<Function>),
+    Call(Slot, Arc<Function<'tcx>>),
 
     Return,
     Bad,
     Debug(Box<String>)
 }
 
-impl Instr {
+impl<'tcx> Instr<'tcx> {
     pub fn replace_arg(&mut self, id: u32, new_slot: Slot) {
         let slot = Slot::new_arg_sub(id);
         if let Some(res) = self.get_result() {
