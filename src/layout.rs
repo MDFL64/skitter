@@ -30,6 +30,7 @@ pub enum LayoutKind {
     Ptr,
     Tuple,
     Struct,
+    Array{elem_size: u32, elem_count: u32},
 
     Never
 }
@@ -83,6 +84,22 @@ impl Layout {
                     }
                     AdtKind::Enum => panic!("enum"),
                     AdtKind::Union => panic!("union"),
+                }
+            }
+            TyKind::Array(elem_ty,count) => {
+                let param_env = rustc_middle::ty::ParamEnv::reveal_all();
+                let count = count.eval_target_usize(vm.tcx, param_env) as u32;
+
+                let elem_layout = Layout::from(*elem_ty,vm);
+
+                Layout {
+                    size: elem_layout.size * count,
+                    align: elem_layout.align,
+                    kind: LayoutKind::Array{
+                        elem_size: elem_layout.size,
+                        elem_count: count
+                    },
+                    field_offsets: Vec::new()
                 }
             }
             _ => panic!("can't layout: {:?}",kind)

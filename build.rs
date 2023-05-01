@@ -355,6 +355,26 @@ fn write_exec_match() {
         let res = stack.add(arg.index()) as usize;
         write_stack(stack, *out, res);
     }
+    Instr::SlotAddrOffset{out,arg,offset} => {
+        let offset: usize = read_stack(stack, *offset);
+        let res = stack.add(arg.index()) as usize + offset;
+        write_stack(stack, *out, res);
+    }
+    Instr::PointerOffset(arg_out,arg_2,offset_n) => {
+        let offset_1: usize = read_stack(stack, *arg_out);
+        let offset_2: usize = read_stack(stack, *arg_2);
+
+        let res = offset_1 + offset_2 + *offset_n as usize;
+        write_stack(stack, *arg_out, res);
+    }
+    Instr::IndexCalc { arg_out, elem_size, elem_count } => {
+        let index: usize = read_stack(stack, *arg_out);
+        if index >= *elem_count as usize {
+            panic!("array index out of bounds");
+        }
+        let offset = index * *elem_size as usize;
+        write_stack(stack, *arg_out, offset);
+    }
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),

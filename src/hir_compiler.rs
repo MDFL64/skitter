@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
+use crate::layout::LayoutKind;
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -137,7 +138,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             }
             // PLACES:
             ExprKind::VarRef{..} |
-            ExprKind::Field{..} => {
+            ExprKind::Field{..} |
+            ExprKind::Index{..} => {
                 let size = expr_layout.size;
 
                 match self.expr_to_place(id) {
@@ -165,44 +167,6 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     }
                 }
             }
-            /*ExprKind::VarRef{id} => {
-                let hir_id = id.0;
-                assert_eq!(hir_id.owner.def_id,self.in_func_id);
-
-                let local_slot = self.find_local(hir_id.local_id);
-
-                if let Some(dst_slot) = dst_slot {
-                    let size = Layout::from(expr.ty).size;
-
-                    if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, size) {
-                        self.out_bc.push(instr);
-                    }
-                    
-                    dst_slot
-                } else {
-                    local_slot
-                }
-            }
-            ExprKind::Field{lhs,variant_index,name} => {
-
-                let lhs_ty = self.expr_ty(*lhs);
-                let layout = Layout::from(lhs_ty);
-                let field_offset = layout.field_offsets[name.index()];
-
-                match self.expr_to_place(*lhs) {
-                    Place::Local(base_slot) => {
-                        let slot = base_slot.offset_by(field_offset);
-                        panic!("--- {:?}",slot);
-                    }
-                    Place::Ptr(ptr_slot, offset) => {
-                        panic!("todo ptr");
-                    }
-                }
-
-                //let name: () = name.index();
-                //println!("-> {:?}",layout);
-                //panic!("= stop");
-            }*/
             ExprKind::Literal{lit,neg} => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
@@ -521,6 +485,22 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 dst_slot
             }
+            ExprKind::Array{fields} => {
+                let LayoutKind::Array{elem_size,..} = expr_layout.kind else {
+                    panic!("bad array layout");
+                };
+
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(&expr_layout)
+                });
+
+                for (i,field) in fields.iter().enumerate() {
+                    let field_slot = dst_slot.offset_by(i as u32 * elem_size);
+                    self.lower_expr(*field, Some(field_slot));
+                }
+
+                dst_slot
+            }
             ExprKind::Adt(adt) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
@@ -573,6 +553,32 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                         Place::Ptr(ptr_slot, offset + field_offset as i32)
                     }
                 }
+            }
+            ExprKind::Index{lhs,index} => {
+
+                let layout = self.expr_layout(*lhs);
+                let LayoutKind::Array{elem_size,elem_count} = layout.kind else {
+                    panic!("bad array layout");
+                };
+
+                let index_layout = self.expr_layout(*index);
+                assert!(index_layout.size == POINTER_SIZE.bytes());
+
+                // this index slot is re-used for the resulting pointer
+                let index_slot = self.stack.alloc(&index_layout);
+                self.lower_expr(*index, Some(index_slot));
+                self.out_bc.push(Instr::IndexCalc { arg_out: index_slot, elem_size, elem_count });
+
+                match self.expr_to_place(*lhs) {
+                    Place::Local(base_slot) => {
+                        self.out_bc.push(Instr::SlotAddrOffset{ out: index_slot, arg: base_slot, offset: index_slot });
+                    }
+                    Place::Ptr(ptr_slot, offset) => {
+                        self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, offset));
+                    }
+                }
+
+                Place::Ptr(index_slot,0)
             }
             // (todo) All other expressions without special handling:
             ExprKind::Block{..} |
