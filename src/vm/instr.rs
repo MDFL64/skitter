@@ -15,8 +15,16 @@ impl Slot {
         Self(id)
     }
 
-    pub fn new_arg_sub(id: u32) -> Self {
+    pub fn new_frame_sub(id: u32) -> Self {
         Self(id + Self::SUB_OFFSET)
+    }
+
+    pub fn get_frame_sub(&self) -> Option<u32> {
+        if self.0 >= Self::SUB_OFFSET {
+            Some(self.0 - Self::SUB_OFFSET)
+        } else {
+            None
+        }
     }
 
     pub fn index(&self) -> usize {
@@ -280,11 +288,10 @@ pub enum Instr<'tcx> {
 }
 
 impl<'tcx> Instr<'tcx> {
-    pub fn replace_arg(&mut self, id: u32, new_slot: Slot) {
-        let slot = Slot::new_arg_sub(id);
+    pub fn replace_arg_sub(&mut self, call_slot: Slot) {
         if let Some(res) = self.get_result() {
-            if *res == slot {
-                *res = new_slot;
+            if let Some(offset) = res.get_frame_sub() {
+                *res = call_slot.offset_by(offset);
             }
         };
     }

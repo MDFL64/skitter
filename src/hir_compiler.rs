@@ -306,22 +306,29 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let func = self.ty_to_func(ty).expect("can't find function");
 
                 let call_start_instr = self.out_bc.len();
-                for (i,arg) in args.iter().enumerate() {
-                    let arg_slot = Slot::new_arg_sub(i as u32);
+                
+                // evaluate arguments and write them to a virtual call frame
+                let mut call_frame = CallFrame::default();
+                call_frame.alloc(&expr_layout);
+                for arg in args.iter() {
+                    let arg_layout = self.expr_layout(*arg);
+                    let arg_slot = call_frame.alloc(&arg_layout);
                     self.lower_expr(*arg, Some(arg_slot));
                 }
 
+                // set up real call frame
                 let base_slot = self.stack.align_for_call();
                 let ret_slot = self.stack.alloc(&expr_layout);
                 assert_eq!(ret_slot, base_slot);
 
-                // amend the previous code to write args into the correct slots
-                for (i,arg) in args.iter().enumerate() {
+                for arg in args.iter() {
                     let arg_layout = self.expr_layout(*arg);
-                    let arg_slot = self.stack.alloc(&arg_layout);
-                    for index in call_start_instr..self.out_bc.len() {
-                        self.out_bc[index].replace_arg(i as u32, arg_slot);
-                    }
+                    self.stack.alloc(&arg_layout);
+                }                    
+
+                // amend the previous code to write args into the correct slots
+                for index in call_start_instr..self.out_bc.len() {
+                    self.out_bc[index].replace_arg_sub(base_slot);
                 }
 
                 self.out_bc.push(Instr::Call(ret_slot, func));
@@ -672,20 +679,44 @@ impl CompilerStack {
         Slot::new(base)
     }
 
-    fn align_for_call(&mut self) -> Slot {
-        self.align(16);
+    fn top(&self) -> Slot {
         Slot::new(self.top)
     }
 
-    fn align(&mut self, n: u32) {
-        // todo there is 100% a better way to do this
-        while (self.top % n) != 0 {
-            self.top += 1;
-        }
+    fn align(&mut self, align: u32) {
+        self.top = crate::layout::Layout::align(self.top,align);
+    }
+
+    fn align_for_call(&mut self) -> Slot {
+        self.align(16);
+        Slot::new(self.top)
     }
 }
 
 struct StackEntry {
     base: u32,
     size: u32
+}
+
+// A simplified callstack for 
+#[derive(Default)]
+struct CallFrame {
+    top: u32
+}
+
+impl CallFrame {
+    fn alloc(&mut self, layout: &crate::layout::Layout) -> Slot {
+
+        self.align(layout.align);
+        
+        let base = self.top;
+        let size = layout.size;
+
+        self.top += size;
+        Slot::new_frame_sub(base)
+    }
+
+    fn align(&mut self, align: u32) {
+        self.top = crate::layout::Layout::align(self.top,align);
+    }
 }

@@ -89,6 +89,11 @@ impl Layout {
         }
     }
 
+    pub fn align(x: u32, align: u32) -> u32 {
+        let mask = align - 1;
+        (x + mask) & !mask
+    }
+
     fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind, vm: &VM<'tcx>) -> Self {
         let mut size = 0;
         let mut align = 1;
@@ -96,10 +101,7 @@ impl Layout {
         let field_offsets = fields.map(|ty| {
             let layout = Layout::from(ty,vm);
 
-            // dumb
-            while (size % layout.align) != 0 {
-                size += 1;
-            }
+            size = Self::align(size, align);
 
             let offset = size;
 
