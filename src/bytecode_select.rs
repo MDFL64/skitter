@@ -15,14 +15,8 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
             if neg {
                 n = -n;
             }
-            match size {
-                1  => Instr::I8_Const(slot, n as i8),
-                2  => Instr::I16_Const(slot, n as i16),
-                4  => Instr::I32_Const(slot, n as i32),
-                8  => Instr::I64_Const(slot, n as i64),
-                16 => Instr::I128_Const(slot, Box::new(n)),
-                _ => panic!("int size {}",size)
-            }
+
+            literal_raw(n,size,slot)
         }
         LitKind::Float(sym,_) => {
             match size {
@@ -53,6 +47,17 @@ pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
             Instr::I8_Const(slot, *b as i8)
         }
         _ => panic!("pick literal {:?}",lit)
+    }
+}
+
+pub fn literal_raw<'tcx>(n: i128, size: u32, slot: Slot) -> Instr<'tcx> {
+    match size {
+        1  => Instr::I8_Const(slot, n as i8),
+        2  => Instr::I16_Const(slot, n as i16),
+        4  => Instr::I32_Const(slot, n as i32),
+        8  => Instr::I64_Const(slot, n as i64),
+        16 => Instr::I128_Const(slot, Box::new(n)),
+        _ => panic!("int size {}",size)
     }
 }
 
@@ -102,7 +107,7 @@ pub fn copy_to_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option
 }
 
 pub fn unary<'tcx>(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
-    match (op,&layout.kind,layout.size) {
+    match (op,&layout.kind,layout.assert_size()) {
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_Neg,
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_Neg,
         (UnOp::Neg,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_Neg,
@@ -120,14 +125,14 @@ pub fn unary<'tcx>(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
 
         (UnOp::Not,LayoutKind::Bool,1) => Instr::Bool_Not,
 
-        _ => panic!("no unary op: {:?} {:?} {:?}",op,&layout.kind,layout.size)
+        _ => panic!("no unary op: {:?} {:?} {:?}",op,&layout.kind,layout.assert_size())
     }
 }
 
 pub fn binary<'tcx>(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr<'tcx>,bool) {
 
     let mut swap = false;
-    let ctor = match (op,&layout.kind,layout.size) {
+    let ctor = match (op,&layout.kind,layout.assert_size()) {
 
         (BinOp::Eq,LayoutKind::Int(_),1) => Instr::I8_Eq,
         (BinOp::Eq,LayoutKind::Int(_),2) => Instr::I16_Eq,
@@ -285,7 +290,7 @@ pub fn binary<'tcx>(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr<
         (BinOp::BitAnd,LayoutKind::Bool,1) => Instr::I8_And,
         (BinOp::BitXor,LayoutKind::Bool,1) => Instr::I8_Xor,
 
-        _ => panic!("no binary op: {:?} {:?} {:?}",&layout.kind,layout.size,op)
+        _ => panic!("no binary op: {:?} {:?} {:?}",&layout.kind,layout.assert_size(),op)
     };
 
     (ctor,swap)
@@ -301,17 +306,17 @@ pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> 
             
             let sign = arg_layout.sign();
 
-            if arg_layout.size >= res_layout.size {
-                match res_layout.size {
+            if arg_layout.assert_size() >= res_layout.assert_size() {
+                match res_layout.assert_size() {
                     1 => Instr::MovSS1,
                     2 => Instr::MovSS2,
                     4 => Instr::MovSS4,
                     8 => Instr::MovSS8,
                     16 => Instr::MovSS16,
-                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
                 }
             } else {
-                match (arg_layout.size,res_layout.size,sign) {
+                match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
                     (1,2,IntSign::Signed) => Instr::I16_S_Widen_8,
                     (1,2,IntSign::Unsigned) => Instr::I16_U_Widen_8,
 
@@ -336,20 +341,20 @@ pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> 
                     (1,16,IntSign::Signed) => Instr::I128_S_Widen_8,
                     (1,16,IntSign::Unsigned) => Instr::I128_U_Widen_8,
 
-                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
                 }
             }
         }
         (LayoutKind::Float,LayoutKind::Float) => {
-            match (arg_layout.size,res_layout.size) {
+            match (arg_layout.assert_size(),res_layout.assert_size()) {
                 (4,8) => Instr::F64_From_F32,
                 (8,4) => Instr::F32_From_F64,
-                _ => panic!("no float2float cast for: {:?} {:?}",arg_layout.size,res_layout.size)
+                _ => panic!("no float2float cast for: {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size())
             }
         }
         (LayoutKind::Int(_),LayoutKind::Float) => {
             let sign = arg_layout.sign();
-            match (arg_layout.size,res_layout.size,sign) {
+            match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
 
                 (1,4,IntSign::Signed) => Instr::F32_From_I8_S,
                 (1,4,IntSign::Unsigned) => Instr::F32_From_I8_U,
@@ -376,12 +381,12 @@ pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> 
                 (16,8,IntSign::Signed) => Instr::F64_From_I128_S,
                 (16,8,IntSign::Unsigned) => Instr::F64_From_I128_U,
 
-                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
             }
         }
         (LayoutKind::Float,LayoutKind::Int(_)) => {
             let sign = res_layout.sign();
-            match (arg_layout.size,res_layout.size,sign) {
+            match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
 
                 (4,1,IntSign::Signed) => Instr::F32_Into_I8_S,
                 (4,1,IntSign::Unsigned) => Instr::F32_Into_I8_U,
@@ -408,7 +413,7 @@ pub fn cast<'tcx>(arg_layout: &Layout, res_layout: &Layout) -> fn(Slot,Slot) -> 
                 (8,16,IntSign::Signed) => Instr::F64_Into_I128_S,
                 (8,16,IntSign::Unsigned) => Instr::F64_Into_I128_U,
 
-                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.size,res_layout.size,sign)
+                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
             }
         }
         _ => panic!("no cast: {:?} -> {:?}",arg_layout.kind,res_layout.kind)

@@ -375,6 +375,16 @@ fn write_exec_match() {
         let offset = index * *elem_size as usize;
         write_stack(stack, *arg_out, offset);
     }
+    Instr::IndexCalcDyn{ arg_out, elem_size, elem_count } => {
+        let index: usize = read_stack(stack, *arg_out);
+        let elem_count: usize = read_stack(stack, *elem_count);
+        if index >= elem_count {
+            println!("{} {}",index,elem_count);
+            panic!("array index out of bounds");
+        }
+        let offset = index * *elem_size as usize;
+        write_stack(stack, *arg_out, offset);
+    }
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),

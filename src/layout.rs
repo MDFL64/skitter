@@ -5,13 +5,21 @@ use crate::{abi::POINTER_SIZE, vm::VM};
 
 #[derive(Debug)]
 pub struct Layout {
-    pub size: u32,
+    pub maybe_size: Option<u32>,
     pub align: u32,
     pub kind: LayoutKind,
     pub field_offsets: Vec<u32>
 }
 
 impl Layout {
+    pub fn assert_size(&self) -> u32 {
+        self.maybe_size.expect("unsized type not permitted")
+    }
+
+    pub fn is_sized(&self) -> bool {
+        self.maybe_size.is_some()
+    } 
+
     pub fn sign(&self) -> IntSign {
         match self.kind {
             LayoutKind::Int(sign) => sign,
@@ -31,6 +39,7 @@ pub enum LayoutKind {
     Tuple,
     Struct,
     Array{elem_size: u32, elem_count: u32},
+    Slice{elem_size: u32},
 
     Never
 }
@@ -68,8 +77,8 @@ impl Layout {
 
             TyKind::Never => Layout::simple(0,LayoutKind::Never),
 
-            TyKind::Ref(..)  => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ref),
-            TyKind::RawPtr(..) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Ptr),
+            TyKind::Ref(_,ref_ty,_) => Self::pointer(*ref_ty, LayoutKind::Ref, vm),
+            TyKind::RawPtr(ptr) => Self::pointer(ptr.ty, LayoutKind::Ptr, vm),
 
             TyKind::Tuple(list) => {
                 // should be quick if this is ()
@@ -91,14 +100,26 @@ impl Layout {
                 let count = count.eval_target_usize(vm.tcx, param_env) as u32;
 
                 let elem_layout = Layout::from(*elem_ty,vm);
+                let elem_size = elem_layout.assert_size();
 
                 Layout {
-                    size: elem_layout.size * count,
+                    maybe_size: Some(elem_size * count),
                     align: elem_layout.align,
                     kind: LayoutKind::Array{
-                        elem_size: elem_layout.size,
+                        elem_size,
                         elem_count: count
                     },
+                    field_offsets: Vec::new()
+                }
+            }
+            TyKind::Slice(elem_ty) => {
+                let elem_layout = Layout::from(*elem_ty,vm);
+                let elem_size = elem_layout.assert_size();
+
+                Layout {
+                    maybe_size: None,
+                    align: elem_layout.align,
+                    kind: LayoutKind::Slice{ elem_size },
                     field_offsets: Vec::new()
                 }
             }
@@ -118,32 +139,46 @@ impl Layout {
         let field_offsets = fields.map(|ty| {
             let layout = Layout::from(ty,vm);
 
-            size = Self::align(size, align);
+            size = Self::align(size, layout.align);
 
             let offset = size;
 
-            size += layout.size;
+            // todo unsized structs
+            size += layout.assert_size();
             align = align.max(layout.align);
 
             offset
         }).collect();
 
-        // dumb
-        while (size % align) != 0 {
-            size += 1;
-        }
+        size = Self::align(size, align);
 
         Layout {
-            size,
+            maybe_size: Some(size),
             align,
             kind,
             field_offsets
         }
     }
 
+    fn pointer<'tcx>(ref_ty: Ty<'tcx>, kind: LayoutKind, vm: &VM<'tcx>) -> Self {
+        let ptr_size = POINTER_SIZE.bytes();
+
+        let ref_layout = Layout::from(ref_ty,vm);
+        if ref_layout.is_sized() {
+            Layout::simple(ptr_size, kind)
+        } else {
+            Self {
+                maybe_size: Some(ptr_size * 2),
+                align: ptr_size,
+                kind,
+                field_offsets: Vec::new()
+            }
+        }
+    }
+
     fn simple(size: u32, kind: LayoutKind) -> Self {
         Self {
-            size,
+            maybe_size: Some(size),
             align: size.max(1),
             kind,
             field_offsets: Vec::new()

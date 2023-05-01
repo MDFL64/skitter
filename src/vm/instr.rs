@@ -279,6 +279,7 @@ pub enum Instr<'tcx> {
     // name the fields since these are less straightforward
     SlotAddrOffset{out: Slot, arg: Slot, offset: Slot},
     IndexCalc{arg_out: Slot, elem_size: u32, elem_count: u32},
+    IndexCalcDyn{arg_out: Slot, elem_size: u32, elem_count: Slot},
 
     //OffsetPtr(Slot, Slot, i32),
 
@@ -527,7 +528,8 @@ impl<'tcx> Instr<'tcx> {
             Instr::SlotAddrOffset{out,..} => Some(out),
             Instr::PointerOffset(x,_,_) => Some(x),
 
-            Instr::IndexCalc{..} => None,
+            Instr::IndexCalc{..} |
+            Instr::IndexCalcDyn {..} => None,
 
             Instr::MovPS1(_,_,_) |
             Instr::MovPS2(_,_,_) |

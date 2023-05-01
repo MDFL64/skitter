@@ -9,6 +9,7 @@ use crate::vm::{self, instr::Slot};
 
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_middle::ty::SubstsRef;
+use rustc_middle::ty::adjustment::PointerCast;
 use rustc_middle::thir::{self, Thir, ExprId, ExprKind, StmtId, StmtKind, BlockId, Pat, PatKind, LogicalOp};
 
 use rustc_hir::hir_id::ItemLocalId;
@@ -140,7 +141,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::VarRef{..} |
             ExprKind::Field{..} |
             ExprKind::Index{..} => {
-                let size = expr_layout.size;
+                let size = expr_layout.assert_size();
 
                 match self.expr_to_place(id) {
                     Place::Local(local_slot) => {
@@ -172,7 +173,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     self.stack.alloc(&expr_layout)
                 });
                 
-                self.out_bc.push(bytecode_select::literal(&lit.node, expr_layout.size, dst_slot, *neg));
+                self.out_bc.push(bytecode_select::literal(&lit.node, expr_layout.assert_size(), dst_slot, *neg));
                 dst_slot
             }
             ExprKind::Unary{op, arg} => {
@@ -227,12 +228,12 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(lhs_slot) => {
-                        if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, layout.size) {
+                        if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, layout.assert_size()) {
                             self.out_bc.push(instr);
                         }
                     }
                     Place::Ptr(ptr_slot,offset) => {
-                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, layout.size, offset) {
+                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, layout.assert_size(), offset) {
                             self.out_bc.push(instr);
                         }
                     }
@@ -256,9 +257,9 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     Place::Ptr(ptr_slot,offset) => {
                         let tmp_slot = self.stack.alloc(&self.expr_layout(*lhs));
                         
-                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.size, offset).unwrap());
+                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.assert_size(), offset).unwrap());
                         self.out_bc.push(ctor(tmp_slot,tmp_slot,rhs_slot));
-                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.size, offset).unwrap());
+                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.assert_size(), offset).unwrap());
                     }
                 }
 
@@ -297,7 +298,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
-                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_layout.size) {
+                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_layout.assert_size()) {
                         self.out_bc.push(instr);
                     }
                     dst_slot
@@ -431,6 +432,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Borrow{arg,..} | ExprKind::AddressOf{arg,..} => {
+                let arg_ty = self.expr_ty(*arg);
 
                 let place = self.expr_to_place(*arg);
 
@@ -447,7 +449,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                         assert_eq!(offset,0);
 
                         if let Some(dst_slot) = dst_slot {
-                            self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, POINTER_SIZE.bytes()).unwrap());
+                            self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, expr_layout.assert_size()).unwrap());
 
                             dst_slot
                         } else {
@@ -464,13 +466,52 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let ptr = self.lower_expr(*arg, None);
 
-                let size = expr_layout.size;
+                let size = expr_layout.assert_size();
 
                 if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size, 0) {
                     self.out_bc.push(instr);
                 }
 
                 dst_slot
+            }
+            ExprKind::Pointer{cast,source} => {
+
+                match cast {
+                    PointerCast::Unsize => {
+                        assert_eq!(expr_layout.assert_size(), POINTER_SIZE.bytes()*2);
+
+                        let src_ty = self.expr_ty(*source);
+                        
+                        let src_ref_ty = match src_ty.kind() {
+                            TyKind::RawPtr(ptr) => ptr.ty,
+                            TyKind::Ref(_,ty,_) => *ty,
+                            _ => panic!()
+                        };
+
+                        let src_ref_layout = crate::layout::Layout::from(src_ref_ty,self.vm);
+
+                        let meta = match src_ref_layout.kind {
+                            LayoutKind::Array{ elem_size, elem_count } => {
+                                elem_count as usize
+                            }
+                            _ => panic!("unsized cast ptr to {:?}",src_ref_layout)
+                        };
+
+                        let dst_slot = dst_slot.unwrap_or_else(|| {
+                            self.stack.alloc(&expr_layout)
+                        });
+
+                        let src_slot = self.lower_expr(*source, None);
+
+                        // copy base
+                        let ptr_size = POINTER_SIZE.bytes();
+                        self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, ptr_size).unwrap());
+                        self.out_bc.push(bytecode_select::literal_raw(meta as i128,ptr_size,dst_slot.offset_by(ptr_size)));
+                    }
+                    _ => panic!("todo ptr cast {:?}",cast)
+                }
+
+                self.lower_expr(*source, dst_slot)
             }
             ExprKind::Tuple{fields} => {
 
@@ -556,28 +597,40 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             }
             ExprKind::Index{lhs,index} => {
 
-                let layout = self.expr_layout(*lhs);
-                let LayoutKind::Array{elem_size,elem_count} = layout.kind else {
-                    panic!("bad array layout");
-                };
-
                 let index_layout = self.expr_layout(*index);
-                assert!(index_layout.size == POINTER_SIZE.bytes());
+                assert!(index_layout.assert_size() == POINTER_SIZE.bytes());
 
                 // this index slot is re-used for the resulting pointer
                 let index_slot = self.stack.alloc(&index_layout);
                 self.lower_expr(*index, Some(index_slot));
-                self.out_bc.push(Instr::IndexCalc { arg_out: index_slot, elem_size, elem_count });
-
-                match self.expr_to_place(*lhs) {
-                    Place::Local(base_slot) => {
-                        self.out_bc.push(Instr::SlotAddrOffset{ out: index_slot, arg: base_slot, offset: index_slot });
+                
+                let layout = self.expr_layout(*lhs);
+                match layout.kind {
+                    LayoutKind::Array{elem_size,elem_count} => {
+                        self.out_bc.push(Instr::IndexCalc { arg_out: index_slot, elem_size, elem_count });
+        
+                        match self.expr_to_place(*lhs) {
+                            Place::Local(base_slot) => {
+                                self.out_bc.push(Instr::SlotAddrOffset{ out: index_slot, arg: base_slot, offset: index_slot });
+                            }
+                            Place::Ptr(ptr_slot, offset) => {
+                                self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, offset));
+                            }
+                        }
                     }
-                    Place::Ptr(ptr_slot, offset) => {
-                        self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, offset));
+                    LayoutKind::Slice { elem_size } => {
+                        let lhs_place = self.expr_to_place(*lhs);
+                        if let Place::Ptr(ptr_slot, offset) = lhs_place {
+                            assert_eq!(offset,0);
+                            let elem_count = ptr_slot.offset_by(POINTER_SIZE.bytes());
+                            self.out_bc.push(Instr::IndexCalcDyn{ arg_out: index_slot, elem_size, elem_count });
+                            self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, 0));
+                        } else {
+                            panic!("invalid local(?!) slice index");
+                        }
                     }
+                    _ => panic!("cannot index {:?}",layout.kind)
                 }
-
                 Place::Ptr(index_slot,0)
             }
             // (todo) All other expressions without special handling:
@@ -598,11 +651,20 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         binder.subst(self.vm.tcx,self.in_func_subs)
     }
 
-    fn expr_layout(&self, id: ExprId) -> crate::layout::Layout {
+    fn expr_ty(&self, id: ExprId) -> Ty<'tcx> {
         let ty = self.in_func.exprs[id].ty;
-        let ty = self.apply_subs(ty);
+        self.apply_subs(ty)
+    }
+
+    fn expr_layout(&self, id: ExprId) -> crate::layout::Layout {
+        let ty = self.expr_ty(id);
         crate::layout::Layout::from(ty, self.vm)
     }
+
+    /*fn expr_ty_and_layout(&self, id: ExprId) -> (Ty<'tcx>,crate::layout::Layout) {
+        let ty = self.expr_ty(id);
+        (ty, crate::layout::Layout::from(ty, self.vm))
+    }*/
 
     fn ty_to_func(&self, ty: Ty<'tcx>) -> Option<Arc<Function<'tcx>>> {
         match ty.kind() {
@@ -678,15 +740,11 @@ impl CompilerStack {
         self.align(layout.align);
         
         let base = self.top;
-        let size = layout.size;
+        let size = layout.assert_size();
 
         self.entries.push(StackEntry { base, size });
         self.top += size;
         Slot::new(base)
-    }
-
-    fn top(&self) -> Slot {
-        Slot::new(self.top)
     }
 
     fn align(&mut self, align: u32) {
@@ -716,7 +774,7 @@ impl CallFrame {
         self.align(layout.align);
         
         let base = self.top;
-        let size = layout.size;
+        let size = layout.assert_size();
 
         self.top += size;
         Slot::new_frame_sub(base)
