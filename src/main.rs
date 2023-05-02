@@ -17,13 +17,14 @@ extern crate rustc_ast;
 extern crate rustc_abi;
 
 mod vm;
-//mod mir_compiler;
+
 mod hir_compiler;
 mod bytecode_select;
 mod layout;
 mod cli;
 mod test;
 mod abi;
+mod ir;
 
 use rustc_session::config;
 use rustc_middle::ty::TyCtxt;

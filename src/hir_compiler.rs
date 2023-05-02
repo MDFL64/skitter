@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
+use crate::ir::IRFunctionBuilder;
 use crate::layout::LayoutKind;
 use crate::vm::Function;
 use crate::vm::instr::Instr;
@@ -30,6 +31,8 @@ pub struct HirCompiler<'a,'tcx> {
 
 impl<'a,'tcx> HirCompiler<'a,'tcx> {
     pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func_subs: SubstsRef<'tcx>, in_func: &'a Thir<'tcx>, root_expr: ExprId) -> Vec<vm::instr::Instr<'tcx>> {
+
+        let ir = IRFunctionBuilder::build(in_func_id,root_expr,in_func);
 
         let mut compiler = HirCompiler {
             in_func_id,
