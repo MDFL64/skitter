@@ -5,7 +5,6 @@ use std::str::FromStr;
 use rustc_middle::ty::Ty;
 use rustc_middle::thir;
 use rustc_middle::thir::Thir;
-use rustc_middle::middle::region::Scope;
 use rustc_hir::def_id::LocalDefId;
 
 pub struct IRFunction<'vm> {
@@ -55,6 +54,9 @@ enum ExprKind<'vm> {
     /// Primitive casts
     Cast(ExprId),
 
+    /// Pointer casts
+    PointerCast(ExprId,PointerCast),
+
     Block(BlockId),
 
     /// Variable reference
@@ -75,11 +77,18 @@ enum ExprKind<'vm> {
     Loop(ExprId),
     Break{scope_id: u32, value: Option<ExprId>},
     Continue{scope_id: u32},
+    Return(Option<ExprId>),
 
     Call{func_ty: Ty<'vm>, func: ExprId, args: Vec<ExprId>},
     Tuple(Vec<ExprId>),
+    Adt{variant: u32, fields: Vec<(u32,ExprId)> },
+    Array(Vec<ExprId>),
 
-    Field{ lhs: ExprId, variant: u32, field: u32 }
+    Ref(ExprId),
+    DeRef(ExprId),
+
+    Field{ lhs: ExprId, variant: u32, field: u32 },
+    Index{ lhs: ExprId, index: ExprId },
 }
 
 enum PatternKind {
@@ -118,6 +127,16 @@ enum BinaryOp {
 enum LogicOp {
     And,
     Or
+}
+
+#[derive(Debug)]
+enum PointerCast{
+    ReifyFnPointer,
+    UnsafeFnPointer,
+    ClosureFnPointer,
+    MutToConstPointer,
+    ArrayToPointer,
+    UnSize,
 }
 
 pub struct IRFunctionBuilder {
@@ -201,6 +220,18 @@ impl IRFunctionBuilder {
             }
             thir::ExprKind::Cast{source} => {
                 ExprKind::Cast(self.expr_id(source))
+            }
+            thir::ExprKind::Pointer{cast,source} => {
+                use rustc_middle::ty::adjustment::PointerCast as PC;
+                let cast = match cast {
+                    PC::ReifyFnPointer => PointerCast::ReifyFnPointer,
+                    PC::UnsafeFnPointer => PointerCast::UnsafeFnPointer,
+                    PC::ClosureFnPointer(_) => PointerCast::ClosureFnPointer,
+                    PC::MutToConstPointer => PointerCast::MutToConstPointer,
+                    PC::ArrayToPointer => PointerCast::ArrayToPointer,
+                    PC::Unsize => PointerCast::UnSize,
+                };
+                ExprKind::PointerCast(self.expr_id(source),cast)
             }
 
             thir::ExprKind::Block{block} => {
@@ -286,6 +317,14 @@ impl IRFunctionBuilder {
                 ExprKind::Assign(self.expr_id(lhs), self.expr_id(rhs))
             }
 
+            thir::ExprKind::Borrow{arg,..} |
+            thir::ExprKind::AddressOf{arg,..} => {
+                ExprKind::Ref(self.expr_id(arg))
+            }
+            thir::ExprKind::Deref{arg} => {
+                ExprKind::DeRef(self.expr_id(arg))
+            }
+
             thir::ExprKind::If{cond,then,else_opt,..} => {
                 ExprKind::If{
                     cond: self.expr_id(cond),
@@ -304,6 +343,10 @@ impl IRFunctionBuilder {
                     scope_id: label.id.as_u32()
                 }
             }
+            thir::ExprKind::Return{value} => {
+                let value = value.map(|e| self.expr_id(e));
+                ExprKind::Return(value)
+            }
             thir::ExprKind::Loop{body} => {
                 ExprKind::Loop(self.expr_id(body))
             }
@@ -319,6 +362,23 @@ impl IRFunctionBuilder {
                 let fields = fields.iter().map(|f| self.expr_id(*f)).collect();
                 ExprKind::Tuple(fields)
             }
+            thir::ExprKind::Adt(ref adt) => {
+                let fields = adt.fields.iter().map(|f| {
+                    (
+                        f.name.as_u32(),
+                        self.expr_id(f.expr)
+                    )
+                }).collect();
+
+                ExprKind::Adt{
+                    variant: adt.variant_index.as_u32(),
+                    fields
+                }
+            }
+            thir::ExprKind::Array{ref fields} => {
+                let fields = fields.iter().map(|f| self.expr_id(*f)).collect();
+                ExprKind::Array(fields)
+            }
 
             thir::ExprKind::Field{lhs,variant_index,name} => {
 
@@ -326,6 +386,12 @@ impl IRFunctionBuilder {
                     lhs: self.expr_id(lhs),
                     variant: variant_index.as_u32(),
                     field: name.as_u32()
+                }
+            }
+            thir::ExprKind::Index{lhs,index} => {
+                ExprKind::Index{
+                    lhs: self.expr_id(lhs),
+                    index: self.expr_id(index),
                 }
             }
 
