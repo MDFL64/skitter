@@ -1,56 +1,9 @@
 /// Just a few utility functions for picking the right bytecode instructions
 
-use rustc_ast::ast::LitKind;
-use rustc_middle::mir::{UnOp, BinOp};
-use rustc_middle::ty::Ty;
-
-use std::str::FromStr;
-
+use crate::ir::{UnaryOp, BinaryOp};
 use crate::{vm::instr::{Slot, Instr}, layout::{Layout, LayoutKind, IntSign}};
 
-pub fn literal(lit: &LitKind, size: u32, slot: Slot, neg: bool) -> Instr {
-    match lit {
-        LitKind::Int(n,_) => {
-            let mut n = *n as i128;
-            if neg {
-                n = -n;
-            }
-
-            literal_raw(n,size,slot)
-        }
-        LitKind::Float(sym,_) => {
-            match size {
-                4 => {
-                    let mut n = f32::from_str(sym.as_str()).unwrap();
-                    if neg {
-                        n = -n;
-                    }
-                    let x: i32 = unsafe { std::mem::transmute(n) };
-                    Instr::I32_Const(slot, x)
-                }
-                8 => {
-                    let mut n = f64::from_str(sym.as_str()).unwrap();
-                    if neg {
-                        n = -n;
-                    }
-                    let x: i64 = unsafe { std::mem::transmute(n) };
-                    Instr::I64_Const(slot, x)
-                }
-                _ => panic!("float size {}",size)
-            }
-        }
-        LitKind::Char(c) => {
-            let n = *c as i32;
-            Instr::I32_Const(slot, n)
-        }
-        LitKind::Bool(b) => {
-            Instr::I8_Const(slot, *b as i8)
-        }
-        _ => panic!("pick literal {:?}",lit)
-    }
-}
-
-pub fn literal_raw<'tcx>(n: i128, size: u32, slot: Slot) -> Instr<'tcx> {
+pub fn literal<'tcx>(n: i128, size: u32, slot: Slot) -> Instr<'tcx> {
     match size {
         1  => Instr::I8_Const(slot, n as i8),
         2  => Instr::I16_Const(slot, n as i16),
@@ -61,6 +14,7 @@ pub fn literal_raw<'tcx>(n: i128, size: u32, slot: Slot) -> Instr<'tcx> {
     }
 }
 
+// TODO NONE OF THESE ACCOUNT FOR ALIGNMENT!
 pub fn copy<'tcx>(dst: Slot, src: Slot, size: u32) -> Option<Instr<'tcx>> {
     if size == 0 {
         None
@@ -106,189 +60,189 @@ pub fn copy_to_ptr<'tcx>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option
     }
 }
 
-pub fn unary<'tcx>(op: UnOp, layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
+pub fn unary<'tcx>(op: UnaryOp, layout: &Layout) -> fn(Slot,Slot) -> Instr<'tcx> {
     match (op,&layout.kind,layout.assert_size()) {
-        (UnOp::Neg,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_Neg,
-        (UnOp::Neg,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_Neg,
-        (UnOp::Neg,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_Neg,
-        (UnOp::Neg,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_Neg,
-        (UnOp::Neg,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_Neg,
+        (UnaryOp::Neg,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_Neg,
+        (UnaryOp::Neg,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_Neg,
+        (UnaryOp::Neg,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_Neg,
+        (UnaryOp::Neg,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_Neg,
+        (UnaryOp::Neg,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_Neg,
 
-        (UnOp::Not,LayoutKind::Int(_),1) => Instr::I8_Not,
-        (UnOp::Not,LayoutKind::Int(_),2) => Instr::I16_Not,
-        (UnOp::Not,LayoutKind::Int(_),4) => Instr::I32_Not,
-        (UnOp::Not,LayoutKind::Int(_),8) => Instr::I64_Not,
-        (UnOp::Not,LayoutKind::Int(_),16) => Instr::I128_Not,
+        (UnaryOp::Not,LayoutKind::Int(_),1) => Instr::I8_Not,
+        (UnaryOp::Not,LayoutKind::Int(_),2) => Instr::I16_Not,
+        (UnaryOp::Not,LayoutKind::Int(_),4) => Instr::I32_Not,
+        (UnaryOp::Not,LayoutKind::Int(_),8) => Instr::I64_Not,
+        (UnaryOp::Not,LayoutKind::Int(_),16) => Instr::I128_Not,
 
-        (UnOp::Neg,LayoutKind::Float,4) => Instr::F32_Neg,
-        (UnOp::Neg,LayoutKind::Float,8) => Instr::F64_Neg,
+        (UnaryOp::Neg,LayoutKind::Float,4) => Instr::F32_Neg,
+        (UnaryOp::Neg,LayoutKind::Float,8) => Instr::F64_Neg,
 
-        (UnOp::Not,LayoutKind::Bool,1) => Instr::Bool_Not,
+        (UnaryOp::Not,LayoutKind::Bool,1) => Instr::Bool_Not,
 
         _ => panic!("no unary op: {:?} {:?} {:?}",op,&layout.kind,layout.assert_size())
     }
 }
 
-pub fn binary<'tcx>(op: BinOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr<'tcx>,bool) {
+pub fn binary<'tcx>(op: BinaryOp, layout: &Layout) -> (fn(Slot,Slot,Slot) -> Instr<'tcx>,bool) {
 
     let mut swap = false;
     let ctor = match (op,&layout.kind,layout.assert_size()) {
 
-        (BinOp::Eq,LayoutKind::Int(_),1) => Instr::I8_Eq,
-        (BinOp::Eq,LayoutKind::Int(_),2) => Instr::I16_Eq,
-        (BinOp::Eq,LayoutKind::Int(_),4) => Instr::I32_Eq,
-        (BinOp::Eq,LayoutKind::Int(_),8) => Instr::I64_Eq,
-        (BinOp::Eq,LayoutKind::Int(_),16) => Instr::I128_Eq,
-        (BinOp::Ne,LayoutKind::Int(_),1) => Instr::I8_NotEq,
-        (BinOp::Ne,LayoutKind::Int(_),2) => Instr::I16_NotEq,
-        (BinOp::Ne,LayoutKind::Int(_),4) => Instr::I32_NotEq,
-        (BinOp::Ne,LayoutKind::Int(_),8) => Instr::I64_NotEq,
-        (BinOp::Ne,LayoutKind::Int(_),16) => Instr::I128_NotEq,
+        (BinaryOp::Eq,LayoutKind::Int(_),1) => Instr::I8_Eq,
+        (BinaryOp::Eq,LayoutKind::Int(_),2) => Instr::I16_Eq,
+        (BinaryOp::Eq,LayoutKind::Int(_),4) => Instr::I32_Eq,
+        (BinaryOp::Eq,LayoutKind::Int(_),8) => Instr::I64_Eq,
+        (BinaryOp::Eq,LayoutKind::Int(_),16) => Instr::I128_Eq,
+        (BinaryOp::NotEq,LayoutKind::Int(_),1) => Instr::I8_NotEq,
+        (BinaryOp::NotEq,LayoutKind::Int(_),2) => Instr::I16_NotEq,
+        (BinaryOp::NotEq,LayoutKind::Int(_),4) => Instr::I32_NotEq,
+        (BinaryOp::NotEq,LayoutKind::Int(_),8) => Instr::I64_NotEq,
+        (BinaryOp::NotEq,LayoutKind::Int(_),16) => Instr::I128_NotEq,
 
-        (BinOp::Add,LayoutKind::Int(_),1) => Instr::I8_Add,
-        (BinOp::Add,LayoutKind::Int(_),2) => Instr::I16_Add,
-        (BinOp::Add,LayoutKind::Int(_),4) => Instr::I32_Add,
-        (BinOp::Add,LayoutKind::Int(_),8) => Instr::I64_Add,
-        (BinOp::Add,LayoutKind::Int(_),16) => Instr::I128_Add,
-        (BinOp::Sub,LayoutKind::Int(_),1) => Instr::I8_Sub,
-        (BinOp::Sub,LayoutKind::Int(_),2) => Instr::I16_Sub,
-        (BinOp::Sub,LayoutKind::Int(_),4) => Instr::I32_Sub,
-        (BinOp::Sub,LayoutKind::Int(_),8) => Instr::I64_Sub,
-        (BinOp::Sub,LayoutKind::Int(_),16) => Instr::I128_Sub,
-        (BinOp::Mul,LayoutKind::Int(_),1) => Instr::I8_Mul,
-        (BinOp::Mul,LayoutKind::Int(_),2) => Instr::I16_Mul,
-        (BinOp::Mul,LayoutKind::Int(_),4) => Instr::I32_Mul,
-        (BinOp::Mul,LayoutKind::Int(_),8) => Instr::I64_Mul,
-        (BinOp::Mul,LayoutKind::Int(_),16) => Instr::I128_Mul,
+        (BinaryOp::Add,LayoutKind::Int(_),1) => Instr::I8_Add,
+        (BinaryOp::Add,LayoutKind::Int(_),2) => Instr::I16_Add,
+        (BinaryOp::Add,LayoutKind::Int(_),4) => Instr::I32_Add,
+        (BinaryOp::Add,LayoutKind::Int(_),8) => Instr::I64_Add,
+        (BinaryOp::Add,LayoutKind::Int(_),16) => Instr::I128_Add,
+        (BinaryOp::Sub,LayoutKind::Int(_),1) => Instr::I8_Sub,
+        (BinaryOp::Sub,LayoutKind::Int(_),2) => Instr::I16_Sub,
+        (BinaryOp::Sub,LayoutKind::Int(_),4) => Instr::I32_Sub,
+        (BinaryOp::Sub,LayoutKind::Int(_),8) => Instr::I64_Sub,
+        (BinaryOp::Sub,LayoutKind::Int(_),16) => Instr::I128_Sub,
+        (BinaryOp::Mul,LayoutKind::Int(_),1) => Instr::I8_Mul,
+        (BinaryOp::Mul,LayoutKind::Int(_),2) => Instr::I16_Mul,
+        (BinaryOp::Mul,LayoutKind::Int(_),4) => Instr::I32_Mul,
+        (BinaryOp::Mul,LayoutKind::Int(_),8) => Instr::I64_Mul,
+        (BinaryOp::Mul,LayoutKind::Int(_),16) => Instr::I128_Mul,
 
-        (BinOp::BitOr,LayoutKind::Int(_),1) => Instr::I8_Or,
-        (BinOp::BitOr,LayoutKind::Int(_),2) => Instr::I16_Or,
-        (BinOp::BitOr,LayoutKind::Int(_),4) => Instr::I32_Or,
-        (BinOp::BitOr,LayoutKind::Int(_),8) => Instr::I64_Or,
-        (BinOp::BitOr,LayoutKind::Int(_),16) => Instr::I128_Or,
-        (BinOp::BitAnd,LayoutKind::Int(_),1) => Instr::I8_And,
-        (BinOp::BitAnd,LayoutKind::Int(_),2) => Instr::I16_And,
-        (BinOp::BitAnd,LayoutKind::Int(_),4) => Instr::I32_And,
-        (BinOp::BitAnd,LayoutKind::Int(_),8) => Instr::I64_And,
-        (BinOp::BitAnd,LayoutKind::Int(_),16) => Instr::I128_And,
-        (BinOp::BitXor,LayoutKind::Int(_),1) => Instr::I8_Xor,
-        (BinOp::BitXor,LayoutKind::Int(_),2) => Instr::I16_Xor,
-        (BinOp::BitXor,LayoutKind::Int(_),4) => Instr::I32_Xor,
-        (BinOp::BitXor,LayoutKind::Int(_),8) => Instr::I64_Xor,
-        (BinOp::BitXor,LayoutKind::Int(_),16) => Instr::I128_Xor,
-        (BinOp::Shl,LayoutKind::Int(_),1) => Instr::I8_ShiftL,
-        (BinOp::Shl,LayoutKind::Int(_),2) => Instr::I16_ShiftL,
-        (BinOp::Shl,LayoutKind::Int(_),4) => Instr::I32_ShiftL,
-        (BinOp::Shl,LayoutKind::Int(_),8) => Instr::I64_ShiftL,
-        (BinOp::Shl,LayoutKind::Int(_),16) => Instr::I128_ShiftL,
+        (BinaryOp::BitOr,LayoutKind::Int(_),1) => Instr::I8_Or,
+        (BinaryOp::BitOr,LayoutKind::Int(_),2) => Instr::I16_Or,
+        (BinaryOp::BitOr,LayoutKind::Int(_),4) => Instr::I32_Or,
+        (BinaryOp::BitOr,LayoutKind::Int(_),8) => Instr::I64_Or,
+        (BinaryOp::BitOr,LayoutKind::Int(_),16) => Instr::I128_Or,
+        (BinaryOp::BitAnd,LayoutKind::Int(_),1) => Instr::I8_And,
+        (BinaryOp::BitAnd,LayoutKind::Int(_),2) => Instr::I16_And,
+        (BinaryOp::BitAnd,LayoutKind::Int(_),4) => Instr::I32_And,
+        (BinaryOp::BitAnd,LayoutKind::Int(_),8) => Instr::I64_And,
+        (BinaryOp::BitAnd,LayoutKind::Int(_),16) => Instr::I128_And,
+        (BinaryOp::BitXor,LayoutKind::Int(_),1) => Instr::I8_Xor,
+        (BinaryOp::BitXor,LayoutKind::Int(_),2) => Instr::I16_Xor,
+        (BinaryOp::BitXor,LayoutKind::Int(_),4) => Instr::I32_Xor,
+        (BinaryOp::BitXor,LayoutKind::Int(_),8) => Instr::I64_Xor,
+        (BinaryOp::BitXor,LayoutKind::Int(_),16) => Instr::I128_Xor,
+        (BinaryOp::ShiftL,LayoutKind::Int(_),1) => Instr::I8_ShiftL,
+        (BinaryOp::ShiftL,LayoutKind::Int(_),2) => Instr::I16_ShiftL,
+        (BinaryOp::ShiftL,LayoutKind::Int(_),4) => Instr::I32_ShiftL,
+        (BinaryOp::ShiftL,LayoutKind::Int(_),8) => Instr::I64_ShiftL,
+        (BinaryOp::ShiftL,LayoutKind::Int(_),16) => Instr::I128_ShiftL,
 
-        (BinOp::Lt,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Lt,
-        (BinOp::Gt,LayoutKind::Int(IntSign::Signed),1) => { swap = true; Instr::I8_S_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Signed),2) => { swap = true; Instr::I16_S_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Signed),4) => { swap = true; Instr::I32_S_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Signed),8) => { swap = true; Instr::I64_S_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Signed),16) => { swap = true; Instr::I128_S_Lt }
-        (BinOp::Le,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_LtEq,
-        (BinOp::Ge,LayoutKind::Int(IntSign::Signed),1) => { swap = true; Instr::I8_S_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Signed),2) => { swap = true; Instr::I16_S_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Signed),4) => { swap = true; Instr::I32_S_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Signed),8) => { swap = true; Instr::I64_S_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Signed),16) => { swap = true; Instr::I128_S_LtEq }
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Lt,
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Signed),1) => { swap = true; Instr::I8_S_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Signed),2) => { swap = true; Instr::I16_S_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Signed),4) => { swap = true; Instr::I32_S_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Signed),8) => { swap = true; Instr::I64_S_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Signed),16) => { swap = true; Instr::I128_S_Lt }
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_LtEq,
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Signed),1) => { swap = true; Instr::I8_S_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Signed),2) => { swap = true; Instr::I16_S_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Signed),4) => { swap = true; Instr::I32_S_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Signed),8) => { swap = true; Instr::I64_S_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Signed),16) => { swap = true; Instr::I128_S_LtEq }
 
-        (BinOp::Div,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Div,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Rem,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Div,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_Rem,
 
-        (BinOp::Shr,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Signed),1) => Instr::I8_S_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Signed),2) => Instr::I16_S_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Signed),4) => Instr::I32_S_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Signed),8) => Instr::I64_S_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Signed),16) => Instr::I128_S_ShiftR,
 
-        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Lt,
-        (BinOp::Lt,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Lt,
-        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_Lt }
-        (BinOp::Gt,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_Lt }
-        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_LtEq,
-        (BinOp::Le,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_LtEq,
-        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_LtEq }
-        (BinOp::Ge,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_LtEq }
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Lt,
+        (BinaryOp::Lt,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Lt,
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_Lt }
+        (BinaryOp::Gt,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_Lt }
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_LtEq,
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Unsigned),1) => { swap = true; Instr::I8_U_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Unsigned),2) => { swap = true; Instr::I16_U_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Unsigned),4) => { swap = true; Instr::I32_U_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Unsigned),8) => { swap = true; Instr::I64_U_LtEq }
+        (BinaryOp::GtEq,LayoutKind::Int(IntSign::Unsigned),16) => { swap = true; Instr::I128_U_LtEq }
 
-        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Div,
-        (BinOp::Div,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Div,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Rem,
-        (BinOp::Rem,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Rem,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Div,
+        (BinaryOp::Div,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Div,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_Rem,
+        (BinaryOp::Rem,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_Rem,
 
-        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_ShiftR,
-        (BinOp::Shr,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Unsigned),1) => Instr::I8_U_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Unsigned),2) => Instr::I16_U_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Unsigned),4) => Instr::I32_U_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Unsigned),8) => Instr::I64_U_ShiftR,
+        (BinaryOp::ShiftR,LayoutKind::Int(IntSign::Unsigned),16) => Instr::I128_U_ShiftR,
 
-        (BinOp::Eq,LayoutKind::Float,4) => Instr::F32_Eq,
-        (BinOp::Eq,LayoutKind::Float,8) => Instr::F64_Eq,
-        (BinOp::Ne,LayoutKind::Float,4) => Instr::F32_NotEq,
-        (BinOp::Ne,LayoutKind::Float,8) => Instr::F64_NotEq,
-        (BinOp::Lt,LayoutKind::Float,4) => Instr::F32_Lt,
-        (BinOp::Lt,LayoutKind::Float,8) => Instr::F64_Lt,
-        (BinOp::Gt,LayoutKind::Float,4) => Instr::F32_Gt,
-        (BinOp::Gt,LayoutKind::Float,8) => Instr::F64_Gt,
+        (BinaryOp::Eq,LayoutKind::Float,4) => Instr::F32_Eq,
+        (BinaryOp::Eq,LayoutKind::Float,8) => Instr::F64_Eq,
+        (BinaryOp::NotEq,LayoutKind::Float,4) => Instr::F32_NotEq,
+        (BinaryOp::NotEq,LayoutKind::Float,8) => Instr::F64_NotEq,
+        (BinaryOp::Lt,LayoutKind::Float,4) => Instr::F32_Lt,
+        (BinaryOp::Lt,LayoutKind::Float,8) => Instr::F64_Lt,
+        (BinaryOp::Gt,LayoutKind::Float,4) => Instr::F32_Gt,
+        (BinaryOp::Gt,LayoutKind::Float,8) => Instr::F64_Gt,
 
-        (BinOp::Le,LayoutKind::Float,4) => Instr::F32_LtEq,
-        (BinOp::Le,LayoutKind::Float,8) => Instr::F64_LtEq,
-        (BinOp::Ge,LayoutKind::Float,4) => Instr::F32_GtEq,
-        (BinOp::Ge,LayoutKind::Float,8) => Instr::F64_GtEq,
+        (BinaryOp::LtEq,LayoutKind::Float,4) => Instr::F32_LtEq,
+        (BinaryOp::LtEq,LayoutKind::Float,8) => Instr::F64_LtEq,
+        (BinaryOp::GtEq,LayoutKind::Float,4) => Instr::F32_GtEq,
+        (BinaryOp::GtEq,LayoutKind::Float,8) => Instr::F64_GtEq,
 
-        (BinOp::Add,LayoutKind::Float,4) => Instr::F32_Add,
-        (BinOp::Add,LayoutKind::Float,8) => Instr::F64_Add,
-        (BinOp::Sub,LayoutKind::Float,4) => Instr::F32_Sub,
-        (BinOp::Sub,LayoutKind::Float,8) => Instr::F64_Sub,
-        (BinOp::Mul,LayoutKind::Float,4) => Instr::F32_Mul,
-        (BinOp::Mul,LayoutKind::Float,8) => Instr::F64_Mul,
-        (BinOp::Div,LayoutKind::Float,4) => Instr::F32_Div,
-        (BinOp::Div,LayoutKind::Float,8) => Instr::F64_Div,
-        (BinOp::Rem,LayoutKind::Float,4) => Instr::F32_Rem,
-        (BinOp::Rem,LayoutKind::Float,8) => Instr::F64_Rem,
+        (BinaryOp::Add,LayoutKind::Float,4) => Instr::F32_Add,
+        (BinaryOp::Add,LayoutKind::Float,8) => Instr::F64_Add,
+        (BinaryOp::Sub,LayoutKind::Float,4) => Instr::F32_Sub,
+        (BinaryOp::Sub,LayoutKind::Float,8) => Instr::F64_Sub,
+        (BinaryOp::Mul,LayoutKind::Float,4) => Instr::F32_Mul,
+        (BinaryOp::Mul,LayoutKind::Float,8) => Instr::F64_Mul,
+        (BinaryOp::Div,LayoutKind::Float,4) => Instr::F32_Div,
+        (BinaryOp::Div,LayoutKind::Float,8) => Instr::F64_Div,
+        (BinaryOp::Rem,LayoutKind::Float,4) => Instr::F32_Rem,
+        (BinaryOp::Rem,LayoutKind::Float,8) => Instr::F64_Rem,
 
-        (BinOp::Eq,LayoutKind::Bool,1) => Instr::I8_Eq,
-        (BinOp::Ne,LayoutKind::Bool,1) => Instr::I8_NotEq,
+        (BinaryOp::Eq,LayoutKind::Bool,1) => Instr::I8_Eq,
+        (BinaryOp::NotEq,LayoutKind::Bool,1) => Instr::I8_NotEq,
 
-        (BinOp::BitOr,LayoutKind::Bool,1) => Instr::I8_Or,
-        (BinOp::BitAnd,LayoutKind::Bool,1) => Instr::I8_And,
-        (BinOp::BitXor,LayoutKind::Bool,1) => Instr::I8_Xor,
+        (BinaryOp::BitOr,LayoutKind::Bool,1) => Instr::I8_Or,
+        (BinaryOp::BitAnd,LayoutKind::Bool,1) => Instr::I8_And,
+        (BinaryOp::BitXor,LayoutKind::Bool,1) => Instr::I8_Xor,
 
         _ => panic!("no binary op: {:?} {:?} {:?}",&layout.kind,layout.assert_size(),op)
     };

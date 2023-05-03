@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
-use crate::ir::IRFunctionBuilder;
+use crate::ir::{IRFunctionBuilder, IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
 use crate::layout::LayoutKind;
 use crate::vm::Function;
 use crate::vm::instr::Instr;
@@ -10,8 +10,7 @@ use crate::vm::{self, instr::Slot};
 
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_middle::ty::SubstsRef;
-use rustc_middle::ty::adjustment::PointerCast;
-use rustc_middle::thir::{self, Thir, ExprId, ExprKind, StmtId, StmtKind, BlockId, Pat, PatKind, LogicalOp};
+use rustc_middle::thir::{self,Thir};
 
 use rustc_hir::hir_id::ItemLocalId;
 use rustc_hir::def_id::LocalDefId;
@@ -19,51 +18,55 @@ use rustc_hir::def_id::LocalDefId;
 pub struct HirCompiler<'a,'tcx> {
     in_func_id: LocalDefId,
     in_func_subs: SubstsRef<'tcx>,
-    in_func: &'a Thir<'tcx>,
+    in_func: &'a IRFunction<'tcx>,
     out_bc: Vec<vm::instr::Instr<'tcx>>,
     vm: &'a vm::VM<'tcx>,
     stack: CompilerStack,
-    locals: Vec<(ItemLocalId,Slot)>,
-    last_scope: ItemLocalId,
-    loops: Vec<(ItemLocalId,Slot,usize)>,
-    loop_breaks: Vec<(ItemLocalId,usize)>
+    locals: Vec<(u32,Slot)>,
+    last_scope: u32,
+    loops: Vec<LoopInfo>,
+    loop_breaks: Vec<BreakInfo>
+}
+
+struct LoopInfo {
+    loop_id: u32,
+    result_slot: Slot,
+    start_index: usize
+}
+
+struct BreakInfo {
+    loop_id: u32,
+    break_index: usize
 }
 
 impl<'a,'tcx> HirCompiler<'a,'tcx> {
-    pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func_subs: SubstsRef<'tcx>, in_func: &'a Thir<'tcx>, root_expr: ExprId) -> Vec<vm::instr::Instr<'tcx>> {
+    pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func_subs: SubstsRef<'tcx>, in_func: &'a Thir<'tcx>, root_expr: thir::ExprId) -> Vec<vm::instr::Instr<'tcx>> {
 
         let ir = IRFunctionBuilder::build(in_func_id,root_expr,in_func);
 
         let mut compiler = HirCompiler {
             in_func_id,
             in_func_subs,
-            in_func,
+            in_func: &ir,
             out_bc: Vec::new(),
             vm,
             stack: Default::default(),
             locals: Vec::new(),
-            last_scope: ItemLocalId::MAX,
+            last_scope: 0xFFFFFFFF,
             loops: Vec::new(),
             loop_breaks: Vec::new()
         };
 
-        let out_ty = match in_func.body_type {
-            thir::BodyTy::Fn(sig) => {
-                sig.output()
-            }
-            _ => panic!("const not supported")
-        };
-
-        let out_ty = compiler.apply_subs(out_ty);
+        let out_ty = compiler.apply_subs(ir.return_ty);
         let out_layout = crate::layout::Layout::from(out_ty,vm);
 
         let ret_slot = compiler.stack.alloc(&out_layout);
         assert_eq!(ret_slot.index(),0);
-        for param in &in_func.params {
-            compiler.alloc_pattern(param.pat.as_ref().unwrap());
+        for param in &ir.params {
+            compiler.alloc_pattern(param);
         }
 
-        compiler.lower_expr(root_expr,Some(Slot::new(0)));
+        compiler.lower_expr(ir.root_expr,Some(Slot::new(0)));
         compiler.out_bc.push(Instr::Return);
 
         if compiler.vm.is_verbose {
@@ -85,13 +88,13 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     }
 
     fn lower_block(&mut self, id: BlockId, dst_slot: Option<Slot>) -> Slot {
-        let block = &self.in_func.blocks[id];
+        let block = self.in_func.block(id);
         for stmt_id in block.stmts.iter() {
             self.lower_stmt(*stmt_id);
         }
-        if let Some(expr) = block.expr {
+        if let Some(expr) = block.result {
             // ALWAYS have a slot allocated for the final expression
-            // prevents wrongly aliasing locals
+            // prevents wrongly aliasing locals - TODO we may want to allocate this up-front for saner stack layout
             let dst_slot = dst_slot.unwrap_or_else(|| {
                 self.stack.alloc(&self.expr_layout(expr))
             });
@@ -103,42 +106,34 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     }
 
     fn lower_stmt(&mut self, id: StmtId) {
-        let stmt = &self.in_func.stmts[id];
-        match &stmt.kind {
-            StmtKind::Let{pattern,initializer,init_scope,remainder_scope,else_block,..} => {
+        let stmt = self.in_func.stmt(id);
+        match stmt {
+            Stmt::Let{pattern,init,else_block,..} => {
                 assert!(else_block.is_none());
                 let dst_slot = self.alloc_pattern(pattern);
-                if let Some(init) = initializer {
+                if let Some(init) = init {
                     self.lower_expr(*init, Some(dst_slot));
                 }
             }
-            StmtKind::Expr{scope, expr} => {
+            Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
             }
         }
     }
 
     fn lower_expr(&mut self, id: ExprId, dst_slot: Option<Slot>) -> Slot {
-        let expr = &self.in_func.exprs[id];
-        //println!("{:?}",expr.kind);
+        let expr = self.in_func.expr(id);
         let expr_layout = self.expr_layout(id);
 
         match &expr.kind {
-            ExprKind::Scope{region_scope,value,..} => {
-                self.last_scope = region_scope.id;
+            ExprKind::Dummy(value,scope_id) => {
+                if let Some(scope_id) = scope_id {
+                    self.last_scope = *scope_id;
+                }
                 self.lower_expr(*value, dst_slot)
             }
-            ExprKind::Block{block} => {
+            ExprKind::Block(block) => {
                 self.lower_block(*block, dst_slot)
-            }
-            ExprKind::ValueTypeAscription{source,..} => {
-                self.lower_expr(*source, dst_slot)
-            }
-            ExprKind::Use{source} => {
-                self.lower_expr(*source, dst_slot)
-            }
-            ExprKind::NeverToAny{source} => {
-                self.lower_expr(*source, dst_slot)
             }
             // PLACES:
             ExprKind::VarRef{..} |
@@ -171,15 +166,15 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     }
                 }
             }
-            ExprKind::Literal{lit,neg} => {
+            ExprKind::LiteralValue(n) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
-                
-                self.out_bc.push(bytecode_select::literal(&lit.node, expr_layout.assert_size(), dst_slot, *neg));
+
+                self.out_bc.push(bytecode_select::literal(*n, expr_layout.assert_size(), dst_slot));
                 dst_slot
             }
-            ExprKind::Unary{op, arg} => {
+            ExprKind::Unary(op, arg) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
@@ -192,7 +187,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.out_bc.push(ctor(dst_slot,arg_slot));
                 dst_slot
             }
-            ExprKind::Cast{source} => {
+            ExprKind::Cast(source) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
@@ -206,7 +201,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.out_bc.push(ctor(dst_slot,arg_slot));
                 dst_slot
             }
-            ExprKind::Binary{op, lhs, rhs} => {
+            ExprKind::Binary(op, lhs, rhs) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
@@ -224,7 +219,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 }
                 dst_slot
             }
-            ExprKind::Assign{lhs, rhs} => {
+            ExprKind::Assign(lhs, rhs) => {
                 let rhs_slot = self.lower_expr(*rhs, None);
 
                 let layout = self.expr_layout(*lhs);
@@ -245,7 +240,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::AssignOp{op,lhs,rhs} => {
+            ExprKind::AssignOp(op,lhs,rhs) => {
                 let rhs_slot = self.lower_expr(*rhs, None);
 
                 let layout = self.expr_layout(*lhs);
@@ -269,8 +264,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Call{ty,args,..} => {
-                let ty = self.apply_subs(*ty);
+            ExprKind::Call{func_ty,func_expr,args} => {
+                let ty = self.apply_subs(*func_ty);
                 let func = self.ty_to_func(ty).expect("can't find function");
 
                 let call_start_instr = self.out_bc.len();
@@ -342,7 +337,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     res
                 }
             }
-            ExprKind::LogicalOp{op,lhs,rhs} => {
+            ExprKind::LogicOp(op,lhs,rhs) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
@@ -356,17 +351,17 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 let jump_offset_1 = -self.get_jump_offset(jump_index_1);
                 
                 match op {
-                    LogicalOp::And => {
+                    LogicOp::And => {
                         self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, dst_slot);
                     }
-                    LogicalOp::Or => {
+                    LogicOp::Or => {
                         self.out_bc[jump_index_1] = Instr::JumpT(jump_offset_1, dst_slot);
                     }
                 }
 
                 dst_slot
             }
-            ExprKind::Loop{body} => {
+            ExprKind::Loop(body) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
@@ -375,7 +370,11 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 let loop_index = self.out_bc.len();
 
-                self.loops.push((loop_id,dst_slot,0));
+                self.loops.push(LoopInfo{
+                    loop_id,
+                    result_slot: dst_slot,
+                    start_index: loop_index
+                });
                 let loop_count = self.loops.len();
 
                 self.lower_expr(*body, Some(Slot::DUMMY));
@@ -388,7 +387,9 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 self.out_bc.push(Instr::Jump(offset));
 
                 // fix breaks
-                let break_indices: Vec<_> = self.loop_breaks.drain_filter(|(id,_)| *id == loop_id).map(|(_,x)| x).collect();
+                let break_indices: Vec<_> = self.loop_breaks.drain_filter(|break_info| break_info.loop_id == loop_id)
+                    .map(|break_info| break_info.break_index).collect();
+                
                 for break_index in break_indices {
                     let offset = -self.get_jump_offset(break_index);
                     self.out_bc[break_index] = Instr::Jump(offset);
@@ -396,36 +397,34 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 dst_slot
             }
-            ExprKind::Break{label, value} => {
-
-                let loop_id = label.id;
-
-                let (_,loop_slot,_) = self.loops.iter().find(|x| x.0 == loop_id).unwrap();
+            ExprKind::Break{scope_id, value} => {
+                let loop_id = *scope_id;
 
                 if let Some(value) = value {
-                    self.lower_expr(*value, Some(*loop_slot));
+                    let loop_slot = self.loops.iter().find(|x| x.loop_id == loop_id).unwrap().result_slot;
+                    self.lower_expr(*value, Some(loop_slot));
                 }
 
                 let break_index = self.out_bc.len();
-                self.loop_breaks.push((loop_id,break_index));
+                self.loop_breaks.push(BreakInfo{loop_id,break_index});
 
                 self.out_bc.push(Instr::Bad);
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Continue{label} => {
-                let loop_id = label.id;
+            ExprKind::Continue{scope_id} => {
+                let loop_id = *scope_id;
 
-                let (_,_,loop_start) = self.loops.iter().find(|x| x.0 == loop_id).unwrap();
+                let loop_start = self.loops.iter().find(|x| x.loop_id == loop_id).unwrap().start_index;
 
-                let offset = self.get_jump_offset(*loop_start) + 1;
+                let offset = self.get_jump_offset(loop_start) + 1;
                 self.out_bc.push(Instr::Jump(offset));
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Return{value} => {
+            ExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.lower_expr(*value, Some(Slot::new(0)));
                 }
@@ -434,7 +433,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Borrow{arg,..} | ExprKind::AddressOf{arg,..} => {
+            ExprKind::Ref(arg,..) => {
                 let arg_ty = self.expr_ty(*arg);
 
                 let place = self.expr_to_place(*arg);
@@ -461,7 +460,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                     }
                 }
             }
-            ExprKind::Deref{arg} => {
+            ExprKind::DeRef(arg) => {
 
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
@@ -477,10 +476,10 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 dst_slot
             }
-            ExprKind::Pointer{cast,source} => {
+            ExprKind::PointerCast(source,cast) => {
 
                 match cast {
-                    PointerCast::Unsize => {
+                    PointerCast::UnSize => {
                         assert_eq!(expr_layout.assert_size(), POINTER_SIZE.bytes()*2);
 
                         let src_ty = self.expr_ty(*source);
@@ -509,14 +508,14 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
                         // copy base
                         let ptr_size = POINTER_SIZE.bytes();
                         self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, ptr_size).unwrap());
-                        self.out_bc.push(bytecode_select::literal_raw(meta as i128,ptr_size,dst_slot.offset_by(ptr_size)));
+                        self.out_bc.push(bytecode_select::literal(meta as i128,ptr_size,dst_slot.offset_by(ptr_size)));
                     }
                     _ => panic!("todo ptr cast {:?}",cast)
                 }
 
                 self.lower_expr(*source, dst_slot)
             }
-            ExprKind::Tuple{fields} => {
+            ExprKind::Tuple(fields) => {
 
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
@@ -529,7 +528,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 dst_slot
             }
-            ExprKind::Array{fields} => {
+            ExprKind::Array(fields) => {
                 let LayoutKind::Array{elem_size,..} = expr_layout.kind else {
                     panic!("bad array layout");
                 };
@@ -545,17 +544,17 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
 
                 dst_slot
             }
-            ExprKind::Adt(adt) => {
+            ExprKind::Adt{variant,fields} => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
                 });
 
-                assert!(adt.variant_index.index() == 0);
+                assert!(*variant == 0);
 
-                for field in adt.fields.iter() {
-                    let offset = expr_layout.field_offsets[field.name.index()];
+                for (field_index,expr) in fields.iter() {
+                    let offset = expr_layout.field_offsets[*field_index as usize];
                     let field_slot = dst_slot.offset_by(offset);
-                    self.lower_expr(field.expr, Some(field_slot));
+                    self.lower_expr(*expr, Some(field_slot));
                 }
 
                 dst_slot
@@ -565,29 +564,26 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     }
 
     fn expr_to_place(&mut self, id: ExprId) -> Place {
-        let expr = &self.in_func.exprs[id];
+        let expr = self.in_func.expr(id);
 
         match &expr.kind {
-            ExprKind::Scope{region_scope,value,..} => {
+            ExprKind::Dummy(value,_) => {
                 self.expr_to_place(*value)
             }
-            ExprKind::Deref{arg} => {
+            ExprKind::DeRef(arg) => {
                 let addr_slot = self.lower_expr(*arg, None);
                 Place::Ptr(addr_slot, 0)
             }
-            ExprKind::VarRef{id} => {
-                let hir_id = id.0;
-                assert_eq!(hir_id.owner.def_id,self.in_func_id);
-
-                let local_slot = self.find_local(hir_id.local_id);
+            ExprKind::VarRef(local_id) => {
+                let local_slot = self.find_local(*local_id);
                 Place::Local(local_slot)
             }
-            ExprKind::Field{lhs,variant_index,name} => {
+            ExprKind::Field{lhs,variant,field} => {
 
-                assert!(variant_index.index() == 0);
+                assert!(*variant == 0);
 
                 let layout = self.expr_layout(*lhs);
-                let field_offset = layout.field_offsets[name.index()];
+                let field_offset = layout.field_offsets[*field as usize];
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(base_slot) => {
@@ -640,8 +636,8 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
             ExprKind::Block{..} |
             ExprKind::Tuple{..} |
             ExprKind::Binary{..} |
-            ExprKind::Borrow{..} | // TODO special case? is *& a no-op or does it create a temporary?
-            ExprKind::Literal{..} => {
+            ExprKind::Ref{..} | // TODO special case? is *& a no-op or does it create a temporary?
+            ExprKind::LiteralValue{..} => {
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
             }
@@ -655,7 +651,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
     }
 
     fn expr_ty(&self, id: ExprId) -> Ty<'tcx> {
-        let ty = self.in_func.exprs[id].ty;
+        let ty = self.in_func.expr(id).ty;
         self.apply_subs(ty)
     }
 
@@ -679,32 +675,23 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         }
     }
 
-    fn alloc_pattern(&mut self, pat: &Pat<'tcx>) -> Slot {
+    fn alloc_pattern(&mut self, pat: &Pattern<'tcx>) -> Slot {
         match &pat.kind {
-            PatKind::AscribeUserType{subpattern,..} => {
-                self.alloc_pattern(subpattern)
-            }
-            PatKind::Binding{var,ty,subpattern,..} => {
+            PatternKind::LocalBinding(var_id) => {
                 // todo mode may pose issues?
-
-                let hir_id = var.0;
-                assert_eq!(hir_id.owner.def_id,self.in_func_id);
-                let var_id = hir_id.local_id;
-
-                assert!(subpattern.is_none());
                 
-                let ty = self.apply_subs(*ty);
+                let ty = self.apply_subs(pat.ty);
                 let layout = crate::layout::Layout::from(ty, self.vm);
 
                 let slot = self.stack.alloc(&layout);
-                self.locals.push((var_id,slot));
+                self.locals.push((*var_id,slot));
                 slot
             }
             _ => panic!("pat {:?}",pat.kind)
         }
     }
 
-    fn find_local(&self, local: ItemLocalId) -> Slot {
+    fn find_local(&self, local: u32) -> Slot {
         for (id,slot) in &self.locals {
             if *id == local {
                 return *slot;

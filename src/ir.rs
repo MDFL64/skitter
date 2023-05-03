@@ -16,11 +16,11 @@ pub struct IRFunction<'vm> {
     blocks: Vec<Block>
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub struct BlockId(u32);
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub struct StmtId(u32);
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub struct ExprId(u32);
 
 pub struct Expr<'vm> {
@@ -81,7 +81,7 @@ pub enum ExprKind<'vm> {
     Continue{scope_id: u32},
     Return(Option<ExprId>),
 
-    Call{func_ty: Ty<'vm>, func: ExprId, args: Vec<ExprId>},
+    Call{func_ty: Ty<'vm>, func_expr: ExprId, args: Vec<ExprId>},
     Tuple(Vec<ExprId>),
     Adt{variant: u32, fields: Vec<(u32,ExprId)> },
     Array(Vec<ExprId>),
@@ -93,17 +93,18 @@ pub enum ExprKind<'vm> {
     Index{ lhs: ExprId, index: ExprId },
 }
 
+#[derive(Debug)]
 pub enum PatternKind {
     LocalBinding(u32)
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub enum UnaryOp {
     Neg,
     Not
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -369,7 +370,7 @@ impl IRFunctionBuilder {
             thir::ExprKind::Call{ty,fun,ref args,..} => {
                 ExprKind::Call{
                     func_ty: ty,
-                    func: self.expr_id(fun),
+                    func_expr: self.expr_id(fun),
                     args: args.iter().map(|arg| self.expr_id(*arg)).collect()
                 }
             }
@@ -456,5 +457,19 @@ impl IRFunctionBuilder {
                 }
             }
         }
+    }
+}
+
+impl<'vm> IRFunction<'vm> {
+    pub fn expr(&self, id: ExprId) -> &Expr<'vm> {
+        &self.exprs[id.0 as usize]
+    }
+
+    pub fn stmt(&self, id: StmtId) -> &Stmt<'vm> {
+        &self.stmts[id.0 as usize]
+    }
+
+    pub fn block(&self, id: BlockId) -> &Block {
+        &self.blocks[id.0 as usize]
     }
 }
