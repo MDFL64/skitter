@@ -51,7 +51,7 @@ pub enum IntSign {
 }
 
 impl Layout {
-    pub fn from<'tcx>(ty: Ty<'tcx>, vm: &VM<'tcx>) -> Self {
+    pub fn from<'tcx>(ty: Ty<'tcx>, vm: &VM<'_,'tcx>) -> Self {
         let kind = ty.kind();
         match kind {
             TyKind::Int(IntTy::I8) => Layout::simple(1, LayoutKind::Int(IntSign::Signed)),
@@ -132,7 +132,7 @@ impl Layout {
         (x + mask) & !mask
     }
 
-    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind, vm: &VM<'tcx>) -> Self {
+    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind, vm: &VM<'_,'tcx>) -> Self {
         let mut size = 0;
         let mut align = 1;
 
@@ -160,7 +160,7 @@ impl Layout {
         }
     }
 
-    fn pointer<'tcx>(ref_ty: Ty<'tcx>, kind: LayoutKind, vm: &VM<'tcx>) -> Self {
+    fn pointer<'tcx>(ref_ty: Ty<'tcx>, kind: LayoutKind, vm: &VM<'_,'tcx>) -> Self {
         let ptr_size = POINTER_SIZE.bytes();
 
         let ref_layout = Layout::from(ref_ty,vm);

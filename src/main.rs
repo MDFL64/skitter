@@ -25,6 +25,7 @@ mod cli;
 mod test;
 mod abi;
 mod ir;
+mod types;
 
 use rustc_session::config;
 use rustc_middle::ty::TyCtxt;

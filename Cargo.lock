@@ -69,6 +69,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "bumpalo"
+version = "3.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b1ce199063694f33ffb7dd4e0ee620741495c32833cde5aa08f02a0bf96f0c8"
+
+[[package]]
 name = "cc"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -211,29 +217,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a987beff54b60ffa6d51982e1aa1146bc42f19bd26be28b0586f252fccf5317"
 
 [[package]]
-name = "libmimalloc-sys"
-version = "0.1.33"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ac0e912c8ef1b735e92369695618dc5b1819f5a7bf3f167301a3ba1cea515e"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36eb31c1778188ae1e64398743890d0877fef36d11521ac60406b42016e8c2cf"
-
-[[package]]
-name = "mimalloc"
-version = "0.1.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2894987a3459f3ffb755608bd82188f8ed00d0ae077f1edea29c068d639d98"
-dependencies = [
- "libmimalloc-sys",
-]
 
 [[package]]
 name = "once_cell"
@@ -277,9 +264,9 @@ dependencies = [
 name = "skitter"
 version = "0.0.0"
 dependencies = [
+ "bumpalo",
  "clap",
  "colored",
- "mimalloc",
 ]
 
 [[package]]

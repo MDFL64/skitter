@@ -7,25 +7,28 @@ use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
 use crate::hir_compiler::HirCompiler;
 use crate::ir::IRFunctionBuilder;
+use crate::types::TypeContext;
 use crate::vm::instr::Slot;
 
 use super::instr::Instr;
 
-pub struct VM<'tcx> {
+pub struct VM<'vm,'tcx> {
     pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
     functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
+    pub types: TypeContext<'vm>,
     pub is_verbose: bool
 }
 
 
-impl<'tcx> VM<'tcx> {
+impl<'vm,'tcx> VM<'vm,'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
         Self {
             tcx,
             // 64k stack - TODO move out of this struct, this is not safe
             stack: vec!(0;4096),
             functions: Default::default(),
+            types: Default::default(),
             is_verbose: false
         }
     }
@@ -55,7 +58,7 @@ impl<'tcx> VM<'tcx> {
         }).clone()
     }
 
-    pub fn call(&self, func: &Function<'tcx>, stack_offset: u32) {
+    pub fn call(&'vm self, func: &Function<'tcx>, stack_offset: u32) {
 
         if let Some(native) = func.native {
             unsafe {
@@ -107,7 +110,7 @@ impl<'tcx> Function<'tcx> {
         }
     }
 
-    fn bytecode(&self, vm: &VM<'tcx>) -> &[Instr<'tcx>] {
+    fn bytecode<'vm>(&self, vm: &'vm VM<'vm,'tcx>) -> &[Instr<'tcx>] {
         self.bytecode.get_or_init(|| {
 
             // resolve trait methods to a specific instance
@@ -126,7 +129,7 @@ impl<'tcx> Function<'tcx> {
             let (thir_body,root_expr) = vm.tcx.thir_body(WithOptConstParam::unknown(local_id)).expect("type check failed");
             let thir_body = thir_body.borrow();
 
-            let ir = IRFunctionBuilder::build(local_id, root_expr, &thir_body);
+            let ir = IRFunctionBuilder::build(vm,local_id, root_expr, &thir_body);
 
             HirCompiler::compile(vm,&ir,&resolve_subs)
         })

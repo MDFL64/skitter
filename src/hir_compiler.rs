@@ -11,11 +11,11 @@ use crate::vm::{self, instr::Slot};
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_middle::ty::SubstsRef;
 
-pub struct HirCompiler<'a,'tcx> {
+pub struct HirCompiler<'vm,'tcx,'f> {
     in_func_subs: SubstsRef<'tcx>,
-    in_func: &'a IRFunction<'tcx>,
+    in_func: &'f IRFunction<'tcx>,
     out_bc: Vec<vm::instr::Instr<'tcx>>,
-    vm: &'a vm::VM<'tcx>,
+    vm: &'vm vm::VM<'vm,'tcx>,
     stack: CompilerStack,
     locals: Vec<(u32,Slot)>,
     last_scope: u32,
@@ -34,8 +34,8 @@ struct BreakInfo {
     break_index: usize
 }
 
-impl<'a,'tcx> HirCompiler<'a,'tcx> {
-    pub fn compile(vm: &'a vm::VM<'tcx>, ir: &'a IRFunction<'tcx>, subs: SubstsRef<'tcx>) -> Vec<vm::instr::Instr<'tcx>> {
+impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
+    pub fn compile(vm: &'vm vm::VM<'vm,'tcx>, ir: &'f IRFunction<'tcx>, subs: SubstsRef<'tcx>) -> Vec<vm::instr::Instr<'tcx>> {
 
         let mut compiler = HirCompiler {
             in_func_subs: subs,
