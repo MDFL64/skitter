@@ -9,6 +9,8 @@ use rustc_hir::def_id::LocalDefId;
 
 pub struct IRFunction<'vm> {
     pub root_expr: ExprId,
+    pub params: Vec<Box<Pattern<'vm>>>,
+    pub return_ty: Ty<'vm>,
     exprs: Vec<Expr<'vm>>,
     stmts: Vec<Stmt<'vm>>,
     blocks: Vec<Block>
@@ -21,12 +23,12 @@ pub struct StmtId(u32);
 #[derive(Debug)]
 pub struct ExprId(u32);
 
-struct Expr<'vm> {
-    kind: ExprKind<'vm>,
-    ty: Ty<'vm>
+pub struct Expr<'vm> {
+    pub kind: ExprKind<'vm>,
+    pub ty: Ty<'vm>
 }
 
-enum Stmt<'vm> {
+pub enum Stmt<'vm> {
     Expr(ExprId),
     Let{
         pattern: Box<Pattern<'vm>>,
@@ -35,18 +37,18 @@ enum Stmt<'vm> {
     }
 }
 
-struct Block {
-    stmts: Vec<StmtId>,
-    result: Option<ExprId>,
+pub struct Block {
+    pub stmts: Vec<StmtId>,
+    pub result: Option<ExprId>,
 }
 
-struct Pattern<'vm> {
-    kind: PatternKind,
-    ty: Ty<'vm>
+pub struct Pattern<'vm> {
+    pub kind: PatternKind,
+    pub ty: Ty<'vm>
 }
 
 #[derive(Debug)]
-enum ExprKind<'vm> {
+pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
     /// Stores an optional scope ID which is used to resolve breaks
     Dummy(ExprId,Option<u32>),
@@ -91,18 +93,18 @@ enum ExprKind<'vm> {
     Index{ lhs: ExprId, index: ExprId },
 }
 
-enum PatternKind {
+pub enum PatternKind {
     LocalBinding(u32)
 }
 
 #[derive(Debug)]
-enum UnaryOp {
+pub enum UnaryOp {
     Neg,
     Not
 }
 
 #[derive(Debug)]
-enum BinaryOp {
+pub enum BinaryOp {
     Add,
     Sub,
     Mul,
@@ -124,13 +126,13 @@ enum BinaryOp {
 }
 
 #[derive(Debug)]
-enum LogicOp {
+pub enum LogicOp {
     And,
     Or
 }
 
 #[derive(Debug)]
-enum PointerCast{
+pub enum PointerCast{
     ReifyFnPointer,
     UnsafeFnPointer,
     ClosureFnPointer,
@@ -162,7 +164,20 @@ impl IRFunctionBuilder {
             }
         }).collect();
 
+        let params = thir.params.iter().map(|param| {
+            builder.pattern(param.pat.as_ref().unwrap())
+        }).collect();
+
+        let return_ty = match thir.body_type {
+            thir::BodyTy::Fn(sig) => {
+                sig.output()
+            }
+            _ => panic!("const not supported")
+        };
+
         IRFunction{
+            params,
+            return_ty,
             root_expr,
             exprs,
             stmts,
