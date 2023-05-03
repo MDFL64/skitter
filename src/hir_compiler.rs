@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
-use crate::ir::{IRFunctionBuilder, IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
+use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
 use crate::layout::LayoutKind;
 use crate::vm::Function;
 use crate::vm::instr::Instr;
@@ -10,13 +10,8 @@ use crate::vm::{self, instr::Slot};
 
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_middle::ty::SubstsRef;
-use rustc_middle::thir::{self,Thir};
-
-use rustc_hir::hir_id::ItemLocalId;
-use rustc_hir::def_id::LocalDefId;
 
 pub struct HirCompiler<'a,'tcx> {
-    in_func_id: LocalDefId,
     in_func_subs: SubstsRef<'tcx>,
     in_func: &'a IRFunction<'tcx>,
     out_bc: Vec<vm::instr::Instr<'tcx>>,
@@ -40,13 +35,10 @@ struct BreakInfo {
 }
 
 impl<'a,'tcx> HirCompiler<'a,'tcx> {
-    pub fn compile(vm: &'a vm::VM<'tcx>, in_func_id: LocalDefId, in_func_subs: SubstsRef<'tcx>, in_func: &'a Thir<'tcx>, root_expr: thir::ExprId) -> Vec<vm::instr::Instr<'tcx>> {
-
-        let ir = IRFunctionBuilder::build(in_func_id,root_expr,in_func);
+    pub fn compile(vm: &'a vm::VM<'tcx>, ir: &'a IRFunction<'tcx>, subs: SubstsRef<'tcx>) -> Vec<vm::instr::Instr<'tcx>> {
 
         let mut compiler = HirCompiler {
-            in_func_id,
-            in_func_subs,
+            in_func_subs: subs,
             in_func: &ir,
             out_bc: Vec::new(),
             vm,
@@ -70,7 +62,7 @@ impl<'a,'tcx> HirCompiler<'a,'tcx> {
         compiler.out_bc.push(Instr::Return);
 
         if compiler.vm.is_verbose {
-            println!("compiled {:?}",in_func_id);
+            println!("compiled {:?} for {:?}","(todo)",subs);
             for (i,bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}",i,bc);
             }

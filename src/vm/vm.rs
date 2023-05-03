@@ -6,6 +6,7 @@ use rustc_middle::ty::SubstsRef;
 use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
 use crate::hir_compiler::HirCompiler;
+use crate::ir::IRFunctionBuilder;
 use crate::vm::instr::Slot;
 
 use super::instr::Instr;
@@ -65,27 +66,7 @@ impl<'tcx> VM<'tcx> {
         }
 
         // fetch bytecode
-        let bc = func.bytecode.get_or_init(|| {
-            //let mir = self.tcx.mir_built(WithOptConstParam::unknown(func.def_id)).borrow();
-            //MirCompiler::compile(self, &mir)
-
-            // resolve trait methods to a specific instance
-            let resolve_arg = rustc_middle::ty::ParamEnv::reveal_all().and((func.def_id.into(),func.subs));
-            let resolved = self.tcx.resolve_instance(resolve_arg).unwrap().unwrap();
-
-            let resolve_id = resolved.def_id();
-            let resolve_subs = resolved.substs;
-
-            if resolve_id.krate != rustc_hir::def_id::LOCAL_CRATE {
-                panic!("non-local call {:?} {:?}",resolve_id,resolve_subs);
-            }
-            
-            let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: resolve_id.index };
-
-            let (thir_body,root_expr) = self.tcx.thir_body(WithOptConstParam::unknown(local_id)).expect("type check failed");
-            let thir_body = thir_body.borrow();
-            HirCompiler::compile(self,local_id,resolve_subs,&thir_body,root_expr)
-        });
+        let bc = func.bytecode(self);
 
         // run
         unsafe {            
@@ -113,7 +94,7 @@ pub struct Function<'tcx> {
     pub def_id: DefId,
     pub subs: SubstsRef<'tcx>,
     pub native: Option<unsafe fn(*mut u8)>,
-    pub bytecode: OnceLock<Vec<Instr<'tcx>>>
+    bytecode: OnceLock<Vec<Instr<'tcx>>>
 }
 
 impl<'tcx> Function<'tcx> {
@@ -124,6 +105,31 @@ impl<'tcx> Function<'tcx> {
             native: None,
             bytecode: Default::default()
         }
+    }
+
+    fn bytecode(&self, vm: &VM<'tcx>) -> &[Instr<'tcx>] {
+        self.bytecode.get_or_init(|| {
+
+            // resolve trait methods to a specific instance
+            let resolve_arg = rustc_middle::ty::ParamEnv::reveal_all().and((self.def_id.into(),self.subs));
+            let resolved = vm.tcx.resolve_instance(resolve_arg).unwrap().unwrap();
+
+            let resolve_id = resolved.def_id();
+            let resolve_subs = resolved.substs;
+
+            if resolve_id.krate != rustc_hir::def_id::LOCAL_CRATE {
+                panic!("non-local call {:?} {:?}",resolve_id,resolve_subs);
+            }
+            
+            let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: resolve_id.index };
+
+            let (thir_body,root_expr) = vm.tcx.thir_body(WithOptConstParam::unknown(local_id)).expect("type check failed");
+            let thir_body = thir_body.borrow();
+
+            let ir = IRFunctionBuilder::build(local_id, root_expr, &thir_body);
+
+            HirCompiler::compile(vm,&ir,&resolve_subs)
+        })
     }
 }
 
