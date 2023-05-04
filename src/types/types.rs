@@ -16,8 +16,8 @@ pub enum TypeKind<'vm> {
     Array(Type<'vm>,u32),
     Slice(Type<'vm>),
 
-    FunctionDef(TypeDef),
-    Adt(TypeDef),
+    FunctionDef(TypeDef<'vm>),
+    Adt(TypeDef<'vm>),
 }
 
 #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
@@ -43,7 +43,19 @@ pub enum FloatWidth {
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
-pub enum TypeDef {
+pub struct TypeDef<'vm> {
+    pub id: TypeDefId,
+    pub subs: Vec<Sub<'vm>>
+}
+
+// TODO this should maybe just be a ref to a vm structure?
+#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+pub enum TypeDefId {
     Local(u32),
     External(String) // do not actually use a string for this
+}
+
+#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+pub enum Sub<'vm> {
+    Type(Type<'vm>)
 }

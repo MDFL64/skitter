@@ -4,10 +4,38 @@ use rustc_middle::ty::{TyCtxt, Ty, TyKind, IntTy, UintTy, FloatTy};
 use rustc_hir::def_id::DefId;
 use bumpalo::Bump;
 
-use super::{TypeKind, IntWidth, IntSign, TypeDef, FloatWidth};
+use crate::vm::VM;
 
-#[derive(Debug,Hash,PartialEq,Eq,Copy,Clone)]
-pub struct Type<'vm>(&'vm InternedType<'vm>);
+use super::{TypeKind, IntWidth, IntSign, TypeDef, FloatWidth, TypeDefId};
+
+#[derive(Copy,Clone)]
+pub struct Type<'vm>(&'vm InternedType<'vm>,&'vm VM<'vm>);
+
+impl<'vm> Type<'vm> {
+    pub fn kind(&self) -> &TypeKind<'vm> {
+        &self.0.kind
+    }
+}
+
+impl<'vm> std::fmt::Debug for Type<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<'vm> std::hash::Hash for Type<'vm> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<'vm> std::cmp::PartialEq for Type<'vm> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<'vm> std::cmp::Eq for Type<'vm> {}
 
 #[derive(Default)]
 pub struct TypeContext<'vm> {
@@ -16,7 +44,7 @@ pub struct TypeContext<'vm> {
 }
 
 impl<'vm> TypeContext<'vm> {
-    pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Type {
+    pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>) -> Type<'vm> {
         let kind = ty.kind();
         let new_kind = match kind {
             TyKind::Int(int) => {
@@ -50,27 +78,27 @@ impl<'vm> TypeContext<'vm> {
             TyKind::Never => TypeKind::Never,
 
             TyKind::Ref(_,ref_ty,_) => {
-                let ref_ty = self.type_from_rustc(*ref_ty, tcx);
+                let ref_ty = self.type_from_rustc(*ref_ty, vm, tcx);
                 TypeKind::Ref(ref_ty)
             }
             TyKind::RawPtr(ptr) => {
-                let ref_ty = self.type_from_rustc(ptr.ty, tcx);
+                let ref_ty = self.type_from_rustc(ptr.ty, vm, tcx);
                 TypeKind::Ptr(ref_ty)
             }
             TyKind::Tuple(members) => {
                 let members = members.iter().map(|ty| {
-                    self.type_from_rustc(ty, tcx)
+                    self.type_from_rustc(ty, vm, tcx)
                 }).collect();
                 TypeKind::Tuple(members)
             }
             TyKind::Array(member_ty,count) => {
                 let param_env = rustc_middle::ty::ParamEnv::reveal_all();
                 let count = count.eval_target_usize(tcx, param_env) as u32;
-                let member_ty = self.type_from_rustc(*member_ty, tcx);
+                let member_ty = self.type_from_rustc(*member_ty, vm, tcx);
                 TypeKind::Array(member_ty, count)
             }
             TyKind::Slice(member_ty) => {
-                let member_ty = self.type_from_rustc(*member_ty, tcx);
+                let member_ty = self.type_from_rustc(*member_ty, vm, tcx);
                 TypeKind::Slice(member_ty)
             }
 
@@ -88,25 +116,30 @@ impl<'vm> TypeContext<'vm> {
             }
             _ => panic!("convert ty: {:?}",kind)
         };
-        self.intern(new_kind)
+        self.intern(new_kind,vm)
     }
 
-    fn def_from_rustc(did: DefId) -> TypeDef {
-        if did.krate == rustc_hir::def_id::LOCAL_CRATE {
-            TypeDef::Local(did.index.as_u32())
+    fn def_from_rustc(did: DefId) -> TypeDef<'vm> {
+        let id = if did.krate == rustc_hir::def_id::LOCAL_CRATE {
+            TypeDefId::Local(did.index.as_u32())
         } else {
             panic!("todo non-local def");
+        };
+
+        TypeDef{
+            id,
+            subs: Vec::new()
         }
     }
 
-    fn intern(&'vm self, kind: TypeKind<'vm>) -> Type<'vm> {
+    fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
         let mut table = self.table.borrow_mut();
         let entry = table.entry(kind.clone());
 
         entry.or_insert_with(|| {
             let intern_ref = self.arena.alloc(InternedType{kind});
             //println!("interned {:?}",intern_ref);
-            Type(intern_ref)
+            Type(intern_ref,vm)
         }).clone()
     }
 }

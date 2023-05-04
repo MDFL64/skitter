@@ -26,13 +26,10 @@ mod test;
 mod abi;
 mod ir;
 mod types;
-
-use rustc_session::config;
-use rustc_middle::ty::TyCtxt;
-use rustc_hir::ItemKind;
-use rustc_hir::def_id::LocalDefId;
+mod ir_crate;
 
 use clap::Parser;
+use ir_crate::IRCrateLazy;
 
 // doesn't seem to make a huge difference, todo more tests
 //use mimalloc::MiMalloc;
@@ -43,11 +40,19 @@ fn main() {
     
     let args = cli::CliArgs::parse();
 
-    let source_root = args.file_name;
+    let root_crate = IRCrateLazy::new(args.clone());
+
+    let root_crate_2 = IRCrateLazy::new(args.clone());
+
+    loop {
+
+    }
+
+    /*let source_root = args.file_name;
 
     if args.test {
         test::test(&source_root);
-    }
+    }*/
 
     //println!("? {}",source_root);
 
@@ -60,7 +65,7 @@ fn main() {
         .unwrap();
     let sysroot = str::from_utf8(&out.stdout).unwrap().trim();*/
 
-    let self_profile = if args.profile { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
+    /*let self_profile = if args.profile { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
 
     let config = rustc_interface::Config {
         opts: config::Options {
@@ -107,10 +112,10 @@ fn main() {
                 vm.call(&func,0);
             })
         });
-    });
+    });*/
 }
 
-fn find_main(tcx: TyCtxt) -> Option<LocalDefId> {
+/*fn find_main(tcx: TyCtxt) -> Option<LocalDefId> {
     let hir = tcx.hir();
 
     let root = hir.root_module();
@@ -124,4 +129,4 @@ fn find_main(tcx: TyCtxt) -> Option<LocalDefId> {
         }
     }
     None
-}
+}*/

@@ -1,13 +1,12 @@
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, AdtKind};
 use rustc_abi::VariantIdx;
 
-use crate::{abi::POINTER_SIZE, vm::VM};
+use crate::{abi::POINTER_SIZE, vm::VM, types::{Type, TypeKind, IntWidth}};
 
 #[derive(Debug)]
 pub struct Layout {
     pub maybe_size: Option<u32>,
     pub align: u32,
-    pub kind: LayoutKind,
     pub field_offsets: Vec<u32>
 }
 
@@ -18,44 +17,25 @@ impl Layout {
 
     pub fn is_sized(&self) -> bool {
         self.maybe_size.is_some()
-    } 
-
-    pub fn sign(&self) -> IntSign {
-        match self.kind {
-            LayoutKind::Int(sign) => sign,
-            _ => IntSign::Unsigned
-        }
     }
 }
 
-#[derive(Debug)]
-pub enum LayoutKind {
-    Int(IntSign),
-    Float,
-    Bool,
-
-    Ref,
-    Ptr,
-    Tuple,
-    Struct,
-    Array{elem_size: u32, elem_count: u32},
-    Slice{elem_size: u32},
-
-    Never
-}
-
-#[derive(Debug,Copy,Clone)]
-pub enum IntSign {
-    Signed,
-    Unsigned
-}
-
 impl Layout {
-    pub fn from<'tcx>(ty: Ty<'tcx>, vm: &VM<'_,'tcx>) -> Self {
+    pub fn from<'vm>(ty: Type<'vm>) -> Self {
         let kind = ty.kind();
         match kind {
-            TyKind::Int(IntTy::I8) => Layout::simple(1, LayoutKind::Int(IntSign::Signed)),
-            TyKind::Int(IntTy::I16) => Layout::simple(2, LayoutKind::Int(IntSign::Signed)),
+            TypeKind::Int(width,sign) => {
+                let size = match width {
+                    IntWidth::I8 => 1,
+                    IntWidth::I16 => 2,
+                    IntWidth::I32 => 4,
+                    IntWidth::I64 => 8,
+                    IntWidth::I128 => 16,
+                    IntWidth::ISize => POINTER_SIZE.bytes()
+                };
+                Layout::simple(size)
+            }
+            /*TyKind::Int(IntTy::I16) => Layout::simple(2, LayoutKind::Int(IntSign::Signed)),
             TyKind::Int(IntTy::I32) => Layout::simple(4, LayoutKind::Int(IntSign::Signed)),
             TyKind::Int(IntTy::I64) => Layout::simple(8, LayoutKind::Int(IntSign::Signed)),
             TyKind::Int(IntTy::I128) => Layout::simple(16, LayoutKind::Int(IntSign::Signed)),
@@ -122,7 +102,7 @@ impl Layout {
                     kind: LayoutKind::Slice{ elem_size },
                     field_offsets: Vec::new()
                 }
-            }
+            }*/
             _ => panic!("can't layout: {:?}",kind)
         }
     }
@@ -132,12 +112,12 @@ impl Layout {
         (x + mask) & !mask
     }
 
-    fn compound<'tcx>(fields: impl Iterator<Item=Ty<'tcx>>, kind: LayoutKind, vm: &VM<'_,'tcx>) -> Self {
+    fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
         let mut size = 0;
         let mut align = 1;
 
         let field_offsets = fields.map(|ty| {
-            let layout = Layout::from(ty,vm);
+            let layout = Layout::from(ty);
 
             size = Self::align(size, layout.align);
 
@@ -155,32 +135,29 @@ impl Layout {
         Layout {
             maybe_size: Some(size),
             align,
-            kind,
             field_offsets
         }
     }
 
-    fn pointer<'tcx>(ref_ty: Ty<'tcx>, kind: LayoutKind, vm: &VM<'_,'tcx>) -> Self {
+    fn pointer<'vm>(ref_ty: Type<'vm>) -> Self {
         let ptr_size = POINTER_SIZE.bytes();
 
-        let ref_layout = Layout::from(ref_ty,vm);
+        let ref_layout = Layout::from(ref_ty);
         if ref_layout.is_sized() {
-            Layout::simple(ptr_size, kind)
+            Layout::simple(ptr_size)
         } else {
             Self {
                 maybe_size: Some(ptr_size * 2),
                 align: ptr_size,
-                kind,
                 field_offsets: Vec::new()
             }
         }
     }
 
-    fn simple(size: u32, kind: LayoutKind) -> Self {
+    fn simple(size: u32) -> Self {
         Self {
             maybe_size: Some(size),
             align: size.max(1),
-            kind,
             field_offsets: Vec::new()
         }
     }

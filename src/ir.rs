@@ -2,19 +2,20 @@
 
 use std::str::FromStr;
 
-use rustc_middle::ty::Ty;
 use rustc_middle::thir;
 use rustc_middle::thir::Thir;
+use rustc_middle::ty::TyCtxt;
 use rustc_hir::def_id::LocalDefId;
 
+use crate::types::{Type, TypeContext};
 use crate::vm::VM;
 
-pub struct IRFunction<'tcx> {
+pub struct IRFunction<'vm> {
     pub root_expr: ExprId,
-    pub params: Vec<Box<Pattern<'tcx>>>,
-    pub return_ty: Ty<'tcx>,
-    exprs: Vec<Expr<'tcx>>,
-    stmts: Vec<Stmt<'tcx>>,
+    pub params: Vec<Box<Pattern<'vm>>>,
+    pub return_ty: Type<'vm>,
+    exprs: Vec<Expr<'vm>>,
+    stmts: Vec<Stmt<'vm>>,
     blocks: Vec<Block>
 }
 
@@ -25,15 +26,15 @@ pub struct StmtId(u32);
 #[derive(Debug,Clone,Copy)]
 pub struct ExprId(u32);
 
-pub struct Expr<'tcx> {
-    pub kind: ExprKind<'tcx>,
-    pub ty: Ty<'tcx>
+pub struct Expr<'vm> {
+    pub kind: ExprKind<'vm>,
+    pub ty: Type<'vm>
 }
 
-pub enum Stmt<'tcx> {
+pub enum Stmt<'vm> {
     Expr(ExprId),
     Let{
-        pattern: Box<Pattern<'tcx>>,
+        pattern: Box<Pattern<'vm>>,
         init: Option<ExprId>,
         else_block: Option<BlockId>
     }
@@ -44,13 +45,13 @@ pub struct Block {
     pub result: Option<ExprId>,
 }
 
-pub struct Pattern<'tcx> {
+pub struct Pattern<'vm> {
     pub kind: PatternKind,
-    pub ty: Ty<'tcx>
+    pub ty: Type<'vm>
 }
 
 #[derive(Debug)]
-pub enum ExprKind<'tcx> {
+pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
     /// Stores an optional scope ID which is used to resolve breaks
     Dummy(ExprId,Option<u32>),
@@ -83,7 +84,7 @@ pub enum ExprKind<'tcx> {
     Continue{scope_id: u32},
     Return(Option<ExprId>),
 
-    Call{func_ty: Ty<'tcx>, func_expr: ExprId, args: Vec<ExprId>},
+    Call{func_ty: Type<'vm>, func_expr: ExprId, args: Vec<ExprId>},
     Tuple(Vec<ExprId>),
     Adt{variant: u32, fields: Vec<(u32,ExprId)> },
     Array(Vec<ExprId>),
@@ -145,14 +146,16 @@ pub enum PointerCast{
 }
 
 pub struct IRFunctionBuilder<'vm,'tcx> {
-    vm: &'vm VM<'vm,'tcx>,
+    vm: &'vm VM<'vm>,
+    tcx: TyCtxt<'tcx>,
     func_id: LocalDefId
 }
 
 impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
-    pub fn build(vm: &'vm VM<'vm,'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'tcx> {
+    pub fn build(vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
         let builder = Self{
             vm,
+            tcx,
             func_id
         };
 
@@ -179,6 +182,8 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
             }
             _ => panic!("const not supported")
         };
+
+        let return_ty = builder.vm.type_from_rustc(return_ty,tcx);
 
         IRFunction{
             params,
@@ -228,7 +233,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
         }
     }
 
-    fn expr(&self, old: &thir::Expr<'tcx>) -> Expr<'tcx> {
+    fn expr(&self, old: &thir::Expr<'tcx>) -> Expr<'vm> {
         let kind = match old.kind {
             thir::ExprKind::Use{source} |
             thir::ExprKind::NeverToAny{source} |
@@ -373,7 +378,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
 
             thir::ExprKind::Call{ty,fun,ref args,..} => {
                 ExprKind::Call{
-                    func_ty: ty,
+                    func_ty: self.vm.type_from_rustc(ty,self.tcx),
                     func_expr: self.expr_id(fun),
                     args: args.iter().map(|arg| self.expr_id(*arg)).collect()
                 }
@@ -418,15 +423,13 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
             _ => panic!("convert {:?}",old.kind)
         };
 
-        self.vm.types.type_from_rustc(old.ty,self.vm.tcx);
-
         Expr{
             kind,
-            ty: old.ty
+            ty: self.vm.type_from_rustc(old.ty,self.tcx)
         }
     }
 
-    fn pattern(&self, old: &thir::Pat<'tcx>) -> Box<Pattern<'tcx>> {
+    fn pattern(&self, old: &thir::Pat<'tcx>) -> Box<Pattern<'vm>> {
         let kind = match old.kind {
             thir::PatKind::AscribeUserType{ref subpattern,..} => {
                 return self.pattern(subpattern);
@@ -447,11 +450,11 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
 
         Box::new(Pattern {
             kind,
-            ty: old.ty
+            ty: self.vm.type_from_rustc(old.ty,self.tcx)
         })
     }
 
-    fn stmt(&self, old: &thir::Stmt<'tcx>) -> Stmt<'tcx> {
+    fn stmt(&self, old: &thir::Stmt<'tcx>) -> Stmt<'vm> {
         use rustc_middle::thir::StmtKind;
         match old.kind {
             StmtKind::Expr{expr,..} => Stmt::Expr(self.expr_id(expr)),
@@ -466,12 +469,12 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
     }
 }
 
-impl<'tcx> IRFunction<'tcx> {
-    pub fn expr(&self, id: ExprId) -> &Expr<'tcx> {
+impl<'vm> IRFunction<'vm> {
+    pub fn expr(&self, id: ExprId) -> &Expr<'vm> {
         &self.exprs[id.0 as usize]
     }
 
-    pub fn stmt(&self, id: StmtId) -> &Stmt<'tcx> {
+    pub fn stmt(&self, id: StmtId) -> &Stmt<'vm> {
         &self.stmts[id.0 as usize]
     }
 

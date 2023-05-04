@@ -3,19 +3,17 @@ use std::sync::Arc;
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
 use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
-use crate::layout::LayoutKind;
+use crate::layout::Layout;
+use crate::types::{Type, TypeKind, Sub};
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
-use rustc_middle::ty::{Ty, TyKind};
-use rustc_middle::ty::SubstsRef;
-
-pub struct HirCompiler<'vm,'tcx,'f> {
-    in_func_subs: SubstsRef<'tcx>,
-    in_func: &'f IRFunction<'tcx>,
-    out_bc: Vec<vm::instr::Instr<'tcx>>,
-    vm: &'vm vm::VM<'vm,'tcx>,
+pub struct HirCompiler<'vm,'f> {
+    in_func_subs: Vec<Sub<'vm>>,
+    in_func: &'f IRFunction<'vm>,
+    out_bc: Vec<vm::instr::Instr<'vm>>,
+    vm: &'vm vm::VM<'vm>,
     stack: CompilerStack,
     locals: Vec<(u32,Slot)>,
     last_scope: u32,
@@ -34,8 +32,8 @@ struct BreakInfo {
     break_index: usize
 }
 
-impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
-    pub fn compile(vm: &'vm vm::VM<'vm,'tcx>, ir: &'f IRFunction<'tcx>, subs: SubstsRef<'tcx>) -> Vec<vm::instr::Instr<'tcx>> {
+impl<'vm,'f> HirCompiler<'vm,'f> {
+    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: Vec<Sub<'vm>>) -> Vec<vm::instr::Instr<'vm>> {
 
         let mut compiler = HirCompiler {
             in_func_subs: subs,
@@ -50,7 +48,7 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
         };
 
         let out_ty = compiler.apply_subs(ir.return_ty);
-        let out_layout = crate::layout::Layout::from(out_ty,vm);
+        let out_layout = crate::layout::Layout::from(out_ty);
 
         let ret_slot = compiler.stack.alloc(&out_layout);
         assert_eq!(ret_slot.index(),0);
@@ -62,7 +60,7 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
         compiler.out_bc.push(Instr::Return);
 
         if compiler.vm.is_verbose {
-            println!("compiled {:?} for {:?}","(todo)",subs);
+            println!("compiled {:?} for {:?}","(todo)",compiler.in_func_subs);
             for (i,bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}",i,bc);
             }
@@ -115,7 +113,7 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
 
     fn lower_expr(&mut self, id: ExprId, dst_slot: Option<Slot>) -> Slot {
         let expr = self.in_func.expr(id);
-        let expr_layout = self.expr_layout(id);
+        let (expr_ty,expr_layout) = self.expr_ty_and_layout(id);
 
         match &expr.kind {
             ExprKind::Dummy(value,scope_id) => {
@@ -173,9 +171,9 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
 
                 let arg_slot = self.lower_expr(*arg, None);
 
-                let layout = self.expr_layout(*arg);
+                let arg_ty = self.expr_ty(*arg);
 
-                let ctor = bytecode_select::unary(*op, &layout);
+                let ctor = bytecode_select::unary(*op, arg_ty);
                 self.out_bc.push(ctor(dst_slot,arg_slot));
                 dst_slot
             }
@@ -186,8 +184,8 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
 
                 let arg_slot = self.lower_expr(*source, None);
                 
-                let arg_ty = &self.expr_layout(*source);
-                let dst_ty = &expr_layout;
+                let arg_ty = self.expr_ty(*source);
+                let dst_ty = expr_ty;
 
                 let ctor = bytecode_select::cast(arg_ty,dst_ty);
                 self.out_bc.push(ctor(dst_slot,arg_slot));
@@ -201,9 +199,9 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                 let lhs_slot = self.lower_expr(*lhs, None);
                 let rhs_slot = self.lower_expr(*rhs, None);
 
-                let layout = self.expr_layout(*lhs);
+                let lhs_ty = self.expr_ty(*lhs);
 
-                let (ctor,swap) = bytecode_select::binary(*op, &layout);
+                let (ctor,swap) = bytecode_select::binary(*op, lhs_ty);
                 if swap {
                     self.out_bc.push(ctor(dst_slot,rhs_slot,lhs_slot));
                 } else {
@@ -235,9 +233,9 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
             ExprKind::AssignOp(op,lhs,rhs) => {
                 let rhs_slot = self.lower_expr(*rhs, None);
 
-                let layout = self.expr_layout(*lhs);
+                let lhs_ty = self.expr_ty(*lhs);
                 
-                let (ctor,swap) = bytecode_select::binary(*op, &layout);
+                let (ctor,swap) = bytecode_select::binary(*op, lhs_ty);
                 assert!(!swap);
 
                 match self.expr_to_place(*lhs) {
@@ -245,11 +243,14 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                         self.out_bc.push(ctor(lhs_slot,lhs_slot,rhs_slot));
                     }
                     Place::Ptr(ptr_slot,offset) => {
-                        let tmp_slot = self.stack.alloc(&self.expr_layout(*lhs));
+                        let lhs_layout = self.expr_layout(*lhs);
+                        let lhs_size = lhs_layout.assert_size();
                         
-                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, layout.assert_size(), offset).unwrap());
+                        let tmp_slot = self.stack.alloc(&lhs_layout);
+                        
+                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, lhs_size, offset).unwrap());
                         self.out_bc.push(ctor(tmp_slot,tmp_slot,rhs_slot));
-                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, layout.assert_size(), offset).unwrap());
+                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, lhs_size, offset).unwrap());
                     }
                 }
 
@@ -476,19 +477,17 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
 
                         let src_ty = self.expr_ty(*source);
                         
-                        let src_ref_ty = match src_ty.kind() {
-                            TyKind::RawPtr(ptr) => ptr.ty,
-                            TyKind::Ref(_,ty,_) => *ty,
+                        let src_kind = match src_ty.kind() {
+                            TypeKind::Ptr(ref_ty) |
+                            TypeKind::Ref(ref_ty) => ref_ty.kind(),
                             _ => panic!()
                         };
 
-                        let src_ref_layout = crate::layout::Layout::from(src_ref_ty,self.vm);
-
-                        let meta = match src_ref_layout.kind {
-                            LayoutKind::Array{ elem_size, elem_count } => {
-                                elem_count as usize
+                        let meta = match src_kind {
+                            TypeKind::Array(_,elem_count) => {
+                                *elem_count as usize
                             }
-                            _ => panic!("unsized cast ptr to {:?}",src_ref_layout)
+                            _ => panic!("unsized cast ptr to {:?}",src_kind)
                         };
 
                         let dst_slot = dst_slot.unwrap_or_else(|| {
@@ -521,9 +520,11 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                 dst_slot
             }
             ExprKind::Array(fields) => {
-                let LayoutKind::Array{elem_size,..} = expr_layout.kind else {
+                let TypeKind::Array(elem_ty,_) = expr_ty.kind() else {
                     panic!("bad array layout");
                 };
+
+                let elem_size = Layout::from(*elem_ty).assert_size();
 
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(&expr_layout)
@@ -595,10 +596,19 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                 let index_slot = self.stack.alloc(&index_layout);
                 self.lower_expr(*index, Some(index_slot));
                 
-                let layout = self.expr_layout(*lhs);
-                match layout.kind {
-                    LayoutKind::Array{elem_size,elem_count} => {
-                        self.out_bc.push(Instr::IndexCalc { arg_out: index_slot, elem_size, elem_count });
+                let lhs_ty = self.expr_ty(*lhs);
+                let lhs_kind = lhs_ty.kind();
+                match lhs_kind {
+                    TypeKind::Array(elem_ty,elem_count) => {
+
+                        let elem_size = Layout::from(*elem_ty).assert_size();
+                        let elem_count = *elem_count;
+
+                        self.out_bc.push(Instr::IndexCalc {
+                            arg_out: index_slot,
+                            elem_size,
+                            elem_count
+                        });
         
                         match self.expr_to_place(*lhs) {
                             Place::Local(base_slot) => {
@@ -609,7 +619,10 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                             }
                         }
                     }
-                    LayoutKind::Slice { elem_size } => {
+                    TypeKind::Slice(elem_ty) => {
+
+                        let elem_size = Layout::from(*elem_ty).assert_size();
+
                         let lhs_place = self.expr_to_place(*lhs);
                         if let Place::Ptr(ptr_slot, offset) = lhs_place {
                             assert_eq!(offset,0);
@@ -620,7 +633,7 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
                             panic!("invalid local(?!) slice index");
                         }
                     }
-                    _ => panic!("cannot index {:?}",layout.kind)
+                    _ => panic!("cannot index {:?}",lhs_kind)
                 }
                 Place::Ptr(index_slot,0)
             }
@@ -637,43 +650,47 @@ impl<'vm,'tcx,'f> HirCompiler<'vm,'tcx,'f> {
         }
     }
 
-    fn apply_subs(&self, ty: Ty<'tcx>) -> Ty<'tcx> {
-        let binder = rustc_middle::ty::subst::EarlyBinder(ty);
-        binder.subst(self.vm.tcx,self.in_func_subs)
+    fn apply_subs(&self, ty: Type<'vm>) -> Type<'vm> {
+        // TODO SUBS
+        //let binder = rustc_middle::ty::subst::EarlyBinder(ty);
+        //binder.subst(self.vm.tcx,self.in_func_subs)
+        ty
     }
 
-    fn expr_ty(&self, id: ExprId) -> Ty<'tcx> {
+    fn expr_ty(&self, id: ExprId) -> Type<'vm> {
         let ty = self.in_func.expr(id).ty;
         self.apply_subs(ty)
     }
 
     fn expr_layout(&self, id: ExprId) -> crate::layout::Layout {
         let ty = self.expr_ty(id);
-        crate::layout::Layout::from(ty, self.vm)
+        crate::layout::Layout::from(ty)
     }
 
-    /*fn expr_ty_and_layout(&self, id: ExprId) -> (Ty<'tcx>,crate::layout::Layout) {
+    fn expr_ty_and_layout(&self, id: ExprId) -> (Type<'vm>,crate::layout::Layout) {
         let ty = self.expr_ty(id);
-        (ty, crate::layout::Layout::from(ty, self.vm))
-    }*/
+        (ty, crate::layout::Layout::from(ty))
+    }
 
-    fn ty_to_func(&self, ty: Ty<'tcx>) -> Option<Arc<Function<'tcx>>> {
-        match ty.kind() {
-            TyKind::FnDef(func_id,subs) => {
-                let func = self.vm.get_func(*func_id, subs);
-                Some(func)
+    fn ty_to_func(&self, ty: Type<'vm>) -> Option<Arc<Function<'vm>>> {
+        println!("{:?}",ty);
+        panic!("ty to func");
+        /*match ty.kind() {
+            TypeKind::FnDef(func_id,subs) => {
+                //let func = self.vm.get_func(*func_id, subs);
+                //Some(func)
             }
             _ => None
-        }
+        }*/
     }
 
-    fn alloc_pattern(&mut self, pat: &Pattern<'tcx>) -> Slot {
+    fn alloc_pattern(&mut self, pat: &Pattern<'vm>) -> Slot {
         match &pat.kind {
             PatternKind::LocalBinding(var_id) => {
                 // todo mode may pose issues?
                 
                 let ty = self.apply_subs(pat.ty);
-                let layout = crate::layout::Layout::from(ty, self.vm);
+                let layout = crate::layout::Layout::from(ty);
 
                 let slot = self.stack.alloc(&layout);
                 self.locals.push((*var_id,slot));

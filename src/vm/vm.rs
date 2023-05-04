@@ -1,5 +1,5 @@
-use rustc_hir::def_id::{DefId, LocalDefId};
-use rustc_middle::ty::TyCtxt;
+use rustc_hir::def_id::DefId;
+use rustc_middle::ty::{Ty, TyCtxt};
 use rustc_middle::ty::WithOptConstParam;
 use rustc_middle::ty::SubstsRef;
 
@@ -7,33 +7,33 @@ use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
 use crate::hir_compiler::HirCompiler;
 use crate::ir::IRFunctionBuilder;
+use crate::types::{Type, TypeDef};
 use crate::types::TypeContext;
 use crate::vm::instr::Slot;
 
 use super::instr::Instr;
 
-pub struct VM<'vm,'tcx> {
-    pub tcx: TyCtxt<'tcx>,
+pub struct VM<'vm> {
+    //pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
-    functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
-    pub types: TypeContext<'vm>,
+    //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
+    types: TypeContext<'vm>,
     pub is_verbose: bool
 }
 
 
-impl<'vm,'tcx> VM<'vm,'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
+impl<'vm> VM<'vm> {
+    pub fn new() -> Self {
         Self {
-            tcx,
             // 64k stack - TODO move out of this struct, this is not safe
             stack: vec!(0;4096),
-            functions: Default::default(),
+            //functions: Default::default(),
             types: Default::default(),
             is_verbose: false
         }
     }
 
-    pub fn get_func(&self, def_id: DefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
+    /*pub fn get_func(&self, def_id: DefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
         let mut functions = self.functions.lock().unwrap();
         functions.entry((def_id,subs)).or_insert_with(|| {
             let mut res = Function::new(def_id,subs);
@@ -56,9 +56,9 @@ impl<'vm,'tcx> VM<'vm,'tcx> {
 
             Arc::new(res)
         }).clone()
-    }
+    }*/
 
-    pub fn call(&'vm self, func: &Function<'tcx>, stack_offset: u32) {
+    pub fn call(&'vm self, func: &Function<'vm>, stack_offset: u32) {
 
         if let Some(native) = func.native {
             unsafe {
@@ -83,6 +83,10 @@ impl<'vm,'tcx> VM<'vm,'tcx> {
             }
         }
     }
+
+    pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Type {
+        self.types.type_from_rustc(ty,self,tcx)
+    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
@@ -93,25 +97,27 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
     *(base.add(slot.index()) as *mut _)
 }
 
-pub struct Function<'tcx> {
-    pub def_id: DefId,
-    pub subs: SubstsRef<'tcx>,
+pub struct Function<'vm> {
+    pub def: TypeDef<'vm>,
     pub native: Option<unsafe fn(*mut u8)>,
-    bytecode: OnceLock<Vec<Instr<'tcx>>>
+    /*pub def_id: DefId,
+    pub subs: SubstsRef<'tcx>,
+    bytecode: OnceLock<Vec<Instr<'tcx>>>*/
 }
 
-impl<'tcx> Function<'tcx> {
-    fn new(def_id: DefId, subs: SubstsRef<'tcx>) -> Self {
+impl<'vm> Function<'vm> {
+    fn new(def: TypeDef<'vm>) -> Self {
         Function {
-            def_id,
-            subs,
+            def,
             native: None,
-            bytecode: Default::default()
+            /*
+            bytecode: Default::default()*/
         }
     }
 
-    fn bytecode<'vm>(&self, vm: &'vm VM<'vm,'tcx>) -> &[Instr<'tcx>] {
-        self.bytecode.get_or_init(|| {
+    fn bytecode(&self, vm: &'vm VM<'vm>) -> &[Instr<'vm>] {
+        panic!("todo bc");
+        /*self.bytecode.get_or_init(|| {
 
             // resolve trait methods to a specific instance
             let resolve_arg = rustc_middle::ty::ParamEnv::reveal_all().and((self.def_id.into(),self.subs));
@@ -132,15 +138,15 @@ impl<'tcx> Function<'tcx> {
             let ir = IRFunctionBuilder::build(vm,local_id, root_expr, &thir_body);
 
             HirCompiler::compile(vm,&ir,&resolve_subs)
-        })
+        })*/
     }
 }
 
 impl<'tcx> std::fmt::Debug for Function<'tcx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Function")
-            .field("def_id", &self.def_id)
-            .field("subs", &self.subs)
+            //.field("def_id", &self.def_id)
+            //.field("subs", &self.subs)
             .finish()
     }
 }
