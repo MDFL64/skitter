@@ -1,10 +1,11 @@
-use std::{collections::HashMap, cell::RefCell};
+use std::{collections::HashMap, cell::RefCell, sync::Mutex};
 
 use rustc_middle::ty::{TyCtxt, Ty, TyKind, IntTy, UintTy, FloatTy};
 use rustc_hir::def_id::DefId;
-use bumpalo::Bump;
 
 use crate::vm::VM;
+
+use colosseum::sync::Arena;
 
 use super::{TypeKind, IntWidth, IntSign, TypeDef, FloatWidth, TypeDefId};
 
@@ -37,13 +38,19 @@ impl<'vm> std::cmp::PartialEq for Type<'vm> {
 
 impl<'vm> std::cmp::Eq for Type<'vm> {}
 
-#[derive(Default)]
-pub struct TypeContext<'vm> {
-    arena: Bump,
-    table: RefCell<HashMap<TypeKind<'vm>,Type<'vm>>>
+pub struct TypeContext<'vm>{
+    table: Mutex<HashMap<TypeKind<'vm>,Type<'vm>>>,
+    arena: Arena<InternedType<'vm>>
 }
 
 impl<'vm> TypeContext<'vm> {
+    pub fn new() -> Self {
+        TypeContext{
+            table: Default::default(),
+            arena: Arena::new()
+        }
+    }
+
     pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>) -> Type<'vm> {
         let kind = ty.kind();
         let new_kind = match kind {
@@ -133,8 +140,8 @@ impl<'vm> TypeContext<'vm> {
     }
 
     fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
-        let mut table = self.table.borrow_mut();
-        let entry = table.entry(kind.clone());
+        let mut inner = self.table.lock().unwrap();
+        let entry = inner.entry(kind.clone());
 
         entry.or_insert_with(|| {
             let intern_ref = self.arena.alloc(InternedType{kind});

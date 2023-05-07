@@ -1,7 +1,4 @@
-use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, AdtKind};
-use rustc_abi::VariantIdx;
-
-use crate::{abi::POINTER_SIZE, vm::VM, types::{Type, TypeKind, IntWidth}};
+use crate::{abi::POINTER_SIZE, types::{Type, TypeKind, IntWidth}};
 
 #[derive(Debug)]
 pub struct Layout {
@@ -112,7 +109,7 @@ impl Layout {
         (x + mask) & !mask
     }
 
-    fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
+    /*fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
         let mut size = 0;
         let mut align = 1;
 
@@ -137,7 +134,7 @@ impl Layout {
             align,
             field_offsets
         }
-    }
+    }*/
 
     fn pointer<'vm>(ref_ty: Type<'vm>) -> Self {
         let ptr_size = POINTER_SIZE.bytes();

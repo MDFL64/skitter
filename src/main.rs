@@ -26,10 +26,12 @@ mod test;
 mod abi;
 mod ir;
 mod types;
-mod ir_crate;
+mod items;
+mod rustc_worker;
 
 use clap::Parser;
-use ir_crate::IRCrateLazy;
+use rustc_worker::RustCWorker;
+use vm::VM;
 
 // doesn't seem to make a huge difference, todo more tests
 //use mimalloc::MiMalloc;
@@ -40,13 +42,38 @@ fn main() {
     
     let args = cli::CliArgs::parse();
 
-    let root_crate = IRCrateLazy::new(args.clone());
+    let vm = VM::new();
+    
+    run(args,&vm);
+}
 
-    let root_crate_2 = IRCrateLazy::new(args.clone());
+fn run<'vm>(args: cli::CliArgs, vm: &'vm VM<'vm>) {
+    std::thread::scope(|scope| {
+        
+        let worker = RustCWorker::new(args, scope, &vm);
+        //vm.add_worker(worker);
 
-    loop {
+        println!("ready");
+        loop {}
 
+        //vm.run_crate(args);
+    });
+}
+
+
+    /*let root_crate = IRCrateLazy::new(args.clone());
+
+    {
+        let start = Instant::now();
+        let main_id = root_crate.find("::main".into());
+        println!("=> {:?} {:?}",main_id,start.elapsed());
     }
+
+    {
+        let start = Instant::now();
+        let main_id = root_crate.find("::main".into());
+        println!("=> {:?} {:?}",main_id,start.elapsed());
+    }*/
 
     /*let source_root = args.file_name;
 
@@ -113,7 +140,6 @@ fn main() {
             })
         });
     });*/
-}
 
 /*fn find_main(tcx: TyCtxt) -> Option<LocalDefId> {
     let hir = tcx.hir();

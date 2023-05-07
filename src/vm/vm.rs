@@ -1,12 +1,14 @@
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{Ty, TyCtxt};
-use rustc_middle::ty::WithOptConstParam;
 use rustc_middle::ty::SubstsRef;
 
 use std::sync::{OnceLock, Arc, Mutex};
 use std::collections::HashMap;
+use crate::cli::CliArgs;
 use crate::hir_compiler::HirCompiler;
 use crate::ir::IRFunctionBuilder;
+use crate::items::ItemContext;
+use crate::rustc_worker::RustCWorker;
 use crate::types::{Type, TypeDef};
 use crate::types::TypeContext;
 use crate::vm::instr::Slot;
@@ -14,11 +16,12 @@ use crate::vm::instr::Slot;
 use super::instr::Instr;
 
 pub struct VM<'vm> {
-    //pub tcx: TyCtxt<'tcx>,
     stack: Vec<u128>,
     //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     types: TypeContext<'vm>,
-    pub is_verbose: bool
+    pub items: ItemContext<'vm>,
+    pub is_verbose: bool,
+    workers: Vec<RustCWorker<'vm>>
 }
 
 
@@ -28,10 +31,23 @@ impl<'vm> VM<'vm> {
             // 64k stack - TODO move out of this struct, this is not safe
             stack: vec!(0;4096),
             //functions: Default::default(),
-            types: Default::default(),
-            is_verbose: false
+            types: TypeContext::new(),
+            items: ItemContext::new(),
+            is_verbose: false,
+            workers: Vec::new()
         }
     }
+
+    /*pub fn add_worker(&mut self, worker: RustCWorker<'vm>) {
+        self.workers.push(worker);
+    }*/
+
+    /*pub fn run_crate(&mut self, args: CliArgs) {
+        assert!(self.crates.len() == 0);
+        self.crates.push(Box::new(IRCrateLazy::new(args)));
+        let main_id = self.crates[0].find("::main").unwrap();
+        println!("{:?}",main_id);
+    }*/
 
     /*pub fn get_func(&self, def_id: DefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
         let mut functions = self.functions.lock().unwrap();
@@ -142,7 +158,7 @@ impl<'vm> Function<'vm> {
     }
 }
 
-impl<'tcx> std::fmt::Debug for Function<'tcx> {
+impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Function")
             //.field("def_id", &self.def_id)
