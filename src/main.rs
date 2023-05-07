@@ -33,6 +33,8 @@ use clap::Parser;
 use rustc_worker::RustCWorker;
 use vm::VM;
 
+use crate::items::CrateId;
+
 // doesn't seem to make a huge difference, todo more tests
 //use mimalloc::MiMalloc;
 //#[global_allocator]
@@ -42,18 +44,24 @@ fn main() {
     
     let args = cli::CliArgs::parse();
 
-    let vm = VM::new();
     
-    run(args,&vm);
+    run(args);
 }
 
-fn run<'vm>(args: cli::CliArgs, vm: &'vm VM<'vm>) {
+fn run(args: cli::CliArgs) {
+    let vm = VM::new();
+    
     std::thread::scope(|scope| {
         
         let worker = RustCWorker::new(args, scope, &vm);
-        //vm.add_worker(worker);
+        vm.add_worker(worker);
+        
+        let main_item = vm.items.get_item(CrateId::new(0), "::main", &vm);
+        let main_fn = main_item.get_function(&[]);
 
-        println!("ready");
+        println!("main fetched");
+        vm.call(&main_fn,0);
+        
         loop {}
 
         //vm.run_crate(args);

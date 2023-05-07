@@ -3,7 +3,7 @@ use std::{time::Duration, sync::{Mutex, Barrier, Arc, OnceLock}, borrow::BorrowM
 use rustc_session::config;
 use rustc_middle::ty::TyCtxt;
 
-use crate::{cli::CliArgs, ir::IRFunction, vm::VM, items::{Item, CrateId}};
+use crate::{cli::CliArgs, ir::{IRFunction, IRFunctionBuilder}, vm::VM, items::{Item, CrateId}};
 
 #[derive(Debug)]
 pub struct ItemId(u32);
@@ -20,21 +20,27 @@ pub struct WorkerResult<T> {
     value: Mutex<Option<T>>
 }
 
+impl<T> WorkerResult<T> {
+    pub fn wait(&self) {
+        self.complete.wait();
+    }
+}
+
 struct WorkerCommand<T,F> {
     func: F,
     result: Arc<WorkerResult<T>>
 }
 
 trait WorkerCommandDyn: Send + Sync {
-    fn call(&self, tcx: TyCtxt);
+    fn call<'vm>(&self, tcx: TyCtxt, vm: &'vm VM<'vm>, items: &ItemMap<'vm>);
 }
 
 impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
-    F: Fn(TyCtxt)->T + Send + Sync,
+    F: for<'v> Fn(TyCtxt,&'v VM<'v>,&ItemMap<'v>)->T + Send + Sync,
     T: Send + Sync
 {
-    fn call(&self, tcx: TyCtxt) {
-        let res = (self.func)(tcx);
+    fn call<'vm>(&self, tcx: TyCtxt, vm: &'vm VM<'vm>, items: &ItemMap<'vm>) {
+        let res = (self.func)(tcx, vm, items);
         {
             let mut guard = self.result.value.lock().unwrap();
             *guard = Some(res);
@@ -43,25 +49,13 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
-/*trait WorkerResult<'vm,T>: Send + Sync + 'vm {
-    fn wait() -> T;
-}
-
-impl<'vm,T,F> WorkerResult<'vm,T> for WorkerCommand<T,F> where
-    F: Fn(TyCtxt)->T + Send + Sync + 'vm,
-    T: Send + Sync + 'vm
-{
-    fn wait() -> T {
-        panic!();
-    }
-}*/
-
-type ItemMap<'vm> = HashMap<rustc_hir::def_id::LocalDefId,Item<'vm>>;
+type ItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
 
 impl<'vm> RustCWorker<'vm> {
     pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>) -> Self {
 
-        let (sender,recv) = std::sync::mpsc::channel();
+        let (sender,recv) =
+            std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
 
         let self_profile = if args.profile { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
 
@@ -111,16 +105,16 @@ impl<'vm> RustCWorker<'vm> {
                             let local_id = item.owner_id.def_id;
                             let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
 
-                            vm.items.get_item(this_crate, item_path);
+                            let vm_item = vm.items.get_item(this_crate, &item_path, vm);
 
-                            //items.insert(item_path,local_id);
+                            items.insert(item_path,(local_id,vm_item));
                         }
 
-                        //println!("{:?}",items);
+                        println!("ready to process!");
 
                         loop {
                             let cmd = recv.recv().unwrap();
-                            //cmd.call(tcx);
+                            cmd.call(tcx, vm, &items);
                         }
                     })
                 });
@@ -134,8 +128,8 @@ impl<'vm> RustCWorker<'vm> {
     }
 
     fn call<T,F>(&self, func: F) -> Arc<WorkerResult<T>> where
-        F: Fn(TyCtxt)->T + Send + Sync + 'vm,
-        T: Send + Sync + 'vm
+        F: for<'v> Fn(TyCtxt,&'v VM<'v>,&ItemMap<'v>)->T + Send + Sync + 'static,
+        T: Send + Sync + 'static
     {
         let result = Arc::new(WorkerResult::<T>{
             complete: Barrier::new(2),
@@ -147,18 +141,12 @@ impl<'vm> RustCWorker<'vm> {
             result: result.clone()
         });
 
-        /*{
+        {
             let sender = self.sender.lock().unwrap();
             sender.send(cmd).unwrap();
-        }*/
+        }
 
         result
-        /*cmd.finish.wait();
-
-        {
-            let mut guard = cmd.result.lock().unwrap();
-            guard.take().unwrap()
-        }*/
     }
 
     /*pub fn setup(&self) -> Arc<WorkerResult<()>> {
@@ -179,10 +167,17 @@ impl<'vm> RustCWorker<'vm> {
         })
     }*/
 
-    /*fn function_ir<'vm>(&self, item: ItemId) -> IRFunction<'vm> {
-        self.call(move |tcx| {
-            panic!();
-        })
-        //panic!();
-    }*/
+    pub fn function_ir(&self, path: String) {
+        let res = self.call(move |tcx,vm,items| {
+            if let Some((did,vm_item)) = &items.get(&path) {
+
+                let (thir,root) = tcx.thir_body(did).unwrap();
+                let ir = IRFunctionBuilder::build(vm, tcx, *did, root, &thir.borrow());
+                vm_item.set_ir(ir);
+            } else {
+                panic!("item not found: {:?}",path);
+            }
+        });
+        res.wait();
+    }
 }

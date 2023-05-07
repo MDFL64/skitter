@@ -12,7 +12,7 @@ use crate::vm::{self, instr::Slot};
 pub struct HirCompiler<'vm,'f> {
     in_func_subs: Vec<Sub<'vm>>,
     in_func: &'f IRFunction<'vm>,
-    out_bc: Vec<vm::instr::Instr<'vm>>,
+    out_bc: Vec<vm::instr::Instr>,
     vm: &'vm vm::VM<'vm>,
     stack: CompilerStack,
     locals: Vec<(u32,Slot)>,
@@ -33,7 +33,7 @@ struct BreakInfo {
 }
 
 impl<'vm,'f> HirCompiler<'vm,'f> {
-    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: Vec<Sub<'vm>>) -> Vec<vm::instr::Instr<'vm>> {
+    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: Vec<Sub<'vm>>) -> Vec<vm::instr::Instr> {
 
         let mut compiler = HirCompiler {
             in_func_subs: subs,
@@ -287,7 +287,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     self.out_bc[index].replace_arg_sub(base_slot);
                 }
 
-                self.out_bc.push(Instr::Call(ret_slot, func));
+                panic!("fix func");
+                //self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
                     if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_layout.assert_size()) {
                         self.out_bc.push(instr);
@@ -672,7 +673,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
         (ty, crate::layout::Layout::from(ty))
     }
 
-    fn ty_to_func(&self, ty: Type<'vm>) -> Option<Arc<Function<'vm>>> {
+    fn ty_to_func(&self, ty: Type<'vm>) -> Option<&'vm Function<'vm>> {
         println!("{:?}",ty);
         panic!("ty to func");
         /*match ty.kind() {

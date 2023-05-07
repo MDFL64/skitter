@@ -1,15 +1,16 @@
-use std::{sync::Mutex, collections::HashMap};
+use std::{sync::{Mutex, RwLock, Arc, OnceLock, MutexGuard}, collections::HashMap, hash::Hash};
 
 use colosseum::sync::Arena;
 
-use crate::vm::VM;
+use crate::{vm::{VM, Function}, ir::IRFunction, types::Sub};
 
 #[derive(Copy,Clone)]
-pub struct Item<'vm>(&'vm InternedItem<'vm>);
+pub struct Item<'vm>(&'vm InternedItem<'vm>, &'vm VM<'vm>);
 
 pub struct ItemContext<'vm>{
     table: Mutex<HashMap<(CrateId,String),Item<'vm>>>,
-    arena: Arena<InternedItem<'vm>>
+    arena: Arena<InternedItem<'vm>>,
+    arena_functions: Arena<Function<'vm>>
 }
 
 #[derive(Hash,Eq,PartialEq,Copy,Clone)]
@@ -19,28 +20,101 @@ impl CrateId {
     pub fn new(n: u32) -> Self {
         Self(n)
     }
+
+    pub fn index(&self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl<'vm> ItemContext<'vm> {
     pub fn new() -> Self {
         ItemContext{
             table: Default::default(),
-            arena: Arena::new()
+            arena: Arena::new(),
+            arena_functions: Arena::new()
         }
     }
 
-    pub fn get_item(&'vm self, crate_id: CrateId, path: String) -> Item<'vm> {
+    pub fn get_item(&'vm self, crate_id: CrateId, path: &str, vm: &'vm VM<'vm>) -> Item<'vm> {
         let mut table = self.table.lock().unwrap();
-        let entry = table.entry((crate_id,path));
+        let entry = table.entry((crate_id,path.to_owned()));
 
         entry.or_insert_with(|| {
-            let intern_ref = self.arena.alloc(Default::default());
-            Item(intern_ref)
+            let intern_ref = self.arena.alloc(InternedItem::new(crate_id, path.to_owned()));
+            Item(intern_ref,vm)
         }).clone()
     }
 }
 
-#[derive(Default)]
-struct InternedItem<'vm> {
-    vm: Option<&'vm VM<'vm>>
+struct InternedItem<'vm>{
+    kind: OnceLock<ItemKind<'vm>>,
+    crate_id: CrateId,
+    path: String
+}
+
+impl<'vm> InternedItem<'vm> {
+    pub fn new(crate_id: CrateId, path: String) -> Self {
+        Self{
+            kind: OnceLock::new(),
+            crate_id,
+            path
+        }
+    }
+}
+
+enum ItemKind<'vm> {
+    Function{
+        ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
+        mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>
+    }
+}
+
+impl<'vm> Item<'vm> {
+    pub fn get_function(&self, subs: &[Sub<'vm>]) -> &'vm Function<'vm> {
+
+        self.0.kind.get_or_init(|| {
+            ItemKind::Function{
+                ir: Mutex::new(None),
+                mono_instances: Mutex::new(HashMap::new()),
+            }
+        });
+
+        let Some(ItemKind::Function{mono_instances,..}) = self.0.kind.get() else {
+            panic!("item kind mismatch");
+        };
+
+        let mut mono_instances = mono_instances.lock().unwrap();
+        mono_instances.entry(subs.to_owned()).or_insert_with(|| {
+            let f = Function::new_internal(*self, subs.to_owned());
+            self.1.items.arena_functions.alloc(f)
+        })
+    }
+
+    pub fn get_ir(&self) -> Arc<IRFunction<'vm>> {
+        
+        let Some(ItemKind::Function{ir,..}) = self.0.kind.get() else {
+            panic!("item kind mismatch");
+        };
+
+        loop {
+            {
+                let ir = ir.lock().unwrap();
+                if let Some(ir) = ir.as_ref() {
+                    return ir.clone();
+                }
+            }
+
+            self.1.build_function_ir(self.0.crate_id,self.0.path.clone());
+        }
+    }
+
+    pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
+        let Some(ItemKind::Function{ir,..}) = self.0.kind.get() else {
+            panic!("item kind mismatch");
+        };
+
+        let mut dest = ir.lock().unwrap();
+
+        *dest = Some(Arc::new(new_ir));
+    }
 }

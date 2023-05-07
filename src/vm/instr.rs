@@ -39,7 +39,7 @@ impl Slot {
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u16)]
-pub enum Instr<'vm> {
+pub enum Instr {
     I8_Const(Slot, i8),
     I8_Neg(Slot, Slot),
     I8_Not(Slot, Slot),
@@ -287,14 +287,14 @@ pub enum Instr<'vm> {
     JumpF(i32, Slot),
     JumpT(i32, Slot),
 
-    Call(Slot, Arc<Function<'vm>>),
+    //Call(Slot, &'vm Function<'vm>),
 
     Return,
     Bad,
     Debug(Box<String>)
 }
 
-impl<'vm> Instr<'vm> {
+impl Instr {
     pub fn replace_arg_sub(&mut self, call_slot: Slot) {
         if let Some(res) = self.get_result() {
             if let Some(offset) = res.get_frame_sub() {
@@ -541,8 +541,9 @@ impl<'vm> Instr<'vm> {
             Instr::JumpT(_, _) |
             Instr::Return |
             Instr::Bad |
-            Instr::Debug(_) |
-            Instr::Call(_, _) => None,
+            Instr::Debug(_)// |
+            //Instr::Call(_, _) 
+            => None,
         }
     }
 }
