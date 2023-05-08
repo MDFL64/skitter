@@ -25,3 +25,9 @@ const _: () = {
         panic!("bad Instr size");
     }
 };
+
+/// Utility function for aligning stacks / layouts
+pub fn align(x: u32, align: u32) -> u32 {
+    let mask = align - 1;
+    (x + mask) & !mask
+}

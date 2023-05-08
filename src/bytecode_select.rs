@@ -2,9 +2,9 @@
 
 use crate::ir::{UnaryOp, BinaryOp};
 use crate::types::{TypeKind, IntWidth, IntSign, Type};
-use crate::{vm::instr::{Slot, Instr}, layout::{Layout}};
+use crate::{vm::instr::{Slot, Instr}};
 
-pub fn literal(n: i128, size: u32, slot: Slot) -> Instr {
+pub fn literal<'vm>(n: i128, size: u32, slot: Slot) -> Instr<'vm> {
     match size {
         1  => Instr::I8_Const(slot, n as i8),
         2  => Instr::I16_Const(slot, n as i16),
@@ -16,7 +16,7 @@ pub fn literal(n: i128, size: u32, slot: Slot) -> Instr {
 }
 
 // TODO NONE OF THESE ACCOUNT FOR ALIGNMENT!
-pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
+pub fn copy<'vm>(dst: Slot, src: Slot, size: u32) -> Option<Instr<'vm>> {
     if size == 0 {
         None
     } else {
@@ -31,7 +31,7 @@ pub fn copy(dst: Slot, src: Slot, size: u32) -> Option<Instr> {
     }
 }
 
-pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
+pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'vm>> {
     if size == 0 {
         None
     } else {
@@ -46,7 +46,7 @@ pub fn copy_from_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Ins
     }
 }
 
-pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr> {
+pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'vm>> {
     if size == 0 {
         None
     } else {
@@ -61,7 +61,7 @@ pub fn copy_to_ptr(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr
     }
 }
 
-pub fn unary(op: UnaryOp, ty: Type) -> fn(Slot,Slot) -> Instr {
+pub fn unary<'vm>(op: UnaryOp, ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
     let size = 0xFFFF;
     match (op,ty.kind(),size) {
         (UnaryOp::Neg,TypeKind::Int(_,IntSign::Signed),1) => Instr::I8_Neg,
@@ -85,7 +85,7 @@ pub fn unary(op: UnaryOp, ty: Type) -> fn(Slot,Slot) -> Instr {
     }
 }
 
-pub fn binary(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr,bool) {
+pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr<'vm>,bool) {
     let size = 0xFFFF;
 
     let mut swap = false;
@@ -253,7 +253,7 @@ pub fn binary(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr,bool) {
     (ctor,swap)
 }
 
-pub fn cast(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr {
+pub fn cast<'vm>(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr<'vm> {
     panic!("todo fix cast");
     /*match (&arg_layout.kind,&res_layout.kind) {
         (LayoutKind::Int(_),LayoutKind::Int(_)) |

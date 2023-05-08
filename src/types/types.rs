@@ -1,3 +1,5 @@
+use crate::items::Item;
+
 use super::Type;
 
 
@@ -44,15 +46,8 @@ pub enum FloatWidth {
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
 pub struct TypeDef<'vm> {
-    pub id: TypeDefId,
+    pub item: Item<'vm>,
     pub subs: Vec<Sub<'vm>>
-}
-
-// TODO this should maybe just be a ref to a vm structure?
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
-pub enum TypeDefId {
-    Local(u32),
-    External(String) // do not actually use a string for this
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]

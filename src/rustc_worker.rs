@@ -1,9 +1,9 @@
 use std::{time::Duration, sync::{Mutex, Barrier, Arc, OnceLock}, borrow::BorrowMut, collections::HashMap};
 
 use rustc_session::config;
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{TyCtxt, Ty};
 
-use crate::{cli::CliArgs, ir::{IRFunction, IRFunctionBuilder}, vm::VM, items::{Item, CrateId}};
+use crate::{cli::CliArgs, ir::{IRFunction, IRFunctionBuilder}, vm::VM, items::{Item, CrateId}, types::Type};
 
 #[derive(Debug)]
 pub struct ItemId(u32);
@@ -13,6 +13,22 @@ pub struct ItemId(u32);
 pub struct RustCWorker<'vm> {
     sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>, // dyn WorkerCommandDyn<'vm>
     vm: &'vm VM<'vm>
+}
+
+type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
+type LocalItemMap<'vm> = HashMap<rustc_hir::def_id::DefIndex,Item<'vm>>;
+
+pub struct RustCContext<'vm,'tcx,'a> {
+    pub items_global: &'a GlobalItemMap<'vm>,
+    pub items_local: &'a LocalItemMap<'vm>,
+    pub vm: &'vm VM<'vm>,
+    pub tcx: TyCtxt<'tcx>
+}
+
+impl<'vm,'tcx,'a> RustCContext<'vm,'tcx,'a> {
+    pub fn type_from_rustc(&self, ty: Ty<'tcx>) -> Type<'vm> {
+        self.vm.types.type_from_rustc(ty,self)
+    }
 }
 
 pub struct WorkerResult<T> {
@@ -32,15 +48,15 @@ struct WorkerCommand<T,F> {
 }
 
 trait WorkerCommandDyn: Send + Sync {
-    fn call<'vm>(&self, tcx: TyCtxt, vm: &'vm VM<'vm>, items: &ItemMap<'vm>);
+    fn call<'vm>(&self, context: RustCContext);
 }
 
 impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
-    F: for<'v> Fn(TyCtxt,&'v VM<'v>,&ItemMap<'v>)->T + Send + Sync,
+    F: Fn(RustCContext)->T + Send + Sync,
     T: Send + Sync
 {
-    fn call<'vm>(&self, tcx: TyCtxt, vm: &'vm VM<'vm>, items: &ItemMap<'vm>) {
-        let res = (self.func)(tcx, vm, items);
+    fn call<'vm>(&self, context: RustCContext) {
+        let res = (self.func)(context);
         {
             let mut guard = self.result.value.lock().unwrap();
             *guard = Some(res);
@@ -48,8 +64,6 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
         self.result.complete.wait();
     }
 }
-
-type ItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
 
 impl<'vm> RustCWorker<'vm> {
     pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>) -> Self {
@@ -95,7 +109,8 @@ impl<'vm> RustCWorker<'vm> {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
 
-                        let mut items: ItemMap = Default::default();
+                        let mut items_global: GlobalItemMap = Default::default();
+                        let mut items_local: LocalItemMap = Default::default();
 
                         let hir = tcx.hir();
 
@@ -107,14 +122,20 @@ impl<'vm> RustCWorker<'vm> {
 
                             let vm_item = vm.items.get_item(this_crate, &item_path, vm);
 
-                            items.insert(item_path,(local_id,vm_item));
+                            items_global.insert(item_path,(local_id,vm_item));
+                            items_local.insert(local_id.local_def_index,vm_item);
                         }
 
                         println!("ready to process!");
 
                         loop {
                             let cmd = recv.recv().unwrap();
-                            cmd.call(tcx, vm, &items);
+                            cmd.call(RustCContext{
+                                items_global: &items_global,
+                                items_local: &items_local,
+                                tcx,
+                                vm
+                            });
                         }
                     })
                 });
@@ -128,7 +149,7 @@ impl<'vm> RustCWorker<'vm> {
     }
 
     fn call<T,F>(&self, func: F) -> Arc<WorkerResult<T>> where
-        F: for<'v> Fn(TyCtxt,&'v VM<'v>,&ItemMap<'v>)->T + Send + Sync + 'static,
+        F: Fn(RustCContext)->T + Send + Sync + 'static,
         T: Send + Sync + 'static
     {
         let result = Arc::new(WorkerResult::<T>{
@@ -168,11 +189,11 @@ impl<'vm> RustCWorker<'vm> {
     }*/
 
     pub fn function_ir(&self, path: String) {
-        let res = self.call(move |tcx,vm,items| {
-            if let Some((did,vm_item)) = &items.get(&path) {
+        let res = self.call(move |ctx| {
+            if let Some((did,vm_item)) = &ctx.items_global.get(&path) {
 
-                let (thir,root) = tcx.thir_body(did).unwrap();
-                let ir = IRFunctionBuilder::build(vm, tcx, *did, root, &thir.borrow());
+                let (thir,root) = ctx.tcx.thir_body(did).unwrap();
+                let ir = IRFunctionBuilder::build(ctx, *did, root, &thir.borrow());
                 vm_item.set_ir(ir);
             } else {
                 panic!("item not found: {:?}",path);

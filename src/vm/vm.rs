@@ -1,26 +1,25 @@
-use crossbeam::atomic::AtomicCell;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{Ty, TyCtxt};
 use rustc_middle::ty::SubstsRef;
 
 use std::borrow::Borrow;
 use std::sync::{OnceLock, Arc, Mutex, RwLock};
-use std::collections::HashMap;
-use crate::cli::CliArgs;
+use std::sync::atomic::Ordering;
 use crate::hir_compiler::HirCompiler;
-use crate::ir::IRFunctionBuilder;
 use crate::items::{ItemContext, Item, CrateId};
-use crate::rustc_worker::RustCWorker;
+use crate::rustc_worker::{RustCWorker, RustCContext};
 use crate::types::{Type, TypeDef, Sub};
 use crate::types::TypeContext;
 use crate::vm::instr::Slot;
+
+use std::sync::atomic::AtomicPtr;
 
 use super::instr::Instr;
 
 pub struct VM<'vm> {
     stack: Vec<u128>,
     //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
-    types: TypeContext<'vm>,
+    pub types: TypeContext<'vm>,
     pub items: ItemContext<'vm>,
     pub is_verbose: bool,
     workers: RwLock<Vec<RustCWorker<'vm>>>
@@ -84,8 +83,7 @@ impl<'vm> VM<'vm> {
 
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
 
-        let native = func.native.load();
-
+        let native = func.get_native();
         if let Some(native) = native {
             unsafe {
                 let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
@@ -109,10 +107,6 @@ impl<'vm> VM<'vm> {
             }
         }
     }
-
-    pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Type {
-        self.types.type_from_rustc(ty,self,tcx)
-    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
@@ -127,8 +121,8 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
 pub struct Function<'vm> {
     item: Item<'vm>,
     subs: Vec<Sub<'vm>>,
-    native: AtomicCell<Option<unsafe fn(*mut u8)>>,
-    bytecode_id: AtomicCell<Option<u32>>
+    native: AtomicPtr<std::ffi::c_void>,
+    bytecode: AtomicPtr<Vec<Instr<'vm>>>
 }
 
 impl<'vm> Function<'vm> {
@@ -136,22 +130,50 @@ impl<'vm> Function<'vm> {
         Function {
             item,
             subs,
-            native: AtomicCell::new(None),
-            bytecode_id: AtomicCell::new(None)
+            native: Default::default(),
+            bytecode: Default::default()
         }
     }
 
-    fn bytecode(&self) -> &'vm [Instr] {
+    pub fn get_native(&self) -> Option<unsafe fn(*mut u8)> {
+        let raw = self.native.load(Ordering::Acquire);
+        if raw.is_null() {
+            None
+        } else {
+            Some(unsafe { std::mem::transmute(raw) })
+        }
+    }
+
+    pub fn get_bytecode(&self) -> Option<&'vm Vec<Instr<'vm>>> {
+        let raw = self.bytecode.load(Ordering::Acquire);
+        if raw.is_null() {
+            None
+        } else {
+            Some(unsafe { &*raw })
+        }
+    }
+
+    pub fn set_native(&self, native: unsafe fn(*mut u8)) {
+        self.native.store(unsafe { std::mem::transmute(native) }, Ordering::Release);
+    }
+
+
+    pub fn set_bytecode(&self, bc: &'vm Vec<Instr>) {
+        self.bytecode.store(bc as *const _ as _, Ordering::Release);
+    }
+
+    fn bytecode(&self) -> &'vm [Instr<'vm>] {
 
         loop {
-            if let Some(bc_index) = self.bytecode_id.load() {
-                panic!("has bc");
-                //return bc;
+            if let Some(bc) = self.get_bytecode() {
+                return bc;
             }
 
             let ir = self.item.get_ir();
 
-            panic!("REQUEST BC HERE!");
+            let bc = HirCompiler::compile(self.item.vm(), &ir, &self.subs);
+
+            panic!("BC READY!");
         }
 
         panic!("todo bc");

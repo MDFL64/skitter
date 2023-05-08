@@ -7,6 +7,7 @@ use rustc_middle::thir::Thir;
 use rustc_middle::ty::TyCtxt;
 use rustc_hir::def_id::LocalDefId;
 
+use crate::rustc_worker::RustCContext;
 use crate::types::{Type, TypeContext};
 use crate::vm::VM;
 
@@ -145,17 +146,15 @@ pub enum PointerCast{
     UnSize,
 }
 
-pub struct IRFunctionBuilder<'vm,'tcx> {
-    vm: &'vm VM<'vm>,
-    tcx: TyCtxt<'tcx>,
+pub struct IRFunctionBuilder<'vm,'tcx,'a> {
+    ctx: RustCContext<'vm,'tcx,'a>,
     func_id: LocalDefId
 }
 
-impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
-    pub fn build(vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
+impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx,'a> {
+    pub fn build(ctx: RustCContext<'vm,'tcx,'a>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
         let builder = Self{
-            vm,
-            tcx,
+            ctx,
             func_id
         };
 
@@ -183,7 +182,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
             _ => panic!("const not supported")
         };
 
-        let return_ty = builder.vm.type_from_rustc(return_ty,tcx);
+        let return_ty = builder.ctx.type_from_rustc(return_ty);
 
         IRFunction{
             params,
@@ -378,7 +377,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
 
             thir::ExprKind::Call{ty,fun,ref args,..} => {
                 ExprKind::Call{
-                    func_ty: self.vm.type_from_rustc(ty,self.tcx),
+                    func_ty: self.ctx.type_from_rustc(ty),
                     func_expr: self.expr_id(fun),
                     args: args.iter().map(|arg| self.expr_id(*arg)).collect()
                 }
@@ -425,7 +424,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
 
         Expr{
             kind,
-            ty: self.vm.type_from_rustc(old.ty,self.tcx)
+            ty: self.ctx.type_from_rustc(old.ty)
         }
     }
 
@@ -450,7 +449,7 @@ impl<'vm,'tcx> IRFunctionBuilder<'vm,'tcx> {
 
         Box::new(Pattern {
             kind,
-            ty: self.vm.type_from_rustc(old.ty,self.tcx)
+            ty: self.ctx.type_from_rustc(old.ty)
         })
     }
 

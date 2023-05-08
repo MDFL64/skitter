@@ -7,6 +7,28 @@ use crate::{vm::{VM, Function}, ir::IRFunction, types::Sub};
 #[derive(Copy,Clone)]
 pub struct Item<'vm>(&'vm InternedItem<'vm>, &'vm VM<'vm>);
 
+impl<'vm> std::fmt::Debug for Item<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Item").finish()
+    }
+}
+
+impl<'vm> PartialEq for Item<'vm> {
+    fn eq(&self, other: &Self) -> bool {
+        let a = self.0 as *const _;
+        let b = other.0 as *const _;
+        a == b
+    }
+}
+
+impl<'vm> Eq for Item<'vm> {}
+
+impl<'vm> Hash for Item<'vm> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.0 as *const _ as usize);
+    }
+}
+
 pub struct ItemContext<'vm>{
     table: Mutex<HashMap<(CrateId,String),Item<'vm>>>,
     arena: Arena<InternedItem<'vm>>,
@@ -70,6 +92,10 @@ enum ItemKind<'vm> {
 }
 
 impl<'vm> Item<'vm> {
+    pub fn vm(&self) -> &'vm VM<'vm> {
+        self.1
+    }
+
     pub fn get_function(&self, subs: &[Sub<'vm>]) -> &'vm Function<'vm> {
 
         self.0.kind.get_or_init(|| {

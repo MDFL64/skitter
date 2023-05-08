@@ -20,7 +20,6 @@ mod vm;
 
 mod hir_compiler;
 mod bytecode_select;
-mod layout;
 mod cli;
 mod test;
 mod abi;

@@ -32,6 +32,10 @@ impl Layout {
                 };
                 Layout::simple(size)
             }
+            TypeKind::Bool => Layout::simple(1),
+            TypeKind::Tuple(fields) => {
+                Layout::compound(fields.iter().copied())
+            }
             /*TyKind::Int(IntTy::I16) => Layout::simple(2, LayoutKind::Int(IntSign::Signed)),
             TyKind::Int(IntTy::I32) => Layout::simple(4, LayoutKind::Int(IntSign::Signed)),
             TyKind::Int(IntTy::I64) => Layout::simple(8, LayoutKind::Int(IntSign::Signed)),
@@ -104,19 +108,14 @@ impl Layout {
         }
     }
 
-    pub fn align(x: u32, align: u32) -> u32 {
-        let mask = align - 1;
-        (x + mask) & !mask
-    }
-
-    /*fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
+    fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
         let mut size = 0;
         let mut align = 1;
 
         let field_offsets = fields.map(|ty| {
             let layout = Layout::from(ty);
 
-            size = Self::align(size, layout.align);
+            size = crate::abi::align(size, layout.align);
 
             let offset = size;
 
@@ -127,14 +126,14 @@ impl Layout {
             offset
         }).collect();
 
-        size = Self::align(size, align);
+        size = crate::abi::align(size, align);
 
         Layout {
             maybe_size: Some(size),
             align,
             field_offsets
         }
-    }*/
+    }
 
     fn pointer<'vm>(ref_ty: Type<'vm>) -> Self {
         let ptr_size = POINTER_SIZE.bytes();
