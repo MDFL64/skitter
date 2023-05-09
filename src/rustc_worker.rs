@@ -126,8 +126,6 @@ impl<'vm> RustCWorker<'vm> {
                             items_local.insert(local_id.local_def_index,vm_item);
                         }
 
-                        println!("ready to process!");
-
                         loop {
                             let cmd = recv.recv().unwrap();
                             cmd.call(RustCContext{

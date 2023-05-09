@@ -348,9 +348,9 @@ fn write_exec_match() {
             continue;
         }
     }
-    /*Instr::Call(base,func) => {
+    Instr::Call(base,func) => {
         self.call(func,stack_offset + base.index() as u32);
-    }*/
+    }
     Instr::SlotAddr(out,arg) => {
         let res = stack.add(arg.index()) as usize;
         write_stack(stack, *out, res);

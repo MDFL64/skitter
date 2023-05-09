@@ -7,6 +7,12 @@ use crate::{vm::{VM, Function}, ir::IRFunction, types::Sub};
 #[derive(Copy,Clone)]
 pub struct Item<'vm>(&'vm InternedItem<'vm>, &'vm VM<'vm>);
 
+impl<'vm> Item<'vm> {
+    pub fn path(&self) -> &str {
+        &self.0.path
+    }
+}
+
 impl<'vm> std::fmt::Debug for Item<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Item").finish()
@@ -31,8 +37,7 @@ impl<'vm> Hash for Item<'vm> {
 
 pub struct ItemContext<'vm>{
     table: Mutex<HashMap<(CrateId,String),Item<'vm>>>,
-    arena: Arena<InternedItem<'vm>>,
-    arena_functions: Arena<Function<'vm>>
+    arena: Arena<InternedItem<'vm>>
 }
 
 #[derive(Hash,Eq,PartialEq,Copy,Clone)]
@@ -52,8 +57,7 @@ impl<'vm> ItemContext<'vm> {
     pub fn new() -> Self {
         ItemContext{
             table: Default::default(),
-            arena: Arena::new(),
-            arena_functions: Arena::new()
+            arena: Arena::new()
         }
     }
 
@@ -111,8 +115,7 @@ impl<'vm> Item<'vm> {
 
         let mut mono_instances = mono_instances.lock().unwrap();
         mono_instances.entry(subs.to_owned()).or_insert_with(|| {
-            let f = Function::new_internal(*self, subs.to_owned());
-            self.1.items.arena_functions.alloc(f)
+            self.1.alloc_function(*self, subs.to_owned())
         })
     }
 

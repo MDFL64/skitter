@@ -48,7 +48,8 @@ fn main() {
 }
 
 fn run(args: cli::CliArgs) {
-    let vm = VM::new();
+    let mut vm = VM::new();
+    vm.is_verbose = args.verbose;
     
     std::thread::scope(|scope| {
         

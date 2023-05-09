@@ -30,7 +30,11 @@ struct BreakInfo {
 }
 
 impl<'vm,'f> HirCompiler<'vm,'f> {
-    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: &[Sub<'vm>]) -> Vec<Instr<'vm>> {
+    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: &[Sub<'vm>], path: &str) -> Vec<Instr<'vm>> {
+
+        if vm.is_verbose {
+            println!("compiling {:?} for {:?}",path,subs);
+        }
 
         let mut compiler = HirCompiler {
             in_func_subs: subs,

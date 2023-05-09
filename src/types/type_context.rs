@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{collections::HashMap, sync::{Mutex, OnceLock}, ops::SubAssign};
 
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg};
 use rustc_hir::def_id::DefId;
@@ -18,7 +18,16 @@ impl<'vm> Type<'vm> {
     }
 
     pub fn layout(&self) -> &'vm Layout {
-        panic!("todo fix layout");
+        self.0.layout.get_or_init(|| {
+            super::layout::Layout::from(*self)
+        })
+    }
+
+    pub fn sign(&self) -> IntSign {
+        match self.kind() {
+            TypeKind::Int(_,sign) => *sign,
+            _ => IntSign::Unsigned
+        }
     }
 }
 
@@ -134,7 +143,7 @@ impl<'vm> TypeContext<'vm> {
         let item = if did.krate == rustc_hir::def_id::LOCAL_CRATE {
             *ctx.items_local.get(&did.index).expect("couldn't find local item")
         } else {
-            panic!("todo non-local def");
+            panic!("todo non-local def {:?}",did);
         };
 
         assert!(subs.len() == 0);

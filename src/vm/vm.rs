@@ -1,3 +1,4 @@
+use colosseum::sync::Arena;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{Ty, TyCtxt};
 use rustc_middle::ty::SubstsRef;
@@ -22,7 +23,10 @@ pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub items: ItemContext<'vm>,
     pub is_verbose: bool,
-    workers: RwLock<Vec<RustCWorker<'vm>>>
+    workers: RwLock<Vec<RustCWorker<'vm>>>,
+
+    arena_functions: Arena<Function<'vm>>,
+    arena_bytecode: Arena<Vec<Instr<'vm>>>
 }
 
 
@@ -35,7 +39,9 @@ impl<'vm> VM<'vm> {
             types: TypeContext::new(),
             items: ItemContext::new(),
             is_verbose: false,
-            workers: Default::default()
+            workers: Default::default(),
+            arena_functions: Arena::new(),
+            arena_bytecode: Arena::new(),
         }
     }
 
@@ -47,6 +53,21 @@ impl<'vm> VM<'vm> {
         let workers = self.workers.read().unwrap();
         let worker = &workers[crate_id.index()];
         worker.function_ir(path);
+    }
+
+    pub fn alloc_function(&'vm self, item: Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
+        let func = Function {
+            item,
+            subs,
+            native: Default::default(),
+            bytecode: Default::default()
+        };
+
+        self.arena_functions.alloc(func)
+    }
+
+    pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &Vec<Instr<'vm>> {
+        self.arena_bytecode.alloc(bc)
     }
 
     /*pub fn run_crate(&mut self, args: CliArgs) {
@@ -126,14 +147,6 @@ pub struct Function<'vm> {
 }
 
 impl<'vm> Function<'vm> {
-    pub fn new_internal(item: Item<'vm>, subs: Vec<Sub<'vm>>) -> Self {
-        Function {
-            item,
-            subs,
-            native: Default::default(),
-            bytecode: Default::default()
-        }
-    }
 
     pub fn get_native(&self) -> Option<unsafe fn(*mut u8)> {
         let raw = self.native.load(Ordering::Acquire);
@@ -171,34 +184,11 @@ impl<'vm> Function<'vm> {
 
             let ir = self.item.get_ir();
 
-            let bc = HirCompiler::compile(self.item.vm(), &ir, &self.subs);
+            let bc = HirCompiler::compile(self.item.vm(), &ir, &self.subs, self.item.path());
+            let bc_ref = self.item.vm().alloc_bytecode(bc);
 
-            panic!("BC READY!");
+            self.set_bytecode(bc_ref);
         }
-
-        panic!("todo bc");
-        /*self.bytecode.get_or_init(|| {
-
-            // resolve trait methods to a specific instance
-            let resolve_arg = rustc_middle::ty::ParamEnv::reveal_all().and((self.def_id.into(),self.subs));
-            let resolved = vm.tcx.resolve_instance(resolve_arg).unwrap().unwrap();
-
-            let resolve_id = resolved.def_id();
-            let resolve_subs = resolved.substs;
-
-            if resolve_id.krate != rustc_hir::def_id::LOCAL_CRATE {
-                panic!("non-local call {:?} {:?}",resolve_id,resolve_subs);
-            }
-            
-            let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: resolve_id.index };
-
-            let (thir_body,root_expr) = vm.tcx.thir_body(WithOptConstParam::unknown(local_id)).expect("type check failed");
-            let thir_body = thir_body.borrow();
-
-            let ir = IRFunctionBuilder::build(vm,local_id, root_expr, &thir_body);
-
-            HirCompiler::compile(vm,&ir,&resolve_subs)
-        })*/
     }
 }
 

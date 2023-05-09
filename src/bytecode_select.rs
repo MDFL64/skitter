@@ -62,7 +62,7 @@ pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<
 }
 
 pub fn unary<'vm>(op: UnaryOp, ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
-    let size = 0xFFFF;
+    let size = ty.layout().assert_size();
     match (op,ty.kind(),size) {
         (UnaryOp::Neg,TypeKind::Int(_,IntSign::Signed),1) => Instr::I8_Neg,
         (UnaryOp::Neg,TypeKind::Int(_,IntSign::Signed),2) => Instr::I16_Neg,
@@ -86,7 +86,7 @@ pub fn unary<'vm>(op: UnaryOp, ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
 }
 
 pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr<'vm>,bool) {
-    let size = 0xFFFF;
+    let size = ty.layout().assert_size();
 
     let mut swap = false;
     let ctor = match (op,ty.kind(),size) {
@@ -253,27 +253,30 @@ pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr<'vm>,
     (ctor,swap)
 }
 
-pub fn cast<'vm>(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr<'vm> {
-    panic!("todo fix cast");
-    /*match (&arg_layout.kind,&res_layout.kind) {
-        (LayoutKind::Int(_),LayoutKind::Int(_)) |
-        (LayoutKind::Bool,LayoutKind::Int(_)) |
-        (LayoutKind::Ptr,LayoutKind::Int(_)) |
-        (LayoutKind::Int(_),LayoutKind::Ptr) => {
-            
-            let sign = arg_layout.sign();
+pub fn cast<'vm>(arg_ty: Type, res_ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
 
-            if arg_layout.assert_size() >= res_layout.assert_size() {
-                match res_layout.assert_size() {
+    let arg_size = arg_ty.layout().assert_size();
+    let res_size = res_ty.layout().assert_size();
+
+    match (arg_ty.kind(),res_ty.kind()) {
+        (TypeKind::Int(..),TypeKind::Int(..)) |
+        (TypeKind::Bool,TypeKind::Int(..)) |
+        (TypeKind::Ptr(_),TypeKind::Int(..)) |
+        (TypeKind::Int(..),TypeKind::Ptr(_)) => {
+            
+            let sign = arg_ty.sign();
+
+            if arg_size >= res_size {
+                match res_size {
                     1 => Instr::MovSS1,
                     2 => Instr::MovSS2,
                     4 => Instr::MovSS4,
                     8 => Instr::MovSS8,
                     16 => Instr::MovSS16,
-                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
+                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_size,res_size,sign)
                 }
             } else {
-                match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
+                match (arg_size,res_size,sign) {
                     (1,2,IntSign::Signed) => Instr::I16_S_Widen_8,
                     (1,2,IntSign::Unsigned) => Instr::I16_U_Widen_8,
 
@@ -298,20 +301,19 @@ pub fn cast<'vm>(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr<'
                     (1,16,IntSign::Signed) => Instr::I128_S_Widen_8,
                     (1,16,IntSign::Unsigned) => Instr::I128_U_Widen_8,
 
-                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
+                    _ => panic!("no int2int cast for: {:?} {:?} {:?}",arg_size,res_size,sign)
                 }
             }
         }
-        (LayoutKind::Float,LayoutKind::Float) => {
-            match (arg_layout.assert_size(),res_layout.assert_size()) {
+        (TypeKind::Float(_),TypeKind::Float(_)) => {
+            match (arg_size,res_size) {
                 (4,8) => Instr::F64_From_F32,
                 (8,4) => Instr::F32_From_F64,
-                _ => panic!("no float2float cast for: {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size())
+                _ => panic!("no float2float cast for: {:?} {:?}",arg_size,res_size)
             }
         }
-        (LayoutKind::Int(_),LayoutKind::Float) => {
-            let sign = arg_layout.sign();
-            match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
+        (TypeKind::Int(_,sign),TypeKind::Float(..)) => {
+            match (arg_size,res_size,sign) {
 
                 (1,4,IntSign::Signed) => Instr::F32_From_I8_S,
                 (1,4,IntSign::Unsigned) => Instr::F32_From_I8_U,
@@ -338,12 +340,11 @@ pub fn cast<'vm>(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr<'
                 (16,8,IntSign::Signed) => Instr::F64_From_I128_S,
                 (16,8,IntSign::Unsigned) => Instr::F64_From_I128_U,
 
-                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
+                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_size,res_size,sign)
             }
         }
-        (LayoutKind::Float,LayoutKind::Int(_)) => {
-            let sign = res_layout.sign();
-            match (arg_layout.assert_size(),res_layout.assert_size(),sign) {
+        (TypeKind::Float(_),TypeKind::Int(_,sign)) => {
+            match (arg_size,res_size,sign) {
 
                 (4,1,IntSign::Signed) => Instr::F32_Into_I8_S,
                 (4,1,IntSign::Unsigned) => Instr::F32_Into_I8_U,
@@ -370,9 +371,9 @@ pub fn cast<'vm>(arg_layout: Type, res_layout: Type) -> fn(Slot,Slot) -> Instr<'
                 (8,16,IntSign::Signed) => Instr::F64_Into_I128_S,
                 (8,16,IntSign::Unsigned) => Instr::F64_Into_I128_U,
 
-                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_layout.assert_size(),res_layout.assert_size(),sign)
+                _ => panic!("no int2float cast for: {:?} {:?} {:?}",arg_size,res_size,sign)
             }
         }
-        _ => panic!("no cast: {:?} -> {:?}",arg_layout.kind,res_layout.kind)
-    }*/
+        _ => panic!("no cast: {:?} -> {:?}",arg_ty,res_ty)
+    }
 }
