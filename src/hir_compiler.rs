@@ -575,7 +575,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 assert!(*variant == 0);
 
-                let field_offset = self.expr_ty(id).layout().field_offsets[*field as usize];
+                let field_offset = self.expr_ty(*lhs).layout().field_offsets[*field as usize];
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(base_slot) => {

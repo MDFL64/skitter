@@ -1,5 +1,7 @@
 use crate::{abi::POINTER_SIZE, types::{Type, TypeKind, IntWidth}};
 
+use super::FloatWidth;
+
 #[derive(Debug)]
 pub struct Layout {
     pub maybe_size: Option<u32>,
@@ -21,7 +23,7 @@ impl Layout {
     pub fn from<'vm>(ty: Type<'vm>) -> Self {
         let kind = ty.kind();
         match kind {
-            TypeKind::Int(width,sign) => {
+            TypeKind::Int(width,_) => {
                 let size = match width {
                     IntWidth::I8 => 1,
                     IntWidth::I16 => 2,
@@ -32,29 +34,38 @@ impl Layout {
                 };
                 Layout::simple(size)
             }
+            TypeKind::Float(FloatWidth::F32) => Layout::simple(4),
+            TypeKind::Float(FloatWidth::F64) => Layout::simple(8),
             TypeKind::Bool => Layout::simple(1),
+            TypeKind::Char => Layout::simple(4),
             TypeKind::Tuple(fields) => {
                 Layout::compound(fields.iter().copied())
             }
-            /*TyKind::Int(IntTy::I16) => Layout::simple(2, LayoutKind::Int(IntSign::Signed)),
-            TyKind::Int(IntTy::I32) => Layout::simple(4, LayoutKind::Int(IntSign::Signed)),
-            TyKind::Int(IntTy::I64) => Layout::simple(8, LayoutKind::Int(IntSign::Signed)),
-            TyKind::Int(IntTy::I128) => Layout::simple(16, LayoutKind::Int(IntSign::Signed)),
+            TypeKind::Ref(ref_ty) |
+            TypeKind::Ptr(ref_ty) => {
+                let ptr_size = POINTER_SIZE.bytes();
 
-            TyKind::Uint(UintTy::U8) => Layout::simple(1, LayoutKind::Int(IntSign::Unsigned)),
-            TyKind::Uint(UintTy::U16) => Layout::simple(2, LayoutKind::Int(IntSign::Unsigned)),
-            TyKind::Uint(UintTy::U32) => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
-            TyKind::Uint(UintTy::U64) => Layout::simple(8, LayoutKind::Int(IntSign::Unsigned)),
-            TyKind::Uint(UintTy::U128) => Layout::simple(16, LayoutKind::Int(IntSign::Unsigned)),
+                let ref_layout = Layout::from(*ref_ty);
+                if ref_layout.is_sized() {
+                    Layout::simple(ptr_size)
+                } else {
+                    Self {
+                        maybe_size: Some(ptr_size * 2),
+                        align: ptr_size,
+                        field_offsets: Vec::new()
+                    }
+                }
+            }
+            TypeKind::Adt(def) => {
+                let fields = def.item.get_adt_fields();
 
-            TyKind::Int(IntTy::Isize) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Int(IntSign::Signed)),
-            TyKind::Uint(UintTy::Usize) => Layout::simple(POINTER_SIZE.bytes(), LayoutKind::Int(IntSign::Unsigned)),
+                let fixed_fields = fields.iter().map(|field| {
+                    field.sub(&def.subs)
+                });
 
-            TyKind::Float(FloatTy::F32) => Layout::simple(4, LayoutKind::Float),
-            TyKind::Float(FloatTy::F64) => Layout::simple(8, LayoutKind::Float),
-
-            TyKind::Bool => Layout::simple(1, LayoutKind::Bool),
-            TyKind::Char => Layout::simple(4, LayoutKind::Int(IntSign::Unsigned)),
+                Layout::compound(fixed_fields)
+            }
+            /*
 
             TyKind::Never => Layout::simple(0,LayoutKind::Never),
 
@@ -132,21 +143,6 @@ impl Layout {
             maybe_size: Some(size),
             align,
             field_offsets
-        }
-    }
-
-    fn pointer<'vm>(ref_ty: Type<'vm>) -> Self {
-        let ptr_size = POINTER_SIZE.bytes();
-
-        let ref_layout = Layout::from(ref_ty);
-        if ref_layout.is_sized() {
-            Layout::simple(ptr_size)
-        } else {
-            Self {
-                maybe_size: Some(ptr_size * 2),
-                align: ptr_size,
-                field_offsets: Vec::new()
-            }
         }
     }
 

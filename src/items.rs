@@ -2,7 +2,7 @@ use std::{sync::{Mutex, RwLock, Arc, OnceLock, MutexGuard}, collections::HashMap
 
 use colosseum::sync::Arena;
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::Sub};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type}};
 
 #[derive(Copy,Clone)]
 pub struct Item<'vm>(&'vm InternedItem<'vm>, &'vm VM<'vm>);
@@ -92,6 +92,9 @@ enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>
+    },
+    Adt{
+        fields: Vec<Type<'vm>>
     }
 }
 
@@ -145,5 +148,22 @@ impl<'vm> Item<'vm> {
         let mut dest = ir.lock().unwrap();
 
         *dest = Some(Arc::new(new_ir));
+    }
+
+    pub fn get_adt_fields(&self) -> &Vec<Type<'vm>> {
+        
+        loop {
+            match self.0.kind.get() {
+                Some(ItemKind::Adt { fields }) => break fields,
+                None => {
+                    self.1.build_adt_fields(self.0.crate_id,self.0.path.clone());
+                }
+                _ => panic!("item kind mismatch")
+            }
+        }
+    }
+
+    pub fn set_adt_fields(&self, fields: Vec<Type<'vm>>) {
+        self.0.kind.set(ItemKind::Adt{ fields }).ok();
     }
 }

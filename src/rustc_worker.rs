@@ -197,4 +197,25 @@ impl RustCWorker {
         });
         res.wait();
     }
+
+    pub fn adt_fields(&self, path: String) {
+        let res = self.call(move |ctx| {
+            if let Some((did,vm_item)) = &ctx.items_global.get(&path) {
+                let adt_def = ctx.tcx.adt_def(did.to_def_id());
+
+                let variants = adt_def.variants();
+                assert!(variants.len() == 1);
+
+                let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
+                    let ty = ctx.tcx.type_of(field.did).skip_binder();
+                    ctx.vm.types.type_from_rustc(ty, &ctx)
+                }).collect();
+
+                vm_item.set_adt_fields(fields);
+            } else {
+                panic!("item not found: {:?}",path);
+            }
+        });
+        res.wait();
+    }
 }

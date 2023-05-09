@@ -247,6 +247,13 @@ pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr<'vm>,
         (BinaryOp::BitAnd,TypeKind::Bool,1) => Instr::I8_And,
         (BinaryOp::BitXor,TypeKind::Bool,1) => Instr::I8_Xor,
 
+        (BinaryOp::Eq,TypeKind::Char,4) => Instr::I32_Eq,
+        (BinaryOp::NotEq,TypeKind::Char,4) => Instr::I32_NotEq,
+        (BinaryOp::Lt,TypeKind::Char,4) => Instr::I32_U_Lt,
+        (BinaryOp::Gt,TypeKind::Char,4) => { swap = true; Instr::I32_U_Lt }
+        (BinaryOp::LtEq,TypeKind::Char,4) => Instr::I32_U_LtEq,
+        (BinaryOp::GtEq,TypeKind::Char,4) => { swap = true; Instr::I32_U_LtEq }
+
         _ => panic!("no binary op: {:?} {:?}",op,ty)
     };
 
@@ -262,7 +269,9 @@ pub fn cast<'vm>(arg_ty: Type, res_ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
         (TypeKind::Int(..),TypeKind::Int(..)) |
         (TypeKind::Bool,TypeKind::Int(..)) |
         (TypeKind::Ptr(_),TypeKind::Int(..)) |
-        (TypeKind::Int(..),TypeKind::Ptr(_)) => {
+        (TypeKind::Int(..),TypeKind::Ptr(_)) |
+        (TypeKind::Char,TypeKind::Int(..)) |
+        (TypeKind::Int(..),TypeKind::Char) => {
             
             let sign = arg_ty.sign();
 

@@ -20,6 +20,8 @@ pub enum TypeKind<'vm> {
 
     FunctionDef(TypeDef<'vm>),
     Adt(TypeDef<'vm>),
+
+    Param(u32)
 }
 
 #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]

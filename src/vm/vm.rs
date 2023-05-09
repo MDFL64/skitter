@@ -55,6 +55,12 @@ impl<'vm> VM<'vm> {
         worker.function_ir(path);
     }
 
+    pub fn build_adt_fields(&self, crate_id: CrateId, path: String) {
+        let workers = self.workers.read().unwrap();
+        let worker = &workers[crate_id.index()];
+        worker.adt_fields(path);
+    }
+
     pub fn alloc_function(&'vm self, item: Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
         let func = Function {
             item,

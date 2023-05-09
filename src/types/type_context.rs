@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::{Mutex, OnceLock}};
 
-use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg};
+use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub};
 
 use colosseum::sync::Arena;
 
@@ -29,11 +29,45 @@ impl<'vm> Type<'vm> {
             _ => IntSign::Unsigned
         }
     }
+
+    pub fn sub(&self, subs: &[Sub<'vm>]) -> Self {
+        if subs.len() == 0 {
+            return *self;
+        }
+        // todo add a field which indicates whether a type accepts subs, fast return if not
+        match self.kind() {
+            TypeKind::Param(n) => {
+                let sub = &subs[*n as usize];
+                if let Sub::Type(sub_ty) = sub {
+                    *sub_ty
+                } else {
+                    panic!("bad sub");
+                }
+            }
+            TypeKind::Tuple(fields) => {
+                // fast path, will become redundant if above optimization is implemented
+                if fields.len() == 0 {
+                    return *self;
+                }
+                let new_fields = fields.iter().map(|field| {
+                    field.sub(subs)
+                }).collect();
+                let vm = self.1;
+                vm.types.intern(TypeKind::Tuple(new_fields), vm)
+            }
+            // These types never accept subs.
+            TypeKind::Int(..) |
+            TypeKind::Float(_) |
+            TypeKind::Bool |
+            TypeKind::Char => *self,
+            _ => panic!("todo sub {:?} with {:?}",self,subs)
+        }
+    }
 }
 
 impl<'vm> std::fmt::Debug for Type<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.0.kind.fmt(f)
     }
 }
 
@@ -125,32 +159,41 @@ impl<'vm> TypeContext<'vm> {
             }
 
             TyKind::Adt(adt,subs) => {
-                assert!(subs.len() == 0);
-
-                let def = Self::def_from_rustc(adt.did(),ctx,subs);
+                let def = self.def_from_rustc(adt.did(),ctx,subs);
                 TypeKind::Adt(def)
             }
             TyKind::FnDef(did,subs) => {
-                let def = Self::def_from_rustc(*did,ctx,subs);
+                let def = self.def_from_rustc(*did,ctx,subs);
                 TypeKind::FunctionDef(def)
             }
+
+            TyKind::Param(param) => {
+                TypeKind::Param(param.index)
+            }
+
             _ => panic!("convert ty: {:?}",kind)
         };
+        //println!("{:?} -> {:?}",ty,new_kind);
         self.intern(new_kind,ctx.vm)
     }
 
-    fn def_from_rustc<'tcx,'a>(did: DefId, ctx: &RustCContext<'vm,'tcx,'a>, subs: &[GenericArg]) -> TypeDef<'vm> {
+    fn def_from_rustc<'tcx,'a>(&'vm self, did: DefId, ctx: &RustCContext<'vm,'tcx,'a>, subs: &[GenericArg<'tcx>]) -> TypeDef<'vm> {
         let item = if did.krate == rustc_hir::def_id::LOCAL_CRATE {
             *ctx.items_local.get(&did.index).expect("couldn't find local item")
         } else {
             panic!("todo non-local def {:?}",did);
         };
 
-        assert!(subs.len() == 0);
+        let subs: Vec<_> = subs.iter().map(|s| {
+            match s.unpack() {
+                GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
+                _ => panic!("can't handle sub {:?}",s)
+            }
+        }).collect();
 
         TypeDef{
             item,
-            subs: Vec::new()
+            subs
         }
     }
 
