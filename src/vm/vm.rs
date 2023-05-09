@@ -23,7 +23,7 @@ pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub items: ItemContext<'vm>,
     pub is_verbose: bool,
-    workers: RwLock<Vec<RustCWorker<'vm>>>,
+    workers: RwLock<Vec<RustCWorker>>,
 
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>
@@ -45,7 +45,7 @@ impl<'vm> VM<'vm> {
         }
     }
 
-    pub fn add_worker(&self, worker: RustCWorker<'vm>) {
+    pub fn add_worker(&self, worker: RustCWorker) {
         self.workers.write().unwrap().push(worker);
     }
 
@@ -63,44 +63,24 @@ impl<'vm> VM<'vm> {
             bytecode: Default::default()
         };
 
+        let path = item.path();
+        if path.starts_with("::_builtin::") {
+            match path {
+                "::_builtin::print_int" => func.set_native(builtin_print_int),
+                "::_builtin::print_uint" => func.set_native(builtin_print_uint),
+                "::_builtin::print_float" => func.set_native(builtin_print_float),
+                "::_builtin::print_bool" => func.set_native(builtin_print_bool),
+                "::_builtin::print_char" => func.set_native(builtin_print_char),
+                _ => panic!("unknown builtin {}",path)
+            }
+        }
+
         self.arena_functions.alloc(func)
     }
 
     pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &Vec<Instr<'vm>> {
         self.arena_bytecode.alloc(bc)
     }
-
-    /*pub fn run_crate(&mut self, args: CliArgs) {
-        assert!(self.crates.len() == 0);
-        self.crates.push(Box::new(IRCrateLazy::new(args)));
-        let main_id = self.crates[0].find("::main").unwrap();
-        println!("{:?}",main_id);
-    }*/
-
-    /*pub fn get_func(&self, def_id: DefId, subs: SubstsRef<'tcx>) -> Arc<Function<'tcx>> {
-        let mut functions = self.functions.lock().unwrap();
-        functions.entry((def_id,subs)).or_insert_with(|| {
-            let mut res = Function::new(def_id,subs);
-
-            // builtin hack
-            if def_id.krate == rustc_hir::def_id::LOCAL_CRATE {
-                let local_id = rustc_hir::def_id::LocalDefId{ local_def_index: def_id.index };
-                let path = self.tcx.hir().def_path(local_id).to_string_no_crate_verbose();
-                if path.starts_with("::_builtin::") {
-                    match path.as_str() {
-                        "::_builtin::print_int" => res.native = Some(builtin_print_int),
-                        "::_builtin::print_uint" => res.native = Some(builtin_print_uint),
-                        "::_builtin::print_float" => res.native = Some(builtin_print_float),
-                        "::_builtin::print_bool" => res.native = Some(builtin_print_bool),
-                        "::_builtin::print_char" => res.native = Some(builtin_print_char),
-                        _ => panic!("unknown builtin {}",path)
-                    }
-                }
-            }
-
-            Arc::new(res)
-        }).clone()
-    }*/
 
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
 

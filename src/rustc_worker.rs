@@ -1,18 +1,17 @@
-use std::{time::Duration, sync::{Mutex, Barrier, Arc, OnceLock}, borrow::BorrowMut, collections::HashMap};
+use std::{sync::{Mutex, Barrier, Arc}, collections::HashMap};
 
 use rustc_session::config;
 use rustc_middle::ty::{TyCtxt, Ty};
 
-use crate::{cli::CliArgs, ir::{IRFunction, IRFunctionBuilder}, vm::VM, items::{Item, CrateId}, types::Type};
+use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::VM, items::{Item, CrateId}, types::Type};
 
 #[derive(Debug)]
 pub struct ItemId(u32);
 
 /////////////////////////
 
-pub struct RustCWorker<'vm> {
-    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>, // dyn WorkerCommandDyn<'vm>
-    vm: &'vm VM<'vm>
+pub struct RustCWorker {
+    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>
 }
 
 type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
@@ -65,8 +64,8 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
-impl<'vm> RustCWorker<'vm> {
-    pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>) -> Self {
+impl RustCWorker {
+    pub fn new<'vm,'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>) -> Self {
 
         let (sender,recv) =
             std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
@@ -141,8 +140,7 @@ impl<'vm> RustCWorker<'vm> {
         });
 
         RustCWorker {
-            sender: Mutex::new(sender),
-            vm
+            sender: Mutex::new(sender)
         }
     }
 
