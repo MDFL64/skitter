@@ -1,7 +1,7 @@
 /// Just a few utility functions for picking the right bytecode instructions
 
 use crate::ir::{UnaryOp, BinaryOp};
-use crate::types::{TypeKind, IntWidth, IntSign, Type};
+use crate::types::{TypeKind, IntSign, Type};
 use crate::{vm::instr::{Slot, Instr}};
 
 pub fn literal<'vm>(n: i128, size: u32, slot: Slot) -> Instr<'vm> {

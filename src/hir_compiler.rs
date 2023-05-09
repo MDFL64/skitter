@@ -427,7 +427,6 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Ref(arg,..) => {
-                let arg_ty = self.expr_ty(*arg);
 
                 let place = self.expr_to_place(*arg);
 

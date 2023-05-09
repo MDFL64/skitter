@@ -4,12 +4,10 @@ use std::str::FromStr;
 
 use rustc_middle::thir;
 use rustc_middle::thir::Thir;
-use rustc_middle::ty::TyCtxt;
 use rustc_hir::def_id::LocalDefId;
 
 use crate::rustc_worker::RustCContext;
-use crate::types::{Type, TypeContext};
-use crate::vm::VM;
+use crate::types::{Type};
 
 pub struct IRFunction<'vm> {
     pub root_expr: ExprId,

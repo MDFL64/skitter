@@ -41,6 +41,26 @@ impl Layout {
             TypeKind::Tuple(fields) => {
                 Layout::compound(fields.iter().copied())
             }
+            TypeKind::Array(elem_ty,count) => {
+                let elem_layout = elem_ty.layout();
+                let elem_size = elem_layout.assert_size();
+
+                Layout {
+                    maybe_size: Some(elem_size * count),
+                    align: elem_layout.align,
+                    field_offsets: Vec::new()
+                }
+            }
+            TypeKind::Slice(elem_ty) => {
+                let elem_layout = elem_ty.layout();
+                
+                Layout {
+                    maybe_size: None,
+                    align: elem_layout.align,
+                    field_offsets: Vec::new()
+                }
+            }
+
             TypeKind::Ref(ref_ty) |
             TypeKind::Ptr(ref_ty) => {
                 let ptr_size = POINTER_SIZE.bytes();
