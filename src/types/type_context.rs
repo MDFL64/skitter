@@ -35,6 +35,7 @@ impl<'vm> Type<'vm> {
             return *self;
         }
         // todo add a field which indicates whether a type accepts subs, fast return if not
+        let vm = self.1;
         match self.kind() {
             TypeKind::Param(n) => {
                 let sub = &subs[*n as usize];
@@ -44,6 +45,14 @@ impl<'vm> Type<'vm> {
                     panic!("bad sub");
                 }
             }
+            TypeKind::Ref(ref_ty) => {
+                let ref_ty = ref_ty.sub(subs);
+                vm.types.intern(TypeKind::Ref(ref_ty),vm)
+            }
+            TypeKind::Ptr(ref_ty) => {
+                let ref_ty = ref_ty.sub(subs);
+                vm.types.intern(TypeKind::Ptr(ref_ty),vm)
+            }
             TypeKind::Tuple(fields) => {
                 // fast path, will become redundant if above optimization is implemented
                 if fields.len() == 0 {
@@ -52,8 +61,33 @@ impl<'vm> Type<'vm> {
                 let new_fields = fields.iter().map(|field| {
                     field.sub(subs)
                 }).collect();
-                let vm = self.1;
                 vm.types.intern(TypeKind::Tuple(new_fields), vm)
+            }
+            TypeKind::Adt(def) => {
+                // fast path, will become redundant if above optimization is implemented
+                if def.subs.len() == 0 {
+                    return *self;
+                }
+                let new_subs = def.subs.iter().map(|field| {
+                    field.sub(subs)
+                }).collect();
+                vm.types.intern(TypeKind::Adt(TypeDef{
+                    item: def.item,
+                    subs: new_subs
+                }), vm)
+            }
+            TypeKind::FunctionDef(def) => {
+                // fast path, will become redundant if above optimization is implemented
+                if def.subs.len() == 0 {
+                    return *self;
+                }
+                let new_subs = def.subs.iter().map(|field| {
+                    field.sub(subs)
+                }).collect();
+                vm.types.intern(TypeKind::FunctionDef(TypeDef{
+                    item: def.item,
+                    subs: new_subs
+                }), vm)
             }
             // These types never accept subs.
             TypeKind::Int(..) |

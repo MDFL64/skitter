@@ -1,15 +1,11 @@
 use colosseum::sync::Arena;
-use rustc_hir::def_id::DefId;
-use rustc_middle::ty::{Ty, TyCtxt};
-use rustc_middle::ty::SubstsRef;
 
-use std::borrow::Borrow;
-use std::sync::{OnceLock, Arc, Mutex, RwLock};
+use std::sync::RwLock;
 use std::sync::atomic::Ordering;
 use crate::hir_compiler::HirCompiler;
 use crate::items::{ItemContext, Item, CrateId};
-use crate::rustc_worker::{RustCWorker, RustCContext};
-use crate::types::{Type, TypeDef, Sub};
+use crate::rustc_worker::RustCWorker;
+use crate::types::Sub;
 use crate::types::TypeContext;
 use crate::vm::instr::Slot;
 
@@ -55,10 +51,10 @@ impl<'vm> VM<'vm> {
         worker.function_ir(path);
     }
 
-    pub fn build_adt_fields(&self, crate_id: CrateId, path: String) {
+    pub fn wait_for_setup(&self, crate_id: CrateId) {
         let workers = self.workers.read().unwrap();
         let worker = &workers[crate_id.index()];
-        worker.adt_fields(path);
+        worker.wait_for_setup();
     }
 
     pub fn alloc_function(&'vm self, item: Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
@@ -168,7 +164,7 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let ir = self.item.get_ir();
+            let ir = self.item.get_ir(&self.subs);
 
             let bc = HirCompiler::compile(self.item.vm(), &ir, &self.subs, self.item.path());
             let bc_ref = self.item.vm().alloc_bytecode(bc);

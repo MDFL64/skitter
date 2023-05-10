@@ -58,8 +58,12 @@ fn main() {
         
         let worker = RustCWorker::new(args, scope, &vm);
         vm.add_worker(worker);
+
+        let main_crate = CrateId::new(0);
+
+        vm.wait_for_setup(main_crate);
         
-        let main_item = vm.items.get_item(CrateId::new(0), "::main", &vm);
+        let main_item = vm.items.get(main_crate, "::main", &vm);
         let main_fn = main_item.get_function(&[]);
 
         vm.call(&main_fn,0);

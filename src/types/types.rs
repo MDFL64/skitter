@@ -56,3 +56,12 @@ pub struct TypeDef<'vm> {
 pub enum Sub<'vm> {
     Type(Type<'vm>)
 }
+
+impl<'vm> Sub<'vm> {
+    pub fn sub(&self, subs: &[Sub<'vm>]) -> Self {
+        match self {
+            Sub::Type(ty) => Sub::Type(ty.sub(subs)),
+            _ => self.clone()
+        }
+    }
+}

@@ -61,14 +61,34 @@ impl<'vm> ItemContext<'vm> {
         }
     }
 
-    pub fn get_item(&'vm self, crate_id: CrateId, path: &str, vm: &'vm VM<'vm>) -> Item<'vm> {
-        let mut table = self.table.lock().unwrap();
-        let entry = table.entry((crate_id,path.to_owned()));
+    /*pub fn init_item(&'vm self, vm: &'vm VM<'vm>, crate_id: CrateId, path: &str, kind: ItemKind<'vm>) -> Item<'vm> {
+        /*let interned = self.arena.alloc(InternedItem{
+            kind,
+            crate_id,
+            path: path.to_owned()
+        });
 
-        entry.or_insert_with(|| {
-            let intern_ref = self.arena.alloc(InternedItem::new(crate_id, path.to_owned()));
-            Item(intern_ref,vm)
-        }).clone()
+        let item = Item(interned,vm);
+
+        let mut table = self.table.write().unwrap();
+        let old = table.insert((crate_id,path.to_owned()),item);
+        assert!(old.is_none());
+
+        item*/
+    }*/
+
+    pub fn get(&'vm self, crate_id: CrateId, path: &str, vm: &'vm VM<'vm>) -> Item<'vm> {
+        let mut table = self.table.lock().unwrap();
+
+        *table.entry((crate_id,path.to_owned())).or_insert_with(|| {
+            let interned = self.arena.alloc(InternedItem{
+                kind: OnceLock::new(),
+                crate_id,
+                path: path.to_owned()
+            });
+
+            Item(interned,vm)
+        })
     }
 }
 
@@ -78,23 +98,24 @@ struct InternedItem<'vm>{
     path: String
 }
 
-impl<'vm> InternedItem<'vm> {
-    pub fn new(crate_id: CrateId, path: String) -> Self {
-        Self{
-            kind: OnceLock::new(),
-            crate_id,
-            path
-        }
-    }
-}
-
-enum ItemKind<'vm> {
+pub enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>
+        mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
+        parent_trait: Option<Item<'vm>>
     },
     Adt{
         fields: Vec<Type<'vm>>
+    }
+}
+
+impl<'vm> ItemKind<'vm> {
+    pub fn new_function(parent_trait: Option<Item<'vm>>) -> Self {
+        Self::Function {
+            ir: Default::default(),
+            mono_instances: Default::default(),
+            parent_trait
+        }
     }
 }
 
@@ -103,30 +124,46 @@ impl<'vm> Item<'vm> {
         self.1
     }
 
+    fn kind(&self) -> &'vm ItemKind<'vm> {
+        self.0.kind.get().expect("item not initialized")
+    }
+
+    pub fn init(&self, kind: ItemKind<'vm>) {
+        self.0.kind.set(kind).ok().expect("item already initialized");
+    }
+
     pub fn get_function(&self, subs: &[Sub<'vm>]) -> &'vm Function<'vm> {
 
-        self.0.kind.get_or_init(|| {
-            ItemKind::Function{
-                ir: Mutex::new(None),
-                mono_instances: Mutex::new(HashMap::new()),
-            }
-        });
-
-        let Some(ItemKind::Function{mono_instances,..}) = self.0.kind.get() else {
+        let ItemKind::Function{mono_instances,..} = self.kind() else {
             panic!("item kind mismatch");
         };
 
         let mut mono_instances = mono_instances.lock().unwrap();
         mono_instances.entry(subs.to_owned()).or_insert_with(|| {
-            self.1.alloc_function(*self, subs.to_owned())
+            self.vm().alloc_function(*self, subs.to_owned())
         })
     }
 
-    pub fn get_ir(&self) -> Arc<IRFunction<'vm>> {
+    /*pub fn set_trait_base_method(&self, parent_trait: Item<'vm>) {
+        let res = self.0.kind.set(ItemKind::Function{
+            ir: Mutex::new(None),
+            mono_instances: Mutex::new(HashMap::new()),
+            parent_trait: Some(parent_trait)
+        });
+        assert!(res.is_ok());
+    }*/
+
+    /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
+    pub fn get_ir(&self, subs: &[Sub<'vm>]) -> Arc<IRFunction<'vm>> {
         
-        let Some(ItemKind::Function{ir,..}) = self.0.kind.get() else {
+        let ItemKind::Function{ir,parent_trait,..} = self.kind() else {
             panic!("item kind mismatch");
         };
+
+        if let Some(parent_trait) = parent_trait {
+            println!("-> {:?}",subs);
+            panic!("todo trait lookup!");
+        }
 
         loop {
             {
@@ -136,12 +173,13 @@ impl<'vm> Item<'vm> {
                 }
             }
 
-            self.1.build_function_ir(self.0.crate_id,self.0.path.clone());
+            self.vm().build_function_ir(self.0.crate_id,self.0.path.clone());
         }
     }
 
     pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
-        let Some(ItemKind::Function{ir,..}) = self.0.kind.get() else {
+
+        let ItemKind::Function{ir,..} = self.kind() else {
             panic!("item kind mismatch");
         };
 
@@ -152,18 +190,10 @@ impl<'vm> Item<'vm> {
 
     pub fn get_adt_fields(&self) -> &Vec<Type<'vm>> {
         
-        loop {
-            match self.0.kind.get() {
-                Some(ItemKind::Adt { fields }) => break fields,
-                None => {
-                    self.1.build_adt_fields(self.0.crate_id,self.0.path.clone());
-                }
-                _ => panic!("item kind mismatch")
-            }
-        }
-    }
+        let ItemKind::Adt{fields} = self.kind() else {
+            panic!("item kind mismatch");
+        };
 
-    pub fn set_adt_fields(&self, fields: Vec<Type<'vm>>) {
-        self.0.kind.set(ItemKind::Adt{ fields }).ok();
+        fields
     }
 }

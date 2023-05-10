@@ -649,10 +649,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     }
 
     fn apply_subs(&self, ty: Type<'vm>) -> Type<'vm> {
-        // TODO SUBS
-        //let binder = rustc_middle::ty::subst::EarlyBinder(ty);
-        //binder.subst(self.vm.tcx,self.in_func_subs)
-        ty
+        ty.sub(self.in_func_subs)
     }
 
     fn expr_ty(&self, id: ExprId) -> Type<'vm> {
@@ -675,9 +672,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 // todo mode may pose issues?
                 
                 let ty = self.apply_subs(pat.ty);
-                let layout = ty.layout();
 
-                let slot = self.stack.alloc(pat.ty);
+                let slot = self.stack.alloc(ty);
                 self.locals.push((*var_id,slot));
                 slot
             }
