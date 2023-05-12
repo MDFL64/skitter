@@ -2,8 +2,10 @@ use colosseum::sync::Arena;
 
 use std::sync::RwLock;
 use std::sync::atomic::Ordering;
+use crate::cli::CliArgs;
 use crate::hir_compiler::HirCompiler;
-use crate::items::{ItemContext, Item, CrateId};
+use crate::items::CrateId;
+use crate::items::Item;
 use crate::rustc_worker::RustCWorker;
 use crate::types::Sub;
 use crate::types::TypeContext;
@@ -17,14 +19,12 @@ pub struct VM<'vm> {
     stack: Vec<u128>,
     //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     pub types: TypeContext<'vm>,
-    pub items: ItemContext<'vm>,
     pub is_verbose: bool,
     workers: RwLock<Vec<RustCWorker>>,
 
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>
 }
-
 
 impl<'vm> VM<'vm> {
     pub fn new() -> Self {
@@ -33,7 +33,6 @@ impl<'vm> VM<'vm> {
             stack: vec!(0;4096),
             //functions: Default::default(),
             types: TypeContext::new(),
-            items: ItemContext::new(),
             is_verbose: false,
             workers: Default::default(),
             arena_functions: Arena::new(),
@@ -41,11 +40,16 @@ impl<'vm> VM<'vm> {
         }
     }
 
-    pub fn add_worker(&self, worker: RustCWorker) {
-        self.workers.write().unwrap().push(worker);
+    pub fn add_worker<'s>(&'vm self, args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>) -> CrateId {
+        let mut workers = self.workers.write().unwrap();
+        let crate_id = CrateId::new(workers.len() as u32);
+        let worker = RustCWorker::new(args, scope, self, crate_id);
+
+        workers.push(worker);
+        crate_id
     }
 
-    pub fn build_function_ir(&self, crate_id: CrateId, path: String) {
+    /*pub fn build_function_ir(&self, crate_id: CrateId, path: String) {
         let workers = self.workers.read().unwrap();
         let worker = &workers[crate_id.index()];
         worker.function_ir(path);
@@ -55,9 +59,9 @@ impl<'vm> VM<'vm> {
         let workers = self.workers.read().unwrap();
         let worker = &workers[crate_id.index()];
         worker.wait_for_setup();
-    }
+    }*/
 
-    pub fn alloc_function(&'vm self, item: Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
+    pub fn alloc_function(&'vm self, item: &'vm Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
         let func = Function {
             item,
             subs,
@@ -65,7 +69,8 @@ impl<'vm> VM<'vm> {
             bytecode: Default::default()
         };
 
-        let path = item.path();
+        let path: &str = panic!("todo function path?");
+        //let path = item.path();
         if path.starts_with("::_builtin::") {
             match path {
                 "::_builtin::print_int" => func.set_native(builtin_print_int),
@@ -122,7 +127,7 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
 
 /// A monomorphized function which may contain bytecode or machine code
 pub struct Function<'vm> {
-    item: Item<'vm>,
+    item: &'vm Item<'vm>,
     subs: Vec<Sub<'vm>>,
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>
@@ -158,8 +163,8 @@ impl<'vm> Function<'vm> {
     }
 
     fn bytecode(&self) -> &'vm [Instr<'vm>] {
-
-        loop {
+        panic!("todo bc");
+        /*loop {
             if let Some(bc) = self.get_bytecode() {
                 return bc;
             }
@@ -170,7 +175,7 @@ impl<'vm> Function<'vm> {
             let bc_ref = self.item.vm().alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);
-        }
+        }*/
     }
 }
 

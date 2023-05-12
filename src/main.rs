@@ -34,9 +34,7 @@ use clap::Parser;
 use rustc_worker::RustCWorker;
 use vm::VM;
 
-use crate::items::CrateId;
-
-// doesn't seem to make a huge difference, todo more tests
+// seems neutral or slower than the system allocator (wsl), todo more tests
 //use mimalloc::MiMalloc;
 //#[global_allocator]
 //static GLOBAL: MiMalloc = MiMalloc;
@@ -56,17 +54,17 @@ fn main() {
     
     std::thread::scope(|scope| {
         
-        let worker = RustCWorker::new(args, scope, &vm);
-        vm.add_worker(worker);
-
-        let main_crate = CrateId::new(0);
-
-        vm.wait_for_setup(main_crate);
+        let main_crate = vm.add_worker(args, scope);
+        //vm.wait_for_setup(main_crate);
         
-        let main_item = vm.items.get(main_crate, "::main", &vm);
-        let main_fn = main_item.get_function(&[]);
+        //let main_item = vm.items.get_func(&main_path);
+        //let main_fn = main_item.get_function(&[]);
+        loop {
 
-        vm.call(&main_fn,0);
+        }
+        panic!("get main");
+
+        //vm.call(&main_fn,0);
 
         process::exit(0)
     });

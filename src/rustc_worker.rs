@@ -1,11 +1,11 @@
-use std::{sync::{Mutex, Barrier, Arc}, collections::HashMap};
+use std::{sync::{Mutex, Barrier, Arc}, collections::HashMap, time::Instant};
 
 use rustc_session::config;
 use rustc_middle::ty::{TyCtxt, Ty};
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 
-use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::VM, items::{Item, CrateId, ItemKind}, types::Type};
+use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, NameSpace}};
 
 #[derive(Debug)]
 pub struct ItemId(u32);
@@ -16,12 +16,13 @@ pub struct RustCWorker {
     sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>
 }
 
-type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
-type LocalItemMap<'vm> = HashMap<rustc_hir::def_id::DefIndex,Item<'vm>>;
+//type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
+//type LocalItemMap<'vm> = HashMap<rustc_hir::def_id::DefIndex,Item<'vm>>;
 
 pub struct RustCContext<'vm,'tcx,'a> {
-    pub items_global: &'a GlobalItemMap<'vm>,
-    pub items_local: &'a LocalItemMap<'vm>,
+    //pub items_global: &'a GlobalItemMap<'vm>,
+    //pub items_local: &'a LocalItemMap<'vm>,
+    pub dummy: &'a i32,
     pub vm: &'vm VM<'vm>,
     pub tcx: TyCtxt<'tcx>
 }
@@ -66,8 +67,12 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
+fn convert_def_path(in_path: &rustc_hir::definitions::DefPath) {
+    println!("{:?}",in_path);
+}
+
 impl RustCWorker {
-    pub fn new<'vm,'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>) -> Self {
+    pub fn new<'vm,'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
 
         let (sender,recv) =
             std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
@@ -110,33 +115,62 @@ impl RustCWorker {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
 
-                        let mut items_global: GlobalItemMap = Default::default();
-                        let mut items_local: LocalItemMap = Default::default();
+                        let mut items = CrateItems::new(this_crate);
 
                         let hir = tcx.hir();
 
-                        let this_crate = CrateId::new(0);
+                        let t = Instant::now();
+                        let hir_items = hir.items();
+                        println!("items = {:?}",t.elapsed());
 
-                        for item_id in hir.items() {
+                        let t = Instant::now();
+                        for item_id in hir_items {
                             let item = hir.item(item_id);
                             match item.kind {
                                 // useless to us
                                 HirItemKind::Use(..) |
                                 HirItemKind::Mod(_) |
+                                HirItemKind::ForeignMod{..} |
                                 HirItemKind::ExternCrate(_) |
-                                HirItemKind::TyAlias(..) => (),
+                                HirItemKind::Macro(..) |
+                                HirItemKind::TyAlias(..) |
+                                HirItemKind::OpaqueTy(_) |
+                                HirItemKind::TraitAlias(..) => (),
                                 // simple items
+                                HirItemKind::Const(..) => {
+                                    // todo?
+                                }
+                                HirItemKind::Static(..) => {
+                                    // todo?
+                                }
                                 HirItemKind::Fn(..) => {
                                     let local_id = item.owner_id.def_id;
                                     let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
 
-                                    let vm_item = vm.items.get(this_crate, &item_path, vm);
-                                    vm_item.init(ItemKind::new_function(None));
+                                    let item_id = items.add_item(ItemKind::new_function());
 
-                                    items_global.insert(item_path,(local_id,vm_item));
-                                    items_local.insert(local_id.local_def_index,vm_item);
+                                    items.set_path(ItemPath(NameSpace::Value,item_path), item_id);
+                                    items.set_did(local_id, item_id);
                                 }
-                                HirItemKind::Struct(..) => {
+                                HirItemKind::Struct(..) |
+                                HirItemKind::Enum(..) |
+                                HirItemKind::Union(..) => {
+                                    let local_id = item.owner_id.def_id;
+                                    let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+
+                                    let item_id = items.add_item(ItemKind::new_function());
+
+                                    items.set_path(ItemPath(NameSpace::Type,item_path), item_id);
+                                    items.set_did(local_id, item_id);
+                                }
+                                // todo impls
+                                HirItemKind::Trait(..) => {
+
+                                }
+                                HirItemKind::Impl(_) => {
+            
+                                }
+                                /*HirItemKind::Struct(..) => {
                                     let local_id = item.owner_id.def_id;
                                     let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
         
@@ -186,10 +220,12 @@ impl RustCWorker {
                                         let local_id = item.id.owner_id.def_id;
                                         let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
                                         
+                                        let ident = item.ident.as_str().to_owned();
+
                                         let vm_item = vm.items.get(this_crate, &item_path, vm);
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
-                                                vm_item.init(ItemKind::new_function(Some(trait_item)));
+                                                vm_item.init(ItemKind::new_function(Some((ident,trait_item))));
                                             }
                                             _ => panic!("cannot handle kind")
                                         }
@@ -206,7 +242,7 @@ impl RustCWorker {
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
                                         let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-                                        
+
                                         let vm_item = vm.items.get(this_crate, &item_path, vm);
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
@@ -215,26 +251,32 @@ impl RustCWorker {
                                             _ => panic!("cannot handle kind")
                                         }
 
-                                        if impl_info.of_trait.is_none() {
+                                        if let Some(impl_trait) = impl_info.of_trait {
+                                            let trait_def = impl_trait.hir_ref_id.owner.def_id.local_def_index;
+                                            // todo look up trait globally
+                                            let trait_item = items_local.get(&trait_def);
+                                            panic!("todo trait impl - {:?}",trait_item);
+                                        } else {
                                             // only add refs for trivial impls
                                             items_global.insert(item_path,(local_id,vm_item));
                                             items_local.insert(local_id.local_def_index,vm_item);
-                                        } else {
-                                            println!("todo trait impl - {:?}",impl_info.of_trait);
                                         }
                                     }
-                                }
+                                }*/
 
                                 _ => panic!("can't handle item kind {:?}",item.kind)
                             }
 
                         }
 
+                        println!("ready = {:?}",t.elapsed());
+
                         loop {
                             let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
                             cmd.call(RustCContext{
-                                items_global: &items_global,
-                                items_local: &items_local,
+                                //items_global: &items_global,
+                                //items_local: &items_local,
+                                dummy: &1,
                                 tcx,
                                 vm
                             });
@@ -272,7 +314,8 @@ impl RustCWorker {
     }
 
     pub fn function_ir(&self, path: String) {
-        let res = self.call(move |ctx| {
+        panic!("todo func ir");
+        /*let res = self.call(move |ctx| {
             if let Some((did,vm_item)) = &ctx.items_global.get(&path) {
 
                 let (thir,root) = ctx.tcx.thir_body(did).unwrap();
@@ -282,7 +325,7 @@ impl RustCWorker {
                 panic!("item not found: {:?}",path);
             }
         });
-        res.wait();
+        res.wait();*/
     }
 
     pub fn wait_for_setup(&self) {

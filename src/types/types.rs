@@ -2,7 +2,6 @@ use crate::items::Item;
 
 use super::Type;
 
-
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
 pub enum TypeKind<'vm> {
     Int(IntWidth,IntSign),
@@ -18,8 +17,8 @@ pub enum TypeKind<'vm> {
     Array(Type<'vm>,u32),
     Slice(Type<'vm>),
 
-    FunctionDef(TypeDef<'vm>),
-    Adt(TypeDef<'vm>),
+    FunctionDef(&'vm Item<'vm>,Vec<Sub<'vm>>),
+    Adt(), // fixme
 
     Param(u32)
 }
@@ -44,12 +43,6 @@ pub enum IntWidth {
 pub enum FloatWidth {
     F32,
     F64
-}
-
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
-pub struct TypeDef<'vm> {
-    pub item: Item<'vm>,
-    pub subs: Vec<Sub<'vm>>
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]

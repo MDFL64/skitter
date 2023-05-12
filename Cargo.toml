@@ -20,4 +20,5 @@ clap = { version = "4.2.4", features = ["derive"] }
 colosseum = "0.2.2"
 crossbeam = "0.8.2"
 
+ahash = "0.8.3"
 #mimalloc = { version = "0.1.37", default-features = false }

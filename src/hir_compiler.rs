@@ -659,8 +659,9 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
     fn ty_to_func(&self, ty: Type<'vm>) -> Option<&'vm Function<'vm>> {
         match ty.kind() {
-            TypeKind::FunctionDef(def) => {
-                Some(def.item.get_function(&def.subs))
+            TypeKind::FunctionDef(item,subs) => {
+                panic!("ty to func");
+                //Some(def.item.get_function(&def.subs))
             }
             _ => None
         }
