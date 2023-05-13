@@ -55,11 +55,6 @@ impl<'vm> CrateItems<'vm> {
         &self.items[id.index()]
     }
 
-    pub fn set_path(&mut self, path: ItemPath, id: ItemId) {
-        let old = self.map_path_to_item.insert(path, id);
-        assert!(old.is_none());
-    }
-
     pub fn find_by_path(&'vm self, path: &ItemPath) -> Option<&'vm Item<'vm>> {
         self.map_path_to_item.get(path).map(|item_id| {
             &self.items[item_id.index()]
@@ -176,7 +171,7 @@ pub enum ItemKind<'vm> {
     }
 }
 
-struct TraitImpl<'vm> {
+pub struct TraitImpl<'vm> {
     for_type: Type<'vm>,
     crate_id: CrateId,
     child_items: Vec<(String,ItemId)>
@@ -212,135 +207,6 @@ impl<'vm> ItemKind<'vm> {
     }
 }
 
-/*
-/*#[derive(Copy,Clone)]
-pub struct Item<'vm>(&'vm InternedItem<'vm>, &'vm VM<'vm>);
-
-impl<'vm> Item<'vm> {
-    pub fn path(&self) -> &str {
-        &self.0.path
-    }
-}
-
-impl<'vm> std::fmt::Debug for Item<'vm> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Item").finish()
-    }
-}
-
-impl<'vm> PartialEq for Item<'vm> {
-    fn eq(&self, other: &Self) -> bool {
-        let a = self.0 as *const _;
-        let b = other.0 as *const _;
-        a == b
-    }
-}
-
-impl<'vm> Eq for Item<'vm> {}
-
-impl<'vm> Hash for Item<'vm> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(self.0 as *const _ as usize);
-    }
-}*/
-
-#[derive(Clone,Eq,PartialEq,Hash)]
-pub struct ItemPathSimple {
-    pub crate_id: CrateId,
-    pub path: String,
-}
-
-pub struct ItemContext<'vm>{
-    table_funcs: Mutex<HashMap<ItemPathSimple,&'vm ItemFunction<'vm>>>,
-    arena_funcs: Arena<ItemFunction<'vm>>
-}
-
-#[derive(Hash,Eq,PartialEq,Copy,Clone)]
-pub struct CrateId(u32);
-
-impl CrateId {
-    pub fn new(n: u32) -> Self {
-        Self(n)
-    }
-
-    pub fn index(&self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl<'vm> ItemContext<'vm> {
-    pub fn new() -> Self {
-        ItemContext{
-            table_funcs: Default::default(),
-            arena_funcs: Arena::new()
-        }
-    }
-
-    pub fn get_func(&'vm self, path: &ItemPathSimple) -> &'vm ItemFunction<'vm> {
-        let mut table = self.table_funcs.lock().unwrap();
-
-        *table.entry(path.clone()).or_insert_with(|| {
-            self.arena_funcs.alloc(Default::default())
-        })
-    }
-}
-
-#[derive(Default)]
-pub struct ItemFunction<'vm> {
-    ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-    mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
-    //parent_trait: Option<i32>
-}
-
-impl<'vm> std::fmt::Debug for ItemFunction<'vm> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ItemFunction").finish()
-    }
-}
-
-impl<'vm> PartialEq for ItemFunction<'vm> {
-    fn eq(&self, other: &Self) -> bool {
-        let a = self as *const _;
-        let b = other as *const _;
-        a == b
-    }
-}
-
-impl<'vm> Eq for ItemFunction<'vm> {}
-
-impl<'vm> Hash for ItemFunction<'vm> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(self as *const _ as usize);
-    }
-}
-
-/*struct InternedItem<'vm>{
-    kind: OnceLock<ItemKind<'vm>>,
-    crate_id: CrateId,
-    path: String
-}
-
-pub enum ItemKind<'vm> {
-    Function{
-        ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
-        parent_trait: Option<(String,Item<'vm>)>
-    },
-    Adt{
-        fields: Vec<Type<'vm>>
-    }
-}
-
-impl<'vm> ItemKind<'vm> {
-    pub fn new_function(parent_trait: Option<(String,Item<'vm>)>) -> Self {
-        Self::Function {
-            ir: Default::default(),
-            mono_instances: Default::default(),
-            parent_trait
-        }
-    }
-}
-*/* */
 impl<'vm> Item<'vm> {
     pub fn get_function(&'vm self, subs: &[Sub<'vm>]) -> &'vm Function<'vm> {
 

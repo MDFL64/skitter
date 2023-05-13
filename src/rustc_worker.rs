@@ -1,4 +1,4 @@
-use std::{sync::{Mutex, Barrier, Arc, OnceLock}, collections::HashMap, time::Instant};
+use std::{sync::{Mutex, Barrier, Arc}, time::Instant};
 
 use rustc_session::config;
 use rustc_middle::ty::{TyCtxt, Ty};
@@ -14,9 +14,6 @@ pub struct RustCWorker<'vm> {
     pub items: Option<&'vm CrateItems<'vm>>,
     //crate_id: CrateId
 }
-
-//type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
-//type LocalItemMap<'vm> = HashMap<rustc_hir::def_id::DefIndex,Item<'vm>>;
 
 pub struct RustCContext<'vm,'tcx> {
     pub items: &'vm CrateItems<'vm>,

@@ -242,7 +242,6 @@ impl<'vm> TypeContext<'vm> {
                 GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
                 GenericArgKind::Lifetime(_) => Sub::Lifetime,
                 GenericArgKind::Const(_) => Sub::Const,
-                _ => panic!("can't handle sub {:?}",s)
             }
         }).collect();
 
