@@ -64,6 +64,13 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
+#[derive(Debug)]
+struct ImplItem<'tcx> {
+    self_ty: Ty<'tcx>,
+    trait_def: Option<rustc_hir::def_id::DefId>,
+    children: Vec<(String,ItemId)>
+}
+
 impl<'vm> RustCWorker<'vm> {
     pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
 
@@ -123,7 +130,7 @@ impl<'vm> RustCWorker<'vm> {
                         let t = Instant::now();
 
                         let mut adt_items = Vec::new();
-                        //let mut impls = Vec::new();
+                        let mut impl_items = Vec::new();
 
                         for item_id in hir_items {
                             let item = hir.item(item_id);
@@ -166,25 +173,74 @@ impl<'vm> RustCWorker<'vm> {
                                     adt_items.push(item_id);
                                 }
                                 // todo impls
-                                HirItemKind::Trait(..) => {
+                                HirItemKind::Trait(_is_auto,_safety,_generics,_bounds,child_items) => {
+                                    // trait item
+                                    let (trait_item,trait_path) = {
+                                        let local_id = item.owner_id.def_id;
+                                        let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+    
+                                        let path = ItemPath::new_type(item_path.clone());
+                                        let kind = ItemKind::new_trait();
+    
+                                        let item_id = items.add_item(vm,kind,path,local_id);
+                                        (item_id,item_path)
+                                    };
 
+                                    for item in child_items {
+                                        let local_id = item.id.owner_id.def_id;
+
+                                        let AssocItemKind::Fn{..} = item.kind else {
+                                            panic!("unsupported associated item");
+                                        };
+
+                                        let item_path = format!("{}::{}",trait_path,item.ident);
+
+                                        let path = ItemPath::new_value(item_path);
+                                        let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
+
+                                        items.add_item(vm,kind,path,local_id);
+                                    }
                                 }
                                 HirItemKind::Impl(impl_info) => {
-                                    assert!(impl_info.of_trait.is_none());
-
                                     let impl_id = item.owner_id.def_id;
                                     let self_ty = tcx.type_of(impl_id).skip_binder();
 
+                                    let trait_did = impl_info.of_trait.map(|of_trait| {
+                                        of_trait.trait_def_id().unwrap()
+                                    });
+
+                                    let trait_path = trait_did.map(|trait_did| {
+                                        tcx.def_path(trait_did).to_string_no_crate_verbose()
+                                    });
+                                    
+                                    let mut impl_list: Vec<(String,ItemId)> = Vec::new();
+
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
-                                        let item_path = format!("{}::{}",self_ty,item.ident);
 
+                                        let item_path = if let Some(trait_path) = &trait_path {
+                                            format!("<{} as {}>::{}",self_ty,trait_path,item.ident)
+                                        } else {
+                                            format!("{}::{}",self_ty,item.ident)
+                                        };
+                                        
                                         let path = ItemPath::new_debug(item_path);
-                                        let kind = ItemKind::new_function();
 
-                                        let item_id = items.add_item(vm,kind,path,local_id);
-                                        // TODO cross-crate impl lookup!
+                                        if let AssocItemKind::Fn{..} = item.kind {
+                                            let kind = ItemKind::new_function();
+    
+                                            let item_id = items.add_item(vm,kind,path,local_id);
+                                            impl_list.push((item.ident.as_str().to_owned(),item_id));
+                                        } else {
+                                            // todo
+                                        }
                                     }
+
+                                    impl_items.push(ImplItem{
+                                        self_ty,
+                                        trait_def: trait_did,
+                                        children: impl_list
+                                    });
                                 }
                                 /*
                                 // traits
@@ -265,6 +321,12 @@ impl<'vm> RustCWorker<'vm> {
 
                         let items = vm.set_crate_items(this_crate, items);
 
+                        let ctx = RustCContext{
+                            items: &items,
+                            tcx,
+                            vm
+                        };
+
                         // fill adt fields
                         for item_id in adt_items {
                             let item = items.get(item_id);
@@ -273,12 +335,6 @@ impl<'vm> RustCWorker<'vm> {
                             let variants = adt_def.variants();
 
                             assert!(variants.len() == 1);
-                    
-                            let ctx = RustCContext{
-                                items: &items,
-                                tcx,
-                                vm
-                            };
 
                             let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
                                 let ty = tcx.type_of(field.did).skip_binder();
@@ -286,6 +342,18 @@ impl<'vm> RustCWorker<'vm> {
                             }).collect();
 
                             item.set_adt_fields(fields);
+                        }
+
+                        // fill impls
+                        for impl_item in impl_items {
+                            let self_ty = vm.types.type_from_rustc(impl_item.self_ty, &ctx);
+
+                            if let Some(trait_did) = impl_item.trait_def {
+                                let trait_item = items.find_by_did(trait_did).expect("todo non-local traits");
+                                trait_item.add_trait_impl(self_ty,this_crate, impl_item.children);
+                            } else {
+                                // todo non trait impls not resolved
+                            }
                         }
 
                         if is_verbose {

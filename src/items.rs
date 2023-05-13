@@ -1,4 +1,4 @@
-use std::{sync::{Mutex, Arc, OnceLock}, collections::HashMap, hash::Hash};
+use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash};
 
 use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type}};
 use ahash::AHashMap;
@@ -105,7 +105,7 @@ enum NameSpace {
     DebugOnly
 }
 
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq,Clone,Copy,Debug)]
 pub struct CrateId(u32);
 
 impl CrateId {
@@ -118,7 +118,7 @@ impl CrateId {
     }
 }
 
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq,Clone,Copy,Debug)]
 pub struct ItemId(u32);
 
 impl ItemId {
@@ -162,24 +162,48 @@ pub enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
-        //parent_trait: Option<(String,Item<'vm>)>
+        parent_trait: Option<(ItemId,String)>
     },
     Adt{
         fields: OnceLock<Vec<Type<'vm>>>
+    },
+    Trait{
+        impl_list: RwLock<Vec<TraitImpl<'vm>>>
     }
+}
+
+struct TraitImpl<'vm> {
+    for_type: Type<'vm>,
+    crate_id: CrateId,
+    child_items: Vec<(String,ItemId)>
 }
 
 impl<'vm> ItemKind<'vm> {
     pub fn new_function() -> Self {
         Self::Function{
             ir: Default::default(),
-            mono_instances: Default::default()
+            mono_instances: Default::default(),
+            parent_trait: None
+        }
+    }
+
+    pub fn new_function_with_trait(trait_item: ItemId, ident: String) -> Self {
+        Self::Function{
+            ir: Default::default(),
+            mono_instances: Default::default(),
+            parent_trait: Some((trait_item,ident))
         }
     }
 
     pub fn new_adt() -> Self {
         Self::Adt{
             fields: Default::default()
+        }
+    }
+
+    pub fn new_trait() -> Self {
+        Self::Trait{
+            impl_list: Default::default()
         }
     }
 }
@@ -329,14 +353,16 @@ impl<'vm> Item<'vm> {
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
     pub fn get_ir(&self, subs: &[Sub<'vm>]) -> Arc<IRFunction<'vm>> {
         
-        let ItemKind::Function{ir,..} = &self.kind else {
+        let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        /*if let Some(parent_trait) = parent_trait {
-            println!("-> {:?}",subs);
-            panic!("todo trait lookup!");
-        }*/
+        if let Some((parent_trait,ident)) = parent_trait {
+            let crate_items = self.vm.get_crate_items(self.crate_id);
+            let trait_item = crate_items.get(*parent_trait);
+            let resolved_func = trait_item.find_trait_impl(subs,ident);
+            return resolved_func.get_ir(&[]); // <- subs shouldn't be needed
+        }
 
         loop {
             {
@@ -362,7 +388,6 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn get_adt_fields(&self) -> &Vec<Type<'vm>> {
-        
         let ItemKind::Adt{fields} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -376,5 +401,45 @@ impl<'vm> Item<'vm> {
         };
 
         fields.set(new_fields).ok();
+    }
+
+    pub fn add_trait_impl(&self, for_type: Type<'vm>, crate_id: CrateId, child_items: Vec<(String,ItemId)>) {
+        let ItemKind::Trait{impl_list} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let mut impl_list = impl_list.write().unwrap();
+        impl_list.push(TraitImpl{
+            for_type,
+            crate_id,
+            child_items
+        });
+    }
+
+    pub fn find_trait_impl(&self, subs: &[Sub<'vm>], member_name: &str) -> &'vm Item {
+        let ItemKind::Trait{impl_list} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let impl_list = impl_list.read().unwrap();
+
+        assert!(subs.len() == 1); // todo generics
+        let Sub::Type(sub_ty) = subs[0] else {
+            todo!();
+        };
+
+        for candidate in impl_list.iter() {
+            if candidate.for_type == sub_ty {
+                let crate_items = self.vm.get_crate_items(candidate.crate_id);
+                for (child_name,child_item) in candidate.child_items.iter() {
+                    if child_name == member_name {
+                        return crate_items.get(*child_item);
+                    }
+                }
+                panic!("trait lookup failed (no field)");
+            }
+        }
+
+        panic!("trait lookup failed (no impl)");
     }
 }
