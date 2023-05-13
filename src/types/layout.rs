@@ -1,6 +1,6 @@
 use crate::{abi::POINTER_SIZE, types::{Type, TypeKind, IntWidth}};
 
-use super::FloatWidth;
+use super::{FloatWidth, ItemWithSubs};
 
 #[derive(Debug)]
 pub struct Layout {
@@ -76,15 +76,14 @@ impl Layout {
                     }
                 }
             }
-            TypeKind::Adt() => {
-                /*let fields = def.item.get_adt_fields();
+            TypeKind::Adt(ItemWithSubs{item,subs}) => {
+                let fields = item.get_adt_fields();
 
                 let fixed_fields = fields.iter().map(|field| {
-                    field.sub(&def.subs)
+                    field.sub(subs)
                 });
 
-                Layout::compound(fixed_fields)*/
-                panic!("todo fix adt")
+                Layout::compound(fixed_fields)
             }
             _ => panic!("can't layout: {:?}",kind)
         }

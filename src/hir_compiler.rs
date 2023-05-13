@@ -1,7 +1,7 @@
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
 use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
-use crate::types::{Type, TypeKind, Sub};
+use crate::types::{Type, TypeKind, Sub, ItemWithSubs};
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -60,7 +60,6 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
         compiler.out_bc.push(Instr::Return);
 
         if compiler.vm.is_verbose {
-            println!("compiled {:?} for {:?}","(todo)",compiler.in_func_subs);
             for (i,bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}",i,bc);
             }
@@ -659,9 +658,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
     fn ty_to_func(&self, ty: Type<'vm>) -> Option<&'vm Function<'vm>> {
         match ty.kind() {
-            TypeKind::FunctionDef(item,subs) => {
-                panic!("ty to func");
-                //Some(def.item.get_function(&def.subs))
+            TypeKind::FunctionDef(ItemWithSubs{item,subs}) => {
+                Some(item.get_function(subs))
             }
             _ => None
         }

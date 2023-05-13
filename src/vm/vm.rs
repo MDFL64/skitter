@@ -5,7 +5,9 @@ use std::sync::atomic::Ordering;
 use crate::cli::CliArgs;
 use crate::hir_compiler::HirCompiler;
 use crate::items::CrateId;
+use crate::items::CrateItems;
 use crate::items::Item;
+use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::types::Sub;
 use crate::types::TypeContext;
@@ -20,8 +22,9 @@ pub struct VM<'vm> {
     //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
-    workers: RwLock<Vec<RustCWorker>>,
+    workers: RwLock<Vec<RustCWorker<'vm>>>,
 
+    arena_items: Arena<CrateItems<'vm>>,
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>
 }
@@ -35,6 +38,8 @@ impl<'vm> VM<'vm> {
             types: TypeContext::new(),
             is_verbose: false,
             workers: Default::default(),
+
+            arena_items: Arena::new(),
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
         }
@@ -49,17 +54,33 @@ impl<'vm> VM<'vm> {
         crate_id
     }
 
-    /*pub fn build_function_ir(&self, crate_id: CrateId, path: String) {
+    pub fn set_crate_items(&'vm self, crate_id: CrateId, items: CrateItems<'vm>) -> &'vm CrateItems<'vm> {
+        let mut workers = self.workers.write().unwrap();
+        let items_ref = self.arena_items.alloc(items);
+        workers[crate_id.index()].items = Some(items_ref);
+        items_ref
+    } 
+
+    pub fn get_crate_items(&'vm self, crate_id: CrateId) -> &'vm CrateItems<'vm> {
         let workers = self.workers.read().unwrap();
-        let worker = &workers[crate_id.index()];
-        worker.function_ir(path);
+        workers[crate_id.index()].items.expect("crate is missing items")
     }
 
     pub fn wait_for_setup(&self, crate_id: CrateId) {
+        // structured like this to prevent deadlocking the RwLock
+        let res = {
+            let workers = self.workers.read().unwrap();
+            let worker = &workers[crate_id.index()];
+            worker.wait_for_setup()
+        };
+        res.wait();
+    }
+
+    pub fn build_function_ir(&self, crate_id: CrateId, item_id: ItemId) {
         let workers = self.workers.read().unwrap();
         let worker = &workers[crate_id.index()];
-        worker.wait_for_setup();
-    }*/
+        worker.build_function_ir(item_id);
+    }
 
     pub fn alloc_function(&'vm self, item: &'vm Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
         let func = Function {
@@ -69,8 +90,7 @@ impl<'vm> VM<'vm> {
             bytecode: Default::default()
         };
 
-        let path: &str = panic!("todo function path?");
-        //let path = item.path();
+        let path = item.path.as_string();
         if path.starts_with("::_builtin::") {
             match path {
                 "::_builtin::print_int" => func.set_native(builtin_print_int),
@@ -163,19 +183,19 @@ impl<'vm> Function<'vm> {
     }
 
     fn bytecode(&self) -> &'vm [Instr<'vm>] {
-        panic!("todo bc");
-        /*loop {
+        loop {
             if let Some(bc) = self.get_bytecode() {
                 return bc;
             }
 
             let ir = self.item.get_ir(&self.subs);
+            let path = self.item.path.as_string();
 
-            let bc = HirCompiler::compile(self.item.vm(), &ir, &self.subs, self.item.path());
-            let bc_ref = self.item.vm().alloc_bytecode(bc);
+            let bc = HirCompiler::compile(self.item.vm, &ir, &self.subs, path);
+            let bc_ref = self.item.vm.alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);
-        }*/
+        }
     }
 }
 

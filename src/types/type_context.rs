@@ -7,7 +7,7 @@ use crate::{vm::VM, rustc_worker::RustCContext, types::Sub};
 
 use colosseum::sync::Arena;
 
-use super::{TypeKind, IntWidth, IntSign, FloatWidth, layout::Layout};
+use super::{TypeKind, IntWidth, IntSign, FloatWidth, ItemWithSubs, layout::Layout};
 
 #[derive(Copy,Clone)]
 pub struct Type<'vm>(&'vm InternedType<'vm>,&'vm VM<'vm>);
@@ -63,29 +63,33 @@ impl<'vm> Type<'vm> {
                 }).collect();
                 vm.types.intern(TypeKind::Tuple(new_fields), vm)
             }
-            TypeKind::Adt() => {
+            TypeKind::Adt(adt) => {
                 // fast path, will become redundant if above optimization is implemented
-                /*if def.subs.len() == 0 {
+                if adt.subs.len() == 0 {
                     return *self;
                 }
-                let new_subs = def.subs.iter().map(|field| {
+                let new_subs = adt.subs.iter().map(|field| {
                     field.sub(subs)
                 }).collect();
-                /*vm.types.intern(TypeKind::Adt(TypeDef{
-                    item: def.item,
+                let new_ty = TypeKind::Adt(ItemWithSubs{
+                    item: adt.item,
                     subs: new_subs
-                }), vm)*/*/
-                panic!("todo fix adt");
+                });
+                vm.types.intern(new_ty, vm)
             }
-            TypeKind::FunctionDef(item,subs) => {
+            TypeKind::FunctionDef(func) => {
                 // fast path, will become redundant if above optimization is implemented
-                if subs.len() == 0 {
+                if func.subs.len() == 0 {
                     return *self;
                 }
-                let new_subs = subs.iter().map(|field| {
+                let new_subs = func.subs.iter().map(|field| {
                     field.sub(subs)
                 }).collect();
-                vm.types.intern(TypeKind::FunctionDef(item,new_subs), vm)
+                let new_ty = TypeKind::FunctionDef(ItemWithSubs{
+                    item: func.item,
+                    subs: new_subs
+                });
+                vm.types.intern(new_ty, vm)
             }
             // These types never accept subs.
             TypeKind::Int(..) |
@@ -132,7 +136,7 @@ impl<'vm> TypeContext<'vm> {
         }
     }
 
-    pub fn type_from_rustc<'tcx,'a>(&'vm self, ty: Ty<'tcx>, ctx: &RustCContext<'vm,'tcx,'a>) -> Type<'vm> {
+    pub fn type_from_rustc<'tcx>(&'vm self, ty: Ty<'tcx>, ctx: &RustCContext<'vm,'tcx>) -> Type<'vm> {
         let kind = ty.kind();
         let new_kind = match kind {
             TyKind::Int(int) => {
@@ -191,14 +195,12 @@ impl<'vm> TypeContext<'vm> {
             }
 
             TyKind::Adt(adt,subs) => {
-                //let def = self.def_from_rustc(adt.did(),ctx,subs);
-                //TypeKind::Adt(def)
-                panic!("todo fix adt");
+                let item_with_subs = self.def_from_rustc(adt.did(),ctx,subs);
+                TypeKind::Adt(item_with_subs)
             }
             TyKind::FnDef(did,subs) => {
-                //let def = self.def_from_rustc(*did,ctx,subs);
-                //TypeKind::FunctionDef(def)
-                panic!("todo fix fn def");
+                let item_with_subs = self.def_from_rustc(*did,ctx,subs);
+                TypeKind::FunctionDef(item_with_subs)
             }
 
             TyKind::Param(param) => {
@@ -211,12 +213,11 @@ impl<'vm> TypeContext<'vm> {
         self.intern(new_kind,ctx.vm)
     }
 
-    fn def_from_rustc<'tcx,'a>(&'vm self, did: DefId, ctx: &RustCContext<'vm,'tcx,'a>, subs: &[GenericArg<'tcx>]) {
-        /*let item = if did.krate == rustc_hir::def_id::LOCAL_CRATE {
-            *ctx.items_local.get(&did.index).expect("couldn't find local item")
-        } else {
-            panic!("todo non-local def {:?}",did);
+    fn def_from_rustc<'tcx>(&'vm self, did: DefId, ctx: &RustCContext<'vm,'tcx>, subs: &[GenericArg<'tcx>]) -> ItemWithSubs<'vm> {
+        let Some(item) = ctx.items.find_by_did(did) else {
+            panic!("couldn't find def {:?}",did);
         };
+        // todo non-local defs
 
         let subs: Vec<_> = subs.iter().map(|s| {
             match s.unpack() {
@@ -225,11 +226,10 @@ impl<'vm> TypeContext<'vm> {
             }
         }).collect();
 
-        TypeDef{
+        ItemWithSubs{
             item,
             subs
-        }*/
-        todo!();
+        }
     }
 
     fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {

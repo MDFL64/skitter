@@ -144,13 +144,13 @@ pub enum PointerCast{
     UnSize,
 }
 
-pub struct IRFunctionBuilder<'vm,'tcx,'a> {
-    ctx: RustCContext<'vm,'tcx,'a>,
+pub struct IRFunctionBuilder<'vm,'tcx> {
+    ctx: RustCContext<'vm,'tcx>,
     func_id: LocalDefId
 }
 
-impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx,'a> {
-    pub fn build(ctx: RustCContext<'vm,'tcx,'a>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
+impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
+    pub fn build(ctx: RustCContext<'vm,'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
         let builder = Self{
             ctx,
             func_id

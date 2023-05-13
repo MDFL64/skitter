@@ -34,6 +34,8 @@ use clap::Parser;
 use rustc_worker::RustCWorker;
 use vm::VM;
 
+use crate::items::ItemPath;
+
 // seems neutral or slower than the system allocator (wsl), todo more tests
 //use mimalloc::MiMalloc;
 //#[global_allocator]
@@ -55,16 +57,18 @@ fn main() {
     std::thread::scope(|scope| {
         
         let main_crate = vm.add_worker(args, scope);
-        //vm.wait_for_setup(main_crate);
-        
-        //let main_item = vm.items.get_func(&main_path);
-        //let main_fn = main_item.get_function(&[]);
-        loop {
+        vm.wait_for_setup(main_crate);
 
-        }
-        panic!("get main");
+        let main_path = ItemPath::new_value("::main".to_owned());
 
-        //vm.call(&main_fn,0);
+        let main_item = vm
+            .get_crate_items(main_crate)
+            .find_by_path(&main_path)
+            .expect("no main found");
+
+        let main_fn = main_item.get_function(&[]);
+
+        vm.call(&main_fn,0);
 
         process::exit(0)
     });

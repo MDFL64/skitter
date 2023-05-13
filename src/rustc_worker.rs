@@ -1,33 +1,30 @@
-use std::{sync::{Mutex, Barrier, Arc}, collections::HashMap, time::Instant};
+use std::{sync::{Mutex, Barrier, Arc, OnceLock}, collections::HashMap, time::Instant};
 
 use rustc_session::config;
 use rustc_middle::ty::{TyCtxt, Ty};
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 
-use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, NameSpace}};
-
-#[derive(Debug)]
-pub struct ItemId(u32);
+use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId}};
 
 /////////////////////////
 
-pub struct RustCWorker {
-    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>
+pub struct RustCWorker<'vm> {
+    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>,
+    pub items: Option<&'vm CrateItems<'vm>>,
+    //crate_id: CrateId
 }
 
 //type GlobalItemMap<'vm> = HashMap<String,(rustc_hir::def_id::LocalDefId,Item<'vm>)>;
 //type LocalItemMap<'vm> = HashMap<rustc_hir::def_id::DefIndex,Item<'vm>>;
 
-pub struct RustCContext<'vm,'tcx,'a> {
-    //pub items_global: &'a GlobalItemMap<'vm>,
-    //pub items_local: &'a LocalItemMap<'vm>,
-    pub dummy: &'a i32,
+pub struct RustCContext<'vm,'tcx> {
+    pub items: &'vm CrateItems<'vm>,
     pub vm: &'vm VM<'vm>,
     pub tcx: TyCtxt<'tcx>
 }
 
-impl<'vm,'tcx,'a> RustCContext<'vm,'tcx,'a> {
+impl<'vm,'tcx> RustCContext<'vm,'tcx> {
     pub fn type_from_rustc(&self, ty: Ty<'tcx>) -> Type<'vm> {
         self.vm.types.type_from_rustc(ty,self)
     }
@@ -67,12 +64,10 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
-fn convert_def_path(in_path: &rustc_hir::definitions::DefPath) {
-    println!("{:?}",in_path);
-}
+impl<'vm> RustCWorker<'vm> {
+    pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
 
-impl RustCWorker {
-    pub fn new<'vm,'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
+        let is_verbose = args.verbose;
 
         let (sender,recv) =
             std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
@@ -121,9 +116,15 @@ impl RustCWorker {
 
                         let t = Instant::now();
                         let hir_items = hir.items();
-                        println!("items = {:?}",t.elapsed());
+                        if is_verbose {
+                            println!("rustc hir items took {:?}",t.elapsed());
+                        }
 
                         let t = Instant::now();
+
+                        let mut adt_items = Vec::new();
+                        //let mut impls = Vec::new();
+
                         for item_id in hir_items {
                             let item = hir.item(item_id);
                             match item.kind {
@@ -147,10 +148,10 @@ impl RustCWorker {
                                     let local_id = item.owner_id.def_id;
                                     let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
 
-                                    let item_id = items.add_item(ItemKind::new_function());
+                                    let path = ItemPath::new_value(item_path);
+                                    let kind = ItemKind::new_function();
 
-                                    items.set_path(ItemPath(NameSpace::Value,item_path), item_id);
-                                    items.set_did(local_id, item_id);
+                                    items.add_item(vm,kind,path,local_id);
                                 }
                                 HirItemKind::Struct(..) |
                                 HirItemKind::Enum(..) |
@@ -158,49 +159,34 @@ impl RustCWorker {
                                     let local_id = item.owner_id.def_id;
                                     let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
 
-                                    let item_id = items.add_item(ItemKind::new_function());
+                                    let path = ItemPath::new_type(item_path);
+                                    let kind = ItemKind::new_adt();
 
-                                    items.set_path(ItemPath(NameSpace::Type,item_path), item_id);
-                                    items.set_did(local_id, item_id);
+                                    let item_id = items.add_item(vm,kind,path,local_id);
+                                    adt_items.push(item_id);
                                 }
                                 // todo impls
                                 HirItemKind::Trait(..) => {
 
                                 }
-                                HirItemKind::Impl(_) => {
-            
+                                HirItemKind::Impl(impl_info) => {
+                                    assert!(impl_info.of_trait.is_none());
+
+                                    let impl_id = item.owner_id.def_id;
+                                    let self_ty = tcx.type_of(impl_id).skip_binder();
+
+                                    for item in impl_info.items {
+                                        let local_id = item.id.owner_id.def_id;
+                                        let item_path = format!("{}::{}",self_ty,item.ident);
+
+                                        let path = ItemPath::new_debug(item_path);
+                                        let kind = ItemKind::new_function();
+
+                                        let item_id = items.add_item(vm,kind,path,local_id);
+                                        // TODO cross-crate impl lookup!
+                                    }
                                 }
-                                /*HirItemKind::Struct(..) => {
-                                    let local_id = item.owner_id.def_id;
-                                    let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-        
-                                    let adt_def = tcx.adt_def(local_id.to_def_id());
-
-                                    let variants = adt_def.variants();
-                                    assert!(variants.len() == 1);
-                    
-                                    let ctx = RustCContext{
-                                        items_global: &items_global,
-                                        items_local: &items_local,
-                                        tcx,
-                                        vm
-                                    };
-
-                                    let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
-                                        let ty = tcx.type_of(field.did).skip_binder();
-                                        vm.types.type_from_rustc(ty, &ctx)
-                                    }).collect();
-
-                                    let item_kind = ItemKind::Adt {
-                                        fields
-                                    };
-
-                                    let vm_item = vm.items.get(this_crate, &item_path, vm);
-                                    vm_item.init(item_kind);
-
-                                    items_global.insert(item_path,(local_id,vm_item));
-                                    items_local.insert(local_id.local_def_index,vm_item);
-                                }
+                                /*
                                 // traits
                                 HirItemKind::Trait(_,_,_,_,items) => {
                                     // create trait item
@@ -269,14 +255,47 @@ impl RustCWorker {
 
                         }
 
-                        println!("ready = {:?}",t.elapsed());
+                        /*for impl_info in impls {
+                            assert!(impl_info.of_trait.is_none());
+
+                            let self_ty = vm.types.type_from_rustc(ty, &ctx);
+
+                            println!("> {:?}",impl_info);
+                        }*/
+
+                        let items = vm.set_crate_items(this_crate, items);
+
+                        // fill adt fields
+                        for item_id in adt_items {
+                            let item = items.get(item_id);
+
+                            let adt_def = tcx.adt_def(item.did);
+                            let variants = adt_def.variants();
+
+                            assert!(variants.len() == 1);
+                    
+                            let ctx = RustCContext{
+                                items: &items,
+                                tcx,
+                                vm
+                            };
+
+                            let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
+                                let ty = tcx.type_of(field.did).skip_binder();
+                                vm.types.type_from_rustc(ty, &ctx)
+                            }).collect();
+
+                            item.set_adt_fields(fields);
+                        }
+
+                        if is_verbose {
+                            println!("item aggregation took {:?}",t.elapsed());
+                        }
 
                         loop {
                             let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
                             cmd.call(RustCContext{
-                                //items_global: &items_global,
-                                //items_local: &items_local,
-                                dummy: &1,
+                                items,
                                 tcx,
                                 vm
                             });
@@ -287,7 +306,8 @@ impl RustCWorker {
         });
 
         RustCWorker {
-            sender: Mutex::new(sender)
+            sender: Mutex::new(sender),
+            items: Default::default()
         }
     }
 
@@ -313,22 +333,19 @@ impl RustCWorker {
         result
     }
 
-    pub fn function_ir(&self, path: String) {
-        panic!("todo func ir");
-        /*let res = self.call(move |ctx| {
-            if let Some((did,vm_item)) = &ctx.items_global.get(&path) {
+    pub fn build_function_ir(&self, item_id: ItemId) {
+        let res = self.call(move |ctx| {
+            let item = ctx.items.get(item_id);
+            let did = item.did;
 
-                let (thir,root) = ctx.tcx.thir_body(did).unwrap();
-                let ir = IRFunctionBuilder::build(ctx, *did, root, &thir.borrow());
-                vm_item.set_ir(ir);
-            } else {
-                panic!("item not found: {:?}",path);
-            }
+            let (thir,root) = ctx.tcx.thir_body(did).unwrap();
+            let ir = IRFunctionBuilder::build(ctx, did, root, &thir.borrow());
+            item.set_ir(ir);
         });
-        res.wait();*/
+        res.wait();
     }
 
-    pub fn wait_for_setup(&self) {
-        self.call( |_ctx| {}).wait();
+    pub fn wait_for_setup(&self) -> Arc<WorkerResult<()>> {
+        self.call( |_ctx| {})
     }
 }

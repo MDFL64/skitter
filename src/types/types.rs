@@ -17,8 +17,8 @@ pub enum TypeKind<'vm> {
     Array(Type<'vm>,u32),
     Slice(Type<'vm>),
 
-    FunctionDef(&'vm Item<'vm>,Vec<Sub<'vm>>),
-    Adt(), // fixme
+    FunctionDef(ItemWithSubs<'vm>),
+    Adt(ItemWithSubs<'vm>),
 
     Param(u32)
 }
@@ -57,4 +57,10 @@ impl<'vm> Sub<'vm> {
             _ => self.clone()
         }
     }
+}
+
+#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+pub struct ItemWithSubs<'vm> {
+    pub item: &'vm Item<'vm>,
+    pub subs: Vec<Sub<'vm>>
 }
