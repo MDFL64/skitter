@@ -7,7 +7,7 @@ use crate::{vm::VM, rustc_worker::RustCContext, types::Sub};
 
 use colosseum::sync::Arena;
 
-use super::{TypeKind, IntWidth, IntSign, FloatWidth, ItemWithSubs, layout::Layout};
+use super::{TypeKind, IntWidth, IntSign, FloatWidth, ItemWithSubs, layout::Layout, ArraySize};
 
 #[derive(Copy,Clone)]
 pub struct Type<'vm>(&'vm InternedType<'vm>,&'vm VM<'vm>);
@@ -185,13 +185,19 @@ impl<'vm> TypeContext<'vm> {
             }
             TyKind::Array(member_ty,count) => {
                 let param_env = rustc_middle::ty::ParamEnv::reveal_all();
-                let count = count.eval_target_usize(ctx.tcx, param_env) as u32;
+                let count = match count.try_eval_target_usize(ctx.tcx, param_env) {
+                    Some(n) => ArraySize::Static(n as u32),
+                    None => ArraySize::ConstParam(0xFFFF) // todo
+                };
                 let member_ty = self.type_from_rustc(*member_ty, ctx);
                 TypeKind::Array(member_ty, count)
             }
             TyKind::Slice(member_ty) => {
                 let member_ty = self.type_from_rustc(*member_ty, ctx);
                 TypeKind::Slice(member_ty)
+            }
+            TyKind::Str => {
+                TypeKind::Str
             }
 
             TyKind::Adt(adt,subs) => {
@@ -201,6 +207,18 @@ impl<'vm> TypeContext<'vm> {
             TyKind::FnDef(did,subs) => {
                 let item_with_subs = self.def_from_rustc(*did,ctx,subs);
                 TypeKind::FunctionDef(item_with_subs)
+            }
+            TyKind::Alias(_,_) => {
+                TypeKind::Alias
+            }
+            TyKind::Foreign(_) => {
+                TypeKind::Foreign
+            }
+            TyKind::Dynamic(..) => {
+                TypeKind::Dynamic
+            }
+            TyKind::FnPtr(_) => {
+                TypeKind::FunctionPointer
             }
 
             TyKind::Param(param) => {
@@ -222,6 +240,8 @@ impl<'vm> TypeContext<'vm> {
         let subs: Vec<_> = subs.iter().map(|s| {
             match s.unpack() {
                 GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
+                GenericArgKind::Lifetime(_) => Sub::Lifetime,
+                GenericArgKind::Const(_) => Sub::Const,
                 _ => panic!("can't handle sub {:?}",s)
             }
         }).collect();

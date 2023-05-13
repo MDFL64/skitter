@@ -45,6 +45,8 @@ impl Layout {
                 let elem_layout = elem_ty.layout();
                 let elem_size = elem_layout.assert_size();
 
+                let count = count.assert_static();
+
                 Layout {
                     maybe_size: Some(elem_size * count),
                     align: elem_layout.align,

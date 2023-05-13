@@ -483,7 +483,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                         let meta = match src_kind {
                             TypeKind::Array(_,elem_count) => {
-                                *elem_count as usize
+                                elem_count.assert_static() as usize
                             }
                             _ => panic!("unsized cast ptr to {:?}",src_kind)
                         };
@@ -599,7 +599,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     TypeKind::Array(elem_ty,elem_count) => {
 
                         let elem_size = elem_ty.layout().assert_size();
-                        let elem_count = *elem_count;
+                        let elem_count = elem_count.assert_static();
 
                         self.out_bc.push(Instr::IndexCalc {
                             arg_out: index_slot,

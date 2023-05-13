@@ -20,6 +20,10 @@ impl<'vm> CrateItems<'vm> {
         }
     }
 
+    pub fn count(&self) -> usize {
+        self.items.len()
+    }
+
     pub fn add_item(&mut self, vm: &'vm VM<'vm>, kind: ItemKind<'vm>, path: ItemPath, did: rustc_hir::def_id::LocalDefId) -> ItemId {
         let item_id = ItemId(self.items.len() as u32);
 

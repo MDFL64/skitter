@@ -130,7 +130,7 @@ impl<'vm> RustCWorker<'vm> {
                         let t = Instant::now();
 
                         let mut adt_items = Vec::new();
-                        let mut impl_items = Vec::new();
+                        let mut impl_items: Vec<ImplItem> = Vec::new();
 
                         for item_id in hir_items {
                             let item = hir.item(item_id);
@@ -189,16 +189,16 @@ impl<'vm> RustCWorker<'vm> {
                                     for item in child_items {
                                         let local_id = item.id.owner_id.def_id;
 
-                                        let AssocItemKind::Fn{..} = item.kind else {
-                                            panic!("unsupported associated item");
-                                        };
-
                                         let item_path = format!("{}::{}",trait_path,item.ident);
 
                                         let path = ItemPath::new_value(item_path);
-                                        let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
 
-                                        items.add_item(vm,kind,path,local_id);
+                                        if let AssocItemKind::Fn{..} = item.kind {
+                                            let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
+                                            items.add_item(vm,kind,path,local_id);
+                                        } else {
+                                            // todo
+                                        }
                                     }
                                 }
                                 HirItemKind::Impl(impl_info) => {
@@ -242,82 +242,10 @@ impl<'vm> RustCWorker<'vm> {
                                         children: impl_list
                                     });
                                 }
-                                /*
-                                // traits
-                                HirItemKind::Trait(_,_,_,_,items) => {
-                                    // create trait item
-                                    let trait_item = {
-                                        let local_id = item.owner_id.def_id;
-                                        let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-
-                                        let vm_item = vm.items.get(this_crate, &item_path, vm);
-                                        println!("todo init trait {}",item_path);
-                                        items_global.insert(item_path,(local_id,vm_item));
-                                        items_local.insert(local_id.local_def_index,vm_item);
-                                        vm_item
-                                    };
-
-                                    // TODO improve this
-                                    for item in items {
-                                        let local_id = item.id.owner_id.def_id;
-                                        let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-                                        
-                                        let ident = item.ident.as_str().to_owned();
-
-                                        let vm_item = vm.items.get(this_crate, &item_path, vm);
-                                        match item.kind {
-                                            AssocItemKind::Fn{..} => {
-                                                vm_item.init(ItemKind::new_function(Some((ident,trait_item))));
-                                            }
-                                            _ => panic!("cannot handle kind")
-                                        }
-
-                                        // for traits, always add to lookup tables
-                                        items_global.insert(item_path,(local_id,vm_item));
-                                        items_local.insert(local_id.local_def_index,vm_item);
-                                    }
-                                }
-                                // impls
-                                HirItemKind::Impl(impl_info) => {
-                                    // TODO: handling impl items the same as normal items is probably way stupid
-                                    // todo resolve sane paths for trivial impls, figure out something else for traits
-                                    for item in impl_info.items {
-                                        let local_id = item.id.owner_id.def_id;
-                                        let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-
-                                        let vm_item = vm.items.get(this_crate, &item_path, vm);
-                                        match item.kind {
-                                            AssocItemKind::Fn{..} => {
-                                                vm_item.init(ItemKind::new_function(None));
-                                            }
-                                            _ => panic!("cannot handle kind")
-                                        }
-
-                                        if let Some(impl_trait) = impl_info.of_trait {
-                                            let trait_def = impl_trait.hir_ref_id.owner.def_id.local_def_index;
-                                            // todo look up trait globally
-                                            let trait_item = items_local.get(&trait_def);
-                                            panic!("todo trait impl - {:?}",trait_item);
-                                        } else {
-                                            // only add refs for trivial impls
-                                            items_global.insert(item_path,(local_id,vm_item));
-                                            items_local.insert(local_id.local_def_index,vm_item);
-                                        }
-                                    }
-                                }*/
-
                                 _ => panic!("can't handle item kind {:?}",item.kind)
                             }
 
                         }
-
-                        /*for impl_info in impls {
-                            assert!(impl_info.of_trait.is_none());
-
-                            let self_ty = vm.types.type_from_rustc(ty, &ctx);
-
-                            println!("> {:?}",impl_info);
-                        }*/
 
                         let items = vm.set_crate_items(this_crate, items);
 
@@ -334,14 +262,16 @@ impl<'vm> RustCWorker<'vm> {
                             let adt_def = tcx.adt_def(item.did);
                             let variants = adt_def.variants();
 
-                            assert!(variants.len() == 1);
-
-                            let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
-                                let ty = tcx.type_of(field.did).skip_binder();
-                                vm.types.type_from_rustc(ty, &ctx)
-                            }).collect();
-
-                            item.set_adt_fields(fields);
+                            // todo real structs
+                            //assert!(variants.len() == 1);
+                            if variants.len() > 0 {
+                                let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
+                                    let ty = tcx.type_of(field.did).skip_binder();
+                                    vm.types.type_from_rustc(ty, &ctx)
+                                }).collect();
+    
+                                item.set_adt_fields(fields);
+                            }
                         }
 
                         // fill impls
@@ -358,6 +288,7 @@ impl<'vm> RustCWorker<'vm> {
 
                         if is_verbose {
                             println!("item aggregation took {:?}",t.elapsed());
+                            println!("n = {}",items.count());
                         }
 
                         loop {
