@@ -18,4 +18,8 @@ pub struct CliArgs {
     /// Print debug information.
     #[clap(long, short)]
     pub verbose: bool,
+
+    /// Load core sources (SLOW, TEMPORARY FEATURE)
+    #[clap(long)]
+    pub core: bool
 }

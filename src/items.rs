@@ -7,16 +7,26 @@ pub struct CrateItems<'vm> {
     crate_id: CrateId,
     items: Vec<Item<'vm>>,
     map_path_to_item: AHashMap<ItemPath,ItemId>,
-    map_did_to_item: AHashMap<rustc_hir::def_id::LocalDefId,ItemId>
+    map_did_to_item: AHashMap<rustc_hir::def_id::LocalDefId,ItemId>,
+
+    extern_crate_list: Vec<ExternCrate>,
+    extern_crate_id_cache: Mutex<AHashMap<rustc_span::def_id::CrateNum,CrateId>>
+}
+
+pub struct ExternCrate {
+    pub name: String,
+    pub id: CrateId
 }
 
 impl<'vm> CrateItems<'vm> {
-    pub fn new(crate_id: CrateId) -> Self {
+    pub fn new(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
         Self {
             crate_id,
             items: Default::default(),
             map_path_to_item: Default::default(),
             map_did_to_item: Default::default(),
+            extern_crate_list,
+            extern_crate_id_cache: Default::default(),
         }
     }
 
@@ -71,9 +81,24 @@ impl<'vm> CrateItems<'vm> {
             None
         }
     }
+
+    pub fn find_crate_id<'tcx>(&self, tcx: rustc_middle::ty::TyCtxt<'tcx>, crate_num: rustc_span::def_id::CrateNum) -> CrateId {
+
+        let mut cache = self.extern_crate_id_cache.lock().unwrap();
+
+        *cache.entry(crate_num).or_insert_with(|| {
+            let crate_name = tcx.crate_name(crate_num);
+            for entry in &self.extern_crate_list {
+                if entry.name == crate_name.as_str() {
+                    return entry.id;
+                }
+            }
+            panic!("lookup for crate failed: {}",crate_name.as_str());
+        })
+    }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct ItemPath(NameSpace,String);
 
 impl ItemPath {
@@ -94,7 +119,7 @@ impl ItemPath {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
 enum NameSpace {
     /// Structs, Enums, etc.
     Type,

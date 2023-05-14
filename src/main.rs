@@ -15,6 +15,7 @@ extern crate rustc_feature;
 extern crate rustc_mir_dataflow;
 extern crate rustc_ast;
 extern crate rustc_abi;
+extern crate rustc_metadata;
 
 mod vm;
 
@@ -34,7 +35,7 @@ use clap::Parser;
 use rustc_worker::RustCWorker;
 use vm::VM;
 
-use crate::items::ItemPath;
+use crate::{items::{ItemPath, ExternCrate}};
 
 // seems neutral or slower than the system allocator (wsl), todo more tests
 //use mimalloc::MiMalloc;
@@ -51,12 +52,41 @@ fn main() {
         test::test(&args.file_name);
     }
 
+    // used only to locate core lib sources
+    let rust_sysroot = if args.core {
+        Some(process::Command::new("rustc")
+            .arg("--print=sysroot")
+            .current_dir(".")
+            .output()
+            .unwrap())
+    } else {
+        None
+    };
+
     let mut vm = VM::new();
     vm.is_verbose = args.verbose;
     
     std::thread::scope(|scope| {
         
-        let main_crate = vm.add_worker(args, scope);
+        let mut extern_crates = Vec::new();
+
+        if args.core {
+            let sysroot = get_sysroot();
+            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs",sysroot);
+
+            // make sure core root exists
+            assert!(std::path::Path::new(&core_root).exists());
+
+            let core_crate = vm.add_worker(&core_root,vec!(), scope);
+            vm.wait_for_setup(core_crate);
+            extern_crates.push(ExternCrate{
+                id: core_crate,
+                name: "core".to_owned()
+            });
+            println!("core setup done");
+        }
+
+        let main_crate = vm.add_worker(&args.file_name,extern_crates, scope);
         vm.wait_for_setup(main_crate);
 
         let main_path = ItemPath::new_value("::main".to_owned());
@@ -81,4 +111,13 @@ fn set_panic_handler() {
         orig_hook(panic_info);
         process::exit(1);
     }));
+}
+
+fn get_sysroot() -> String {
+    let out = process::Command::new("rustc")
+        .arg("--print=sysroot")
+        .current_dir(".")
+        .output()
+        .unwrap();
+    std::str::from_utf8(&out.stdout).unwrap().trim().to_owned()
 }

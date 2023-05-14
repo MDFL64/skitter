@@ -5,7 +5,7 @@ use rustc_middle::ty::{TyCtxt, Ty};
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 
-use crate::{cli::CliArgs, ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate}};
 
 /////////////////////////
 
@@ -69,14 +69,15 @@ struct ImplItem<'tcx> {
 }
 
 impl<'vm> RustCWorker<'vm> {
-    pub fn new<'s>(args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
+    pub fn new<'s>(source_root: &str, extern_crates: Vec<ExternCrate>, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
 
-        let is_verbose = args.verbose;
+        let is_verbose = vm.is_verbose;
 
         let (sender,recv) =
             std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
 
-        let self_profile = if args.profile { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
+        // fixme?
+        let self_profile = if false { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
 
         let config = rustc_interface::Config {
             opts: config::Options {
@@ -93,7 +94,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(args.file_name.into()),
+            input: config::Input::File(source_root.into()),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -113,9 +114,9 @@ impl<'vm> RustCWorker<'vm> {
             rustc_interface::run_compiler(config, |compiler| {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
-
-                        let mut items = CrateItems::new(this_crate);
-
+                        
+                        let mut items = CrateItems::new(this_crate,extern_crates);
+                        
                         let hir = tcx.hir();
 
                         let t = Instant::now();
@@ -276,7 +277,15 @@ impl<'vm> RustCWorker<'vm> {
                             let self_ty = vm.types.type_from_rustc(impl_item.self_ty, &ctx);
 
                             if let Some(trait_did) = impl_item.trait_def {
-                                let trait_item = items.find_by_did(trait_did).expect("todo non-local traits");
+                                let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
+                                    trait_item
+                                } else {
+                                    let trait_path = ItemPath::new_type(tcx.def_path(trait_did).to_string_no_crate_verbose());
+                                    let trait_crate_id = ctx.items.find_crate_id(tcx, trait_did.krate);
+                                    let trait_crate_items = vm.get_crate_items(trait_crate_id);
+
+                                    trait_crate_items.find_by_path(&trait_path).expect("couldn't find trait")
+                                };
                                 trait_item.add_trait_impl(self_ty,this_crate, impl_item.children);
                             } else {
                                 // todo non trait impls not resolved

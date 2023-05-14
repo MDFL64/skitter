@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::{Mutex, OnceLock}};
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext, types::Sub};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::ItemPath};
 
 use colosseum::sync::Arena;
 
@@ -232,10 +232,16 @@ impl<'vm> TypeContext<'vm> {
     }
 
     fn def_from_rustc<'tcx>(&'vm self, did: DefId, ctx: &RustCContext<'vm,'tcx>, subs: &[GenericArg<'tcx>]) -> ItemWithSubs<'vm> {
-        let Some(item) = ctx.items.find_by_did(did) else {
-            panic!("couldn't find def {:?}",did);
+        let item = if let Some(item) = ctx.items.find_by_did(did) {
+            item
+        } else {
+            let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
+            let crate_items = ctx.vm.get_crate_items(trait_crate_id);
+
+            let item_path = ItemPath::new_value(ctx.tcx.def_path(did).to_string_no_crate_verbose());
+            println!("todo correct paths {:?}",item_path);
+            crate_items.find_by_path(&item_path).expect("couldn't find item")
         };
-        // todo non-local defs
 
         let subs: Vec<_> = subs.iter().map(|s| {
             match s.unpack() {

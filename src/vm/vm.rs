@@ -6,6 +6,7 @@ use crate::cli::CliArgs;
 use crate::hir_compiler::HirCompiler;
 use crate::items::CrateId;
 use crate::items::CrateItems;
+use crate::items::ExternCrate;
 use crate::items::Item;
 use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
@@ -45,10 +46,10 @@ impl<'vm> VM<'vm> {
         }
     }
 
-    pub fn add_worker<'s>(&'vm self, args: CliArgs, scope: &'s std::thread::Scope<'s,'vm>) -> CrateId {
+    pub fn add_worker<'s>(&'vm self, source_root: &str, extern_crates: Vec<ExternCrate>, scope: &'s std::thread::Scope<'s,'vm>) -> CrateId {
         let mut workers = self.workers.write().unwrap();
         let crate_id = CrateId::new(workers.len() as u32);
-        let worker = RustCWorker::new(args, scope, self, crate_id);
+        let worker = RustCWorker::new(source_root,extern_crates,scope, self, crate_id);
 
         workers.push(worker);
         crate_id
