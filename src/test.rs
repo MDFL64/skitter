@@ -34,7 +34,7 @@ pub fn test(dir_name: &str) -> ! {
             }
         };
 
-        println!("{:40} {}", file.to_str().unwrap(), res_str);
+        println!("{:40} {}", file.file.to_str().unwrap(), res_str);
     }
     
     println!("=> {} / {} tests passed", count_success, count_total);
@@ -43,8 +43,29 @@ pub fn test(dir_name: &str) -> ! {
     std::process::exit(0)
 }
 
-fn gather_tests(dir_name: &str, files: &mut Vec<PathBuf>) {
+#[derive(Ord, Eq, PartialEq, PartialOrd)]
+struct TestInfo {
+    file: PathBuf,
+    args: Vec<String>
+}
+
+fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
     let dir_path = Path::new(dir_name);
+
+    let args: Vec<String> = if let Result::Ok(data) = std::fs::read(dir_path.join("_args")) {
+        let arg_data = std::str::from_utf8(&data).expect("bad args");
+        arg_data.split(' ').filter_map(|a| {
+            let a = a.trim();
+            if a.len() == 0 {
+                None
+            } else {
+                Some(a.to_owned())
+            }
+        }).collect()
+    } else {
+        vec!()
+    };
+
     let read_dir = std::fs::read_dir(dir_name).expect("failed to read test directory");
     for entry in read_dir {
         if let Ok(entry) = entry {
@@ -61,7 +82,10 @@ fn gather_tests(dir_name: &str, files: &mut Vec<PathBuf>) {
                     } else if file_ty.is_file() {
                         if file_name.ends_with(".rs") {
                             let file = dir_path.join(file_name);
-                            files.push(file);
+                            files.push(TestInfo{
+                                file,
+                                args: args.clone()
+                            });
                         }
                     }
                 }
@@ -78,7 +102,7 @@ struct TestResult {
     fraction: f64,
 }
 
-fn run_test(file_name: &Path, bin_name: &Path) -> Result<TestResult, String> {
+fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String> {
     use std::process::Command;
 
     // Rust compile
@@ -87,7 +111,7 @@ fn run_test(file_name: &Path, bin_name: &Path) -> Result<TestResult, String> {
         let fail = || Err(String::from("rustc compile failed"));
 
         let cmd_res = Command::new("rustc")
-            .arg(file_name)
+            .arg(&test_info.file)
             .arg("-o")
             .arg(bin_name)
             .arg("-C")
@@ -129,7 +153,14 @@ fn run_test(file_name: &Path, bin_name: &Path) -> Result<TestResult, String> {
 
         let program = std::env::current_exe().expect("failed to get skitter path");
 
-        let cmd_res = Command::new(program).arg(file_name).output();
+        let mut cmd = Command::new(program);
+        cmd.arg(&test_info.file);
+
+        for arg in test_info.args.iter() {
+            cmd.arg(arg);
+        }
+
+        let cmd_res = cmd.output();
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {

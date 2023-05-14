@@ -83,7 +83,6 @@ fn main() {
                 id: core_crate,
                 name: "core".to_owned()
             });
-            println!("core setup done");
         }
 
         let main_crate = vm.add_worker(&args.file_name,extern_crates, scope);
