@@ -1,7 +1,7 @@
 use std::{sync::{Mutex, Barrier, Arc}, time::Instant};
 
 use rustc_session::config;
-use rustc_middle::ty::{TyCtxt, Ty};
+use rustc_middle::ty::{TyCtxt, Ty, ImplSubject};
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 
@@ -63,8 +63,7 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
 
 #[derive(Debug)]
 struct ImplItem<'tcx> {
-    self_ty: Ty<'tcx>,
-    trait_def: Option<rustc_hir::def_id::DefId>,
+    subject: rustc_middle::ty::ImplSubject<'tcx>,
     children: Vec<(String,ItemId)>
 }
 
@@ -201,26 +200,20 @@ impl<'vm> RustCWorker<'vm> {
                                 }
                                 HirItemKind::Impl(impl_info) => {
                                     let impl_id = item.owner_id.def_id;
-                                    let self_ty = tcx.type_of(impl_id).skip_binder();
 
-                                    let trait_did = impl_info.of_trait.map(|of_trait| {
-                                        of_trait.trait_def_id().unwrap()
-                                    });
+                                    let subject = tcx.impl_subject(impl_id.into()).skip_binder();
 
-                                    let trait_path = trait_did.map(|trait_did| {
-                                        tcx.def_path(trait_did).to_string_no_crate_verbose()
-                                    });
+                                    let base_path = match subject {
+                                        rustc_middle::ty::ImplSubject::Trait(x) => format!("{:?}",x),
+                                        rustc_middle::ty::ImplSubject::Inherent(x) => format!("{:?}",x),
+                                    };
                                     
                                     let mut impl_list: Vec<(String,ItemId)> = Vec::new();
 
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
 
-                                        let item_path = if let Some(trait_path) = &trait_path {
-                                            format!("<{} as {}>::{}",self_ty,trait_path,item.ident)
-                                        } else {
-                                            format!("{}::{}",self_ty,item.ident)
-                                        };
+                                        let item_path = format!("{}::{}",base_path,item.ident);
                                         
                                         let path = ItemPath::new_debug(item_path);
 
@@ -234,9 +227,9 @@ impl<'vm> RustCWorker<'vm> {
                                         }
                                     }
 
+                                    
                                     impl_items.push(ImplItem{
-                                        self_ty,
-                                        trait_def: trait_did,
+                                        subject,
                                         children: impl_list
                                     });
                                 }
@@ -274,21 +267,28 @@ impl<'vm> RustCWorker<'vm> {
 
                         // fill impls
                         for impl_item in impl_items {
-                            let self_ty = vm.types.type_from_rustc(impl_item.self_ty, &ctx);
+                            match impl_item.subject {
+                                ImplSubject::Trait(trait_ref) => {
+                                    let trait_did = trait_ref.def_id;
 
-                            if let Some(trait_did) = impl_item.trait_def {
-                                let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
-                                    trait_item
-                                } else {
-                                    let trait_path = ItemPath::new_type(tcx.def_path(trait_did).to_string_no_crate_verbose());
-                                    let trait_crate_id = ctx.items.find_crate_id(tcx, trait_did.krate);
-                                    let trait_crate_items = vm.get_crate_items(trait_crate_id);
+                                    let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
+                                        trait_item
+                                    } else {
+                                        let trait_path = ItemPath::new_type(tcx.def_path(trait_did).to_string_no_crate_verbose());
+                                        let trait_crate_id = ctx.items.find_crate_id(tcx, trait_did.krate);
+                                        let trait_crate_items = vm.get_crate_items(trait_crate_id);
+    
+                                        trait_crate_items.find_by_path(&trait_path).expect("couldn't find trait")
+                                    };
 
-                                    trait_crate_items.find_by_path(&trait_path).expect("couldn't find trait")
-                                };
-                                trait_item.add_trait_impl(self_ty,this_crate, impl_item.children);
-                            } else {
-                                // todo non trait impls not resolved
+                                    // TODO convert all the subs and use them in lookups instead?
+                                    let impl_for = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
+
+                                    trait_item.add_trait_impl(impl_for,this_crate, impl_item.children);
+                                }
+                                ImplSubject::Inherent(ty) => {
+                                    // todo non trait impls not resolved
+                                }
                             }
                         }
 

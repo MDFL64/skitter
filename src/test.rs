@@ -20,10 +20,12 @@ pub fn test(dir_name: &str) -> ! {
                 
                 let percent = format!("{:.1}%", res.fraction*100.0);
 
-                let speedup_str = if res.fraction < 1.0 {
+                let speedup_str = if res.fraction < 0.1 {
                     percent.green()
-                } else {
+                } else if res.fraction < 1.0 {
                     percent.yellow()
+                } else {
+                    percent.red()
                 };
 
                 time_skitter_total += res.time_skitter;

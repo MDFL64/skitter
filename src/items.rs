@@ -197,7 +197,7 @@ pub enum ItemKind<'vm> {
 }
 
 pub struct TraitImpl<'vm> {
-    for_type: Type<'vm>,
+    for_types: Vec<Sub<'vm>>,
     crate_id: CrateId,
     child_items: Vec<(String,ItemId)>
 }
@@ -298,14 +298,14 @@ impl<'vm> Item<'vm> {
         fields.set(new_fields).ok();
     }
 
-    pub fn add_trait_impl(&self, for_type: Type<'vm>, crate_id: CrateId, child_items: Vec<(String,ItemId)>) {
+    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, crate_id: CrateId, child_items: Vec<(String,ItemId)>) {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut impl_list = impl_list.write().unwrap();
         impl_list.push(TraitImpl{
-            for_type,
+            for_types,
             crate_id,
             child_items
         });
@@ -318,13 +318,8 @@ impl<'vm> Item<'vm> {
 
         let impl_list = impl_list.read().unwrap();
 
-        assert!(subs.len() == 1); // todo generics
-        let Sub::Type(sub_ty) = subs[0] else {
-            todo!();
-        };
-
         for candidate in impl_list.iter() {
-            if candidate.for_type == sub_ty {
+            if check_types_match(&candidate.for_types,subs) {
                 let crate_items = self.vm.get_crate_items(candidate.crate_id);
                 for (child_name,child_item) in candidate.child_items.iter() {
                     if child_name == member_name {
@@ -337,4 +332,8 @@ impl<'vm> Item<'vm> {
 
         panic!("trait lookup failed (no impl)");
     }
+}
+
+fn check_types_match<'vm>(a: &[Sub<'vm>], b: &[Sub<'vm>]) -> bool {
+    a == b
 }

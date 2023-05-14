@@ -201,11 +201,11 @@ impl<'vm> TypeContext<'vm> {
             }
 
             TyKind::Adt(adt,subs) => {
-                let item_with_subs = self.def_from_rustc(adt.did(),ctx,subs);
+                let item_with_subs = self.def_from_rustc(adt.did(),subs,ctx);
                 TypeKind::Adt(item_with_subs)
             }
             TyKind::FnDef(did,subs) => {
-                let item_with_subs = self.def_from_rustc(*did,ctx,subs);
+                let item_with_subs = self.def_from_rustc(*did,subs,ctx);
                 TypeKind::FunctionDef(item_with_subs)
             }
             TyKind::Alias(_,_) => {
@@ -231,25 +231,40 @@ impl<'vm> TypeContext<'vm> {
         self.intern(new_kind,ctx.vm)
     }
 
-    fn def_from_rustc<'tcx>(&'vm self, did: DefId, ctx: &RustCContext<'vm,'tcx>, subs: &[GenericArg<'tcx>]) -> ItemWithSubs<'vm> {
+    pub fn subs_from_rustc<'tcx>(&'vm self, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> Vec<Sub<'vm>> {
+        args.iter().map(|s| {
+            match s.unpack() {
+                GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
+                GenericArgKind::Lifetime(_) => Sub::Lifetime,
+                GenericArgKind::Const(_) => Sub::Const,
+            }
+        }).collect()
+    }
+
+    fn path_from_rustc(in_path: rustc_hir::definitions::DefPath) -> Option<ItemPath> {
+        if let Some(last_elem) = in_path.data.last() {
+            use rustc_hir::definitions::DefPathData;
+            match last_elem.data {
+                DefPathData::ValueNs(_) => Some(ItemPath::new_value(in_path.to_string_no_crate_verbose())),
+                _ => panic!("? {:?}",last_elem.data)
+            }
+        } else {
+            panic!("zero element path?");
+        }
+    }
+
+    fn def_from_rustc<'tcx>(&'vm self, did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> ItemWithSubs<'vm> {
         let item = if let Some(item) = ctx.items.find_by_did(did) {
             item
         } else {
             let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
             let crate_items = ctx.vm.get_crate_items(trait_crate_id);
 
-            let item_path = ItemPath::new_value(ctx.tcx.def_path(did).to_string_no_crate_verbose());
-            println!("todo correct paths {:?}",item_path);
+            let item_path = Self::path_from_rustc(ctx.tcx.def_path(did)).expect("no path");
             crate_items.find_by_path(&item_path).expect("couldn't find item")
         };
 
-        let subs: Vec<_> = subs.iter().map(|s| {
-            match s.unpack() {
-                GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
-                GenericArgKind::Lifetime(_) => Sub::Lifetime,
-                GenericArgKind::Const(_) => Sub::Const,
-            }
-        }).collect();
+        let subs = self.subs_from_rustc(args, ctx);
 
         ItemWithSubs{
             item,
