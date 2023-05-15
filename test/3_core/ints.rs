@@ -14,7 +14,7 @@ pub fn main() {
     //_builtin::print_int(a.ilog10() as _);
     //let min = a.min(b);
 
-    let c = a.count_zeros();
+    //let c = a.count_zeros();
 
-    _builtin::print_int(c as _);
+    //_builtin::print_int(c as _);
 }

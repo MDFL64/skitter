@@ -103,7 +103,7 @@ impl<'vm> Type<'vm> {
 
     pub fn add_impl(&self, crate_id: CrateId, children: Vec<(String,ItemId)>) {
         if self.kind().is_dummy() {
-            println!("skip impl {:?}",self.kind());
+            //println!("skip impl {:?}",self.kind());
             return;
         }
 
