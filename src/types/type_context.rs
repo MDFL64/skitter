@@ -1,13 +1,14 @@
-use std::{collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{collections::HashMap, sync::{Mutex, OnceLock, RwLock}};
 
-use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind};
+use ahash::AHashMap;
+use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::ItemPath};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, Item, CrateId, ItemId}};
 
 use colosseum::sync::Arena;
 
-use super::{TypeKind, IntWidth, IntSign, FloatWidth, ItemWithSubs, layout::Layout, ArraySize};
+use super::{TypeKind, IntWidth, IntSign, FloatWidth, ItemWithSubs, layout::Layout, ArraySize, Mutability};
 
 #[derive(Copy,Clone)]
 pub struct Type<'vm>(&'vm InternedType<'vm>,&'vm VM<'vm>);
@@ -45,13 +46,13 @@ impl<'vm> Type<'vm> {
                     panic!("bad sub");
                 }
             }
-            TypeKind::Ref(ref_ty) => {
+            TypeKind::Ref(ref_ty,mutability) => {
                 let ref_ty = ref_ty.sub(subs);
-                vm.types.intern(TypeKind::Ref(ref_ty),vm)
+                vm.types.intern(TypeKind::Ref(ref_ty,*mutability),vm)
             }
-            TypeKind::Ptr(ref_ty) => {
+            TypeKind::Ptr(ref_ty,mutability) => {
                 let ref_ty = ref_ty.sub(subs);
-                vm.types.intern(TypeKind::Ptr(ref_ty),vm)
+                vm.types.intern(TypeKind::Ptr(ref_ty,*mutability),vm)
             }
             TypeKind::Tuple(fields) => {
                 // fast path, will become redundant if above optimization is implemented
@@ -98,6 +99,24 @@ impl<'vm> Type<'vm> {
             TypeKind::Char => *self,
             _ => panic!("todo sub {:?} with {:?}",self,subs)
         }
+    }
+
+    pub fn add_impl(&self, crate_id: CrateId, children: Vec<(String,ItemId)>) {
+        if self.kind().is_dummy() {
+            println!("skip impl {:?}",self.kind());
+            return;
+        }
+
+        let mut impl_table = self.0.impl_table.write().unwrap();
+        for (name,item_id) in children {
+            let old = impl_table.insert(name,(crate_id,item_id));
+            assert!(old.is_none());
+        }
+    }
+
+    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId,ItemId)> {
+        let impl_table = self.0.impl_table.read().unwrap();
+        impl_table.get(name).copied()
     }
 }
 
@@ -169,13 +188,21 @@ impl<'vm> TypeContext<'vm> {
             TyKind::Char => TypeKind::Char,
             TyKind::Never => TypeKind::Never,
 
-            TyKind::Ref(_,ref_ty,_) => {
+            TyKind::Ref(_,ref_ty,mutability) => {
                 let ref_ty = self.type_from_rustc(*ref_ty, ctx);
-                TypeKind::Ref(ref_ty)
+                let mutability = match mutability {
+                    rustc_middle::mir::Mutability::Mut => Mutability::Mut,
+                    rustc_middle::mir::Mutability::Not => Mutability::Const
+                };
+                TypeKind::Ref(ref_ty,mutability)
             }
             TyKind::RawPtr(ptr) => {
                 let ref_ty = self.type_from_rustc(ptr.ty, ctx);
-                TypeKind::Ptr(ref_ty)
+                let mutability = match ptr.mutbl {
+                    rustc_middle::mir::Mutability::Mut => Mutability::Mut,
+                    rustc_middle::mir::Mutability::Not => Mutability::Const
+                };
+                TypeKind::Ptr(ref_ty,mutability)
             }
             TyKind::Tuple(members) => {
                 let members = members.iter().map(|ty| {
@@ -241,9 +268,19 @@ impl<'vm> TypeContext<'vm> {
         }).collect()
     }
 
-    fn path_from_rustc(in_path: rustc_hir::definitions::DefPath) -> Option<ItemPath> {
+    fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> Option<ItemPath> {
+        use rustc_hir::definitions::DefPathData;
+
+        // we only handle trivial paths
+        for elem in in_path.data.iter() {
+            match elem.data {
+                DefPathData::ValueNs(_) |
+                DefPathData::TypeNs(_) => (),
+                _ => return None
+            }
+        }
+
         if let Some(last_elem) = in_path.data.last() {
-            use rustc_hir::definitions::DefPathData;
             match last_elem.data {
                 DefPathData::ValueNs(_) => Some(ItemPath::new_value(in_path.to_string_no_crate_verbose())),
                 _ => panic!("? {:?}",last_elem.data)
@@ -257,11 +294,38 @@ impl<'vm> TypeContext<'vm> {
         let item = if let Some(item) = ctx.items.find_by_did(did) {
             item
         } else {
-            let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
-            let crate_items = ctx.vm.get_crate_items(trait_crate_id);
-
-            let item_path = Self::path_from_rustc(ctx.tcx.def_path(did)).expect("no path");
-            crate_items.find_by_path(&item_path).expect("couldn't find item")
+            let def_path = ctx.tcx.def_path(did);
+            if let Some(item_path) = Self::path_from_rustc(&def_path) {
+                let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
+                let crate_items = ctx.vm.get_crate_items(trait_crate_id);
+    
+                if let Some(item) = crate_items.find_by_path(&item_path) {
+                    item
+                } else {
+                    panic!("couldn't find item: {:?} / {:?}",item_path,def_path)
+                }
+            } else {
+                if let Some(parent_impl) = ctx.tcx.impl_of_method(did) {
+                    let subject = ctx.tcx.impl_subject(parent_impl).skip_binder();
+                    let ident = ctx.tcx.item_name(did);
+                    match subject {
+                        ImplSubject::Inherent(ty) => {
+                            let ty = self.type_from_rustc(ty, ctx);
+                            if let Some((crate_id,item_id)) = ty.find_impl_member(ident.as_str()) {
+                                let crate_items = ctx.vm.get_crate_items(crate_id);
+                                crate_items.get(item_id)
+                            } else {
+                                panic!("missing type impl");
+                            }
+                        }
+                        ImplSubject::Trait(trait_ref) => {
+                            panic!("todo trait ref");
+                        }
+                    }
+                } else {
+                    panic!("can't resolve path: {:?}",did);
+                }
+            }
         };
 
         let subs = self.subs_from_rustc(args, ctx);
@@ -279,7 +343,8 @@ impl<'vm> TypeContext<'vm> {
         entry.or_insert_with(|| {
             let intern_ref = self.arena.alloc(InternedType{
                 kind,
-                layout: Default::default()
+                layout: Default::default(),
+                impl_table: Default::default()
             });
             Type(intern_ref,vm)
         }).clone()
@@ -289,5 +354,6 @@ impl<'vm> TypeContext<'vm> {
 #[derive(Debug)]
 struct InternedType<'vm> {
     kind: TypeKind<'vm>,
-    layout: OnceLock<Layout>
+    layout: OnceLock<Layout>,
+    impl_table: RwLock<AHashMap<String,(CrateId,ItemId)>>
 }

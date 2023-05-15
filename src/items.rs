@@ -326,6 +326,7 @@ impl<'vm> Item<'vm> {
                         return crate_items.get(*child_item);
                     }
                 }
+                println!("{:?}::{} for {:?}",self.path,member_name,subs);
                 panic!("trait lookup failed (no field)");
             }
         }

@@ -476,8 +476,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         let src_ty = self.expr_ty(*source);
                         
                         let src_kind = match src_ty.kind() {
-                            TypeKind::Ptr(ref_ty) |
-                            TypeKind::Ref(ref_ty) => ref_ty.kind(),
+                            TypeKind::Ptr(ref_ty,_) |
+                            TypeKind::Ref(ref_ty,_) => ref_ty.kind(),
                             _ => panic!()
                         };
 

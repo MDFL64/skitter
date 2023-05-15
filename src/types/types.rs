@@ -10,8 +10,8 @@ pub enum TypeKind<'vm> {
     Bool,
     Never,
 
-    Ref(Type<'vm>),
-    Ptr(Type<'vm>),
+    Ref(Type<'vm>,Mutability),
+    Ptr(Type<'vm>,Mutability),
 
     Tuple(Vec<Type<'vm>>),
     Array(Type<'vm>,ArraySize),
@@ -26,6 +26,15 @@ pub enum TypeKind<'vm> {
     FunctionPointer,
 
     Param(u32)
+}
+
+impl<'vm> TypeKind<'vm> {
+    pub fn is_dummy(&self) -> bool {
+        match self {
+            TypeKind::Dynamic => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
@@ -48,6 +57,12 @@ pub enum IntWidth {
 pub enum FloatWidth {
     F32,
     F64
+}
+
+#[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
+pub enum Mutability {
+    Mut,
+    Const
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]

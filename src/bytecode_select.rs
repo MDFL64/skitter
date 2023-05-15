@@ -268,8 +268,8 @@ pub fn cast<'vm>(arg_ty: Type, res_ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
     match (arg_ty.kind(),res_ty.kind()) {
         (TypeKind::Int(..),TypeKind::Int(..)) |
         (TypeKind::Bool,TypeKind::Int(..)) |
-        (TypeKind::Ptr(_),TypeKind::Int(..)) |
-        (TypeKind::Int(..),TypeKind::Ptr(_)) |
+        (TypeKind::Ptr(..),TypeKind::Int(..)) |
+        (TypeKind::Int(..),TypeKind::Ptr(..)) |
         (TypeKind::Char,TypeKind::Int(..)) |
         (TypeKind::Int(..),TypeKind::Char) => {
             

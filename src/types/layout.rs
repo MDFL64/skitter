@@ -63,8 +63,8 @@ impl Layout {
                 }
             }
 
-            TypeKind::Ref(ref_ty) |
-            TypeKind::Ptr(ref_ty) => {
+            TypeKind::Ref(ref_ty,_) |
+            TypeKind::Ptr(ref_ty,_) => {
                 let ptr_size = POINTER_SIZE.bytes();
 
                 let ref_layout = Layout::from(*ref_ty);

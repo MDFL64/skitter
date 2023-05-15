@@ -268,6 +268,10 @@ impl<'vm> RustCWorker<'vm> {
                         // fill impls
                         for impl_item in impl_items {
                             match impl_item.subject {
+                                ImplSubject::Inherent(ty) => {
+                                    let ty = vm.types.type_from_rustc(ty, &ctx);
+                                    ty.add_impl(this_crate,impl_item.children);
+                                }
                                 ImplSubject::Trait(trait_ref) => {
                                     let trait_did = trait_ref.def_id;
 
@@ -285,9 +289,6 @@ impl<'vm> RustCWorker<'vm> {
                                     let impl_for = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
                                     trait_item.add_trait_impl(impl_for,this_crate, impl_item.children);
-                                }
-                                ImplSubject::Inherent(ty) => {
-                                    // todo non trait impls not resolved
                                 }
                             }
                         }
