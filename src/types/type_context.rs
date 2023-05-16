@@ -31,6 +31,11 @@ impl<'vm> Type<'vm> {
         }
     }
 
+    pub fn ref_to(&self, m: Mutability) -> Self {
+        let ref_kind = TypeKind::Ref(*self, m);
+        self.1.types.intern(ref_kind, self.1)
+    }
+
     pub fn sub(&self, subs: &[Sub<'vm>]) -> Self {
         if subs.len() == 0 {
             return *self;

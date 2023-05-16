@@ -1,7 +1,7 @@
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
-use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt};
-use crate::types::{Type, TypeKind, Sub, ItemWithSubs};
+use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt, BindingMode};
+use crate::types::{Type, TypeKind, Sub, ItemWithSubs, Mutability};
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -671,16 +671,45 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     }
 
     fn alloc_pattern(&mut self, pat: &Pattern<'vm>) -> Slot {
-        match &pat.kind {
-            PatternKind::LocalBinding(var_id) => {
-                // todo mode may pose issues?
-                
-                let ty = self.apply_subs(pat.ty);
+        let ty = self.apply_subs(pat.ty);
+        let slot = self.stack.alloc(ty);
 
-                let slot = self.stack.alloc(ty);
-                self.locals.push((*var_id,slot));
-                slot
+        self.bind_pattern(pat, slot);
+        slot
+    }
+
+    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot) {
+        match &pat.kind {
+            PatternKind::LocalBinding(var_id,mode) => {
+                match mode {
+                    BindingMode::Value => {
+                        println!("val {:?}",slot);
+                        self.locals.push((*var_id,slot));
+                    }
+                    BindingMode::Ref => {
+                        println!("ref {:?}",slot);
+
+                        let ty = self.apply_subs(pat.ty);
+                        assert!(ty.layout().is_sized()); // todo???
+                        // NOTE: mutability here may not be correct!
+                        let ref_ty = ty.ref_to(Mutability::Mut);
+                        let var_slot = self.stack.alloc(ref_ty);
+
+                        self.out_bc.push(Instr::SlotAddr(var_slot, slot));
+                        self.locals.push((*var_id,var_slot));
+                    }
+                }
             }
+            PatternKind::Struct { fields } => {
+                println!("struct {:?}",slot);
+                let layout = self.apply_subs(pat.ty).layout();
+
+                for field in fields {
+                    let offset = layout.field_offsets[field.field as usize];
+                    self.bind_pattern(&field.pattern, slot.offset_by(offset));
+                }
+            }
+            PatternKind::Hole => (),
             _ => panic!("pat {:?}",pat.kind)
         }
     }

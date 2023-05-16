@@ -11,7 +11,7 @@ use crate::types::{Type};
 
 pub struct IRFunction<'vm> {
     pub root_expr: ExprId,
-    pub params: Vec<Box<Pattern<'vm>>>,
+    pub params: Vec<Pattern<'vm>>,
     pub return_ty: Type<'vm>,
     exprs: Vec<Expr<'vm>>,
     stmts: Vec<Stmt<'vm>>,
@@ -33,7 +33,7 @@ pub struct Expr<'vm> {
 pub enum Stmt<'vm> {
     Expr(ExprId),
     Let{
-        pattern: Box<Pattern<'vm>>,
+        pattern: Pattern<'vm>,
         init: Option<ExprId>,
         else_block: Option<BlockId>
     }
@@ -44,8 +44,9 @@ pub struct Block {
     pub result: Option<ExprId>,
 }
 
+#[derive(Debug)]
 pub struct Pattern<'vm> {
-    pub kind: PatternKind,
+    pub kind: PatternKind<'vm>,
     pub ty: Type<'vm>
 }
 
@@ -96,8 +97,24 @@ pub enum ExprKind<'vm> {
 }
 
 #[derive(Debug)]
-pub enum PatternKind {
-    LocalBinding(u32)
+pub enum PatternKind<'vm> {
+    LocalBinding(u32,BindingMode),
+    Struct{
+        fields: Vec<FieldPattern<'vm>>
+    },
+    Hole
+}
+
+#[derive(Debug)]
+pub enum BindingMode {
+    Value,
+    Ref
+}
+
+#[derive(Debug)]
+pub struct FieldPattern<'vm> {
+    pub field: u32,
+    pub pattern: Pattern<'vm>
 }
 
 #[derive(Debug,Clone,Copy)]
@@ -430,29 +447,41 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
         }
     }
 
-    fn pattern(&self, old: &thir::Pat<'tcx>) -> Box<Pattern<'vm>> {
+    fn pattern(&self, old: &thir::Pat<'tcx>) -> Pattern<'vm> {
         let kind = match old.kind {
             thir::PatKind::AscribeUserType{ref subpattern,..} => {
                 return self.pattern(subpattern);
             }
             thir::PatKind::Binding{ref subpattern, ref var, mode,..} => {
                 assert!(subpattern.is_none());
-                assert!(mode == rustc_middle::thir::BindingMode::ByValue);
-
+                let mode = match mode {
+                    rustc_middle::thir::BindingMode::ByValue => BindingMode::Value,
+                    rustc_middle::thir::BindingMode::ByRef(_) => BindingMode::Ref,
+                };
                 let hir_id = var.0;
                 // will probably not hold true for closures
                 assert_eq!(hir_id.owner.def_id,self.func_id);
 
                 let local_id = hir_id.local_id.as_u32();
-                PatternKind::LocalBinding(local_id)
+                PatternKind::LocalBinding(local_id,mode)
             }
+            thir::PatKind::Leaf{ref subpatterns} => {
+                let fields: Vec<_> = subpatterns.iter().map(|child| {
+                    FieldPattern{
+                        field: child.field.as_u32(),
+                        pattern: self.pattern(&child.pattern)
+                    }
+                }).collect();
+                PatternKind::Struct { fields }
+            }
+            thir::PatKind::Wild => PatternKind::Hole,
             _ => panic!("pattern kind {:?}",old.kind)
         };
 
-        Box::new(Pattern {
+        Pattern {
             kind,
             ty: self.ctx.type_from_rustc(old.ty)
-        })
+        }
     }
 
     fn stmt(&self, old: &thir::Stmt<'tcx>) -> Stmt<'vm> {
