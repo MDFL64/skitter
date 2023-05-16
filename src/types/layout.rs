@@ -87,6 +87,9 @@ impl Layout {
 
                 Layout::compound(fixed_fields)
             }
+            TypeKind::FunctionDef(_) => {
+                Layout::simple(0)
+            }
             _ => panic!("can't layout: {:?}",kind)
         }
     }

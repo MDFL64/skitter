@@ -4,6 +4,7 @@ use rustc_session::config;
 use rustc_middle::ty::{TyCtxt, Ty, ImplSubject};
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
+use rustc_hir::def_id::LocalDefId;
 
 use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate}};
 
@@ -64,7 +65,8 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
 #[derive(Debug)]
 struct ImplItem<'tcx> {
     subject: rustc_middle::ty::ImplSubject<'tcx>,
-    children: Vec<(String,ItemId)>
+    children_fn: Vec<(String,ItemId)>,
+    children_ty: Vec<(String,LocalDefId)>,
 }
 
 impl<'vm> RustCWorker<'vm> {
@@ -188,13 +190,18 @@ impl<'vm> RustCWorker<'vm> {
 
                                         let item_path = format!("{}::{}",trait_path,item.ident);
 
-                                        let path = ItemPath::new_value(item_path);
-
-                                        if let AssocItemKind::Fn{..} = item.kind {
-                                            let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
-                                            items.add_item(vm,kind,path,local_id);
-                                        } else {
-                                            // todo
+                                        match item.kind {
+                                            AssocItemKind::Fn{..} => {
+                                                let path = ItemPath::new_value(item_path);
+                                                let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
+                                                items.add_item(vm,kind,path,local_id);
+                                            }
+                                            AssocItemKind::Type => {
+                                                let path = ItemPath::new_type(item_path);
+                                                let kind = ItemKind::new_associated_type(trait_item, item.ident.as_str().to_owned());
+                                                items.add_item(vm,kind,path,local_id);
+                                            }
+                                            _ => () // constants unhandled
                                         }
                                     }
                                 }
@@ -208,7 +215,8 @@ impl<'vm> RustCWorker<'vm> {
                                         rustc_middle::ty::ImplSubject::Inherent(x) => format!("{:?}",x),
                                     };
                                     
-                                    let mut impl_list: Vec<(String,ItemId)> = Vec::new();
+                                    let mut impl_list_fn: Vec<(String,ItemId)> = Vec::new();
+                                    let mut impl_list_ty: Vec<(String,LocalDefId)> = Vec::new();
 
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
@@ -217,20 +225,25 @@ impl<'vm> RustCWorker<'vm> {
                                         
                                         let path = ItemPath::new_debug(item_path);
 
-                                        if let AssocItemKind::Fn{..} = item.kind {
-                                            let kind = ItemKind::new_function();
-    
-                                            let item_id = items.add_item(vm,kind,path,local_id);
-                                            impl_list.push((item.ident.as_str().to_owned(),item_id));
-                                        } else {
-                                            // todo
+                                        match item.kind {
+                                            AssocItemKind::Fn{..} => {
+                                                let kind = ItemKind::new_function();
+                                                let item_id = items.add_item(vm,kind,path,local_id);
+                                                impl_list_fn.push((item.ident.as_str().to_owned(),item_id));
+                                            }
+                                            AssocItemKind::Type => {
+                                                //let kind = ItemKind::new_associated_type();
+                                                //let item_id = items.add_item(vm,kind,path,local_id);
+                                                impl_list_ty.push((item.ident.as_str().to_owned(),local_id));
+                                            }
+                                            _ => () // constants unhandled
                                         }
                                     }
-
                                     
                                     impl_items.push(ImplItem{
                                         subject,
-                                        children: impl_list
+                                        children_fn: impl_list_fn,
+                                        children_ty: impl_list_ty
                                     });
                                 }
                                 _ => panic!("can't handle item kind {:?}",item.kind)
@@ -267,10 +280,16 @@ impl<'vm> RustCWorker<'vm> {
 
                         // fill impls
                         for impl_item in impl_items {
+                            let impl_assoc_tys: Vec<_> = impl_item.children_ty.into_iter().map(|(name,local_id)| {
+                                let ty = tcx.type_of(local_id).skip_binder();
+                                let ty = vm.types.type_from_rustc(ty, &ctx);
+                                (name,ty)
+                            }).collect();
+
                             match impl_item.subject {
                                 ImplSubject::Inherent(ty) => {
                                     let ty = vm.types.type_from_rustc(ty, &ctx);
-                                    ty.add_impl(this_crate,impl_item.children);
+                                    ty.add_impl(this_crate,impl_item.children_fn,impl_assoc_tys);
                                 }
                                 ImplSubject::Trait(trait_ref) => {
                                     let trait_did = trait_ref.def_id;
@@ -288,7 +307,7 @@ impl<'vm> RustCWorker<'vm> {
                                     // TODO convert all the subs and use them in lookups instead?
                                     let impl_for = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
-                                    trait_item.add_trait_impl(impl_for,this_crate, impl_item.children);
+                                    trait_item.add_trait_impl(impl_for,this_crate,impl_item.children_fn,impl_assoc_tys);
                                 }
                             }
                         }

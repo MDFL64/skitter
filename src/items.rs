@@ -93,7 +93,7 @@ impl<'vm> CrateItems<'vm> {
                     return entry.id;
                 }
             }
-            panic!("lookup for crate failed: {}",crate_name.as_str());
+            panic!("lookup for crate failed: {} {}",crate_num,crate_name.as_str());
         })
     }
 }
@@ -162,7 +162,7 @@ pub struct Item<'vm> {
 
 impl<'vm> std::fmt::Debug for Item<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Item").finish()
+        f.debug_struct("Item").field("path", &self.path).finish()
     }
 }
 
@@ -186,20 +186,30 @@ pub enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
-        parent_trait: Option<(ItemId,String)>
+        parent_trait: Option<TraitInfo>
     },
     Adt{
         fields: OnceLock<Vec<Type<'vm>>>
     },
     Trait{
         impl_list: RwLock<Vec<TraitImpl<'vm>>>
+    },
+    AssociatedType{
+        parent_trait: TraitInfo
     }
+}
+
+/// Always refers to a trait item in the same crate.
+pub struct TraitInfo {
+    pub trait_id: ItemId,
+    pub ident: String
 }
 
 pub struct TraitImpl<'vm> {
     for_types: Vec<Sub<'vm>>,
     crate_id: CrateId,
-    child_items: Vec<(String,ItemId)>
+    child_fn_items: Vec<(String,ItemId)>,
+    child_tys: Vec<(String,Type<'vm>)>,
 }
 
 impl<'vm> ItemKind<'vm> {
@@ -211,11 +221,23 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_function_with_trait(trait_item: ItemId, ident: String) -> Self {
+    pub fn new_function_with_trait(trait_id: ItemId, ident: String) -> Self {
         Self::Function{
             ir: Default::default(),
             mono_instances: Default::default(),
-            parent_trait: Some((trait_item,ident))
+            parent_trait: Some(TraitInfo{
+                trait_id,
+                ident
+            })
+        }
+    }
+
+    pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
+        Self::AssociatedType{
+            parent_trait: TraitInfo{
+                trait_id,
+                ident
+            }
         }
     }
 
@@ -252,11 +274,13 @@ impl<'vm> Item<'vm> {
             panic!("item kind mismatch");
         };
 
-        if let Some((parent_trait,ident)) = parent_trait {
+        if let Some(trait_info) = parent_trait {
             let crate_items = self.vm.get_crate_items(self.crate_id);
-            let trait_item = crate_items.get(*parent_trait);
-            let resolved_func = trait_item.find_trait_impl(subs,ident);
-            return resolved_func.get_ir(&[]); // <- subs shouldn't be needed
+            let trait_item = crate_items.get(trait_info.trait_id);
+            let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
+            if let Some(resolved_func) = resolved_func {
+                return resolved_func.get_ir(&[]); // <- subs shouldn't be needed here (but might in bc generation!)
+            }
         }
 
         loop {
@@ -298,7 +322,7 @@ impl<'vm> Item<'vm> {
         fields.set(new_fields).ok();
     }
 
-    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, crate_id: CrateId, child_items: Vec<(String,ItemId)>) {
+    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -307,11 +331,41 @@ impl<'vm> Item<'vm> {
         impl_list.push(TraitImpl{
             for_types,
             crate_id,
-            child_items
+            child_fn_items,
+            child_tys
         });
     }
 
-    pub fn find_trait_impl(&self, subs: &[Sub<'vm>], member_name: &str) -> &'vm Item {
+    pub fn resolve_associated_ty(&self, subs: &[Sub<'vm>]) -> Type<'vm> {
+        let ItemKind::AssociatedType{parent_trait} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let crate_items = self.vm.get_crate_items(self.crate_id);
+        let trait_item = crate_items.get(parent_trait.trait_id);
+
+        let ItemKind::Trait{impl_list} = &trait_item.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let impl_list = impl_list.read().unwrap();
+
+        for candidate in impl_list.iter() {
+            if check_types_match(&candidate.for_types,subs) {
+                for (child_name,child_ty) in candidate.child_tys.iter() {
+                    if *child_name == parent_trait.ident {
+                        return *child_ty;
+                    }
+                }
+                println!("{:?}::{} for {:?}",trait_item.path,parent_trait.ident,subs);
+                panic!("trait ty lookup failed (no field)");
+            }
+        }
+        println!("{:?}::{} for {:?}",trait_item.path,parent_trait.ident,subs);
+        panic!("trait ty lookup failed (no impl)");
+    }
+
+    pub fn find_trait_fn(&self, subs: &[Sub<'vm>], member_name: &str) -> Option<&'vm Item> {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -321,17 +375,18 @@ impl<'vm> Item<'vm> {
         for candidate in impl_list.iter() {
             if check_types_match(&candidate.for_types,subs) {
                 let crate_items = self.vm.get_crate_items(candidate.crate_id);
-                for (child_name,child_item) in candidate.child_items.iter() {
+                for (child_name,child_item) in candidate.child_fn_items.iter() {
                     if child_name == member_name {
-                        return crate_items.get(*child_item);
+                        return Some(crate_items.get(*child_item));
                     }
                 }
-                println!("{:?}::{} for {:?}",self.path,member_name,subs);
-                panic!("trait lookup failed (no field)");
+                //println!("{:?}::{} for {:?}",self.path,member_name,subs);
+                //panic!("trait fn lookup failed (no field)");
             }
         }
-
-        panic!("trait lookup failed (no impl)");
+        //println!("{:?}::{} for {:?}",self.path,member_name,subs);
+        //panic!("trait fn lookup failed (no impl)");
+        None
     }
 }
 

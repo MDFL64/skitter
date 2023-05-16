@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::{Mutex, OnceLock, RwLock}};
 
 use ahash::AHashMap;
-use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject};
+use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject, AliasKind};
 use rustc_hir::def_id::DefId;
 
 use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, Item, CrateId, ItemId}};
@@ -92,6 +92,15 @@ impl<'vm> Type<'vm> {
                 });
                 vm.types.intern(new_ty, vm)
             }
+            TypeKind::AssociatedType(assoc_ty) => {
+                // todo gadt's ???
+
+                let new_subs: Vec<_> = assoc_ty.subs.iter().map(|field| {
+                    field.sub(subs)
+                }).collect();
+
+                assoc_ty.item.resolve_associated_ty(&new_subs)
+            }
             // These types never accept subs.
             TypeKind::Int(..) |
             TypeKind::Float(_) |
@@ -101,14 +110,14 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn add_impl(&self, crate_id: CrateId, children: Vec<(String,ItemId)>) {
+    pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
         if self.kind().is_dummy() {
             //println!("skip impl {:?}",self.kind());
             return;
         }
 
         let mut impl_table = self.0.impl_table.write().unwrap();
-        for (name,item_id) in children {
+        for (name,item_id) in child_fn_items {
             let old = impl_table.insert(name,(crate_id,item_id));
             assert!(old.is_none());
         }
@@ -235,8 +244,16 @@ impl<'vm> TypeContext<'vm> {
                 let item_with_subs = self.def_from_rustc(*did,subs,ctx);
                 TypeKind::FunctionDef(item_with_subs)
             }
-            TyKind::Alias(_,_) => {
-                TypeKind::Alias
+            TyKind::Alias(alias_kind,alias_ty) => {
+                match alias_kind {
+                    AliasKind::Projection => {
+                        let item_with_subs = self.def_from_rustc(alias_ty.def_id,alias_ty.substs,ctx);
+                        TypeKind::AssociatedType(item_with_subs)
+                    }
+                    AliasKind::Opaque => {
+                        panic!("todo opaque type {:?} / {:?}",alias_kind,alias_ty);
+                    }
+                }
             }
             TyKind::Foreign(_) => {
                 TypeKind::Foreign
@@ -283,6 +300,7 @@ impl<'vm> TypeContext<'vm> {
         if let Some(last_elem) = in_path.data.last() {
             match last_elem.data {
                 DefPathData::ValueNs(_) => Some(ItemPath::new_value(in_path.to_string_no_crate_verbose())),
+                DefPathData::TypeNs(_) => Some(ItemPath::new_type(in_path.to_string_no_crate_verbose())),
                 _ => panic!("? {:?}",last_elem.data)
             }
         } else {
@@ -296,6 +314,7 @@ impl<'vm> TypeContext<'vm> {
         } else {
             let def_path = ctx.tcx.def_path(did);
             if let Some(item_path) = Self::path_from_rustc(&def_path) {
+                assert!(did.krate != rustc_hir::def_id::LOCAL_CRATE);
                 let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
                 let crate_items = ctx.vm.get_crate_items(trait_crate_id);
     

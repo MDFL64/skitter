@@ -2,7 +2,6 @@ use colosseum::sync::Arena;
 
 use std::sync::RwLock;
 use std::sync::atomic::Ordering;
-use crate::cli::CliArgs;
 use crate::hir_compiler::HirCompiler;
 use crate::items::CrateId;
 use crate::items::CrateItems;

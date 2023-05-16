@@ -151,6 +151,10 @@ pub struct IRFunctionBuilder<'vm,'tcx> {
 
 impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
     pub fn build(ctx: RustCContext<'vm,'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
+        if ctx.vm.is_verbose {
+            println!("converting ir for {:?}",func_id);
+        }
+
         let builder = Self{
             ctx,
             func_id

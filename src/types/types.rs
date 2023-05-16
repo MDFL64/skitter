@@ -20,7 +20,7 @@ pub enum TypeKind<'vm> {
 
     FunctionDef(ItemWithSubs<'vm>),
     Adt(ItemWithSubs<'vm>),
-    Alias, // todo
+    AssociatedType(ItemWithSubs<'vm>),
     Foreign,
     Dynamic,
     FunctionPointer,

@@ -32,7 +32,6 @@ mod rustc_worker;
 use std::process;
 
 use clap::Parser;
-use rustc_worker::RustCWorker;
 use vm::VM;
 
 use crate::{items::{ItemPath, ExternCrate}};

@@ -163,6 +163,11 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 self.out_bc.push(bytecode_select::literal(*n, expr_ty.layout().assert_size(), dst_slot));
                 dst_slot
             }
+            ExprKind::LiteralVoid => {
+                dst_slot.unwrap_or_else(|| {
+                    Slot::DUMMY
+                })
+            }
             ExprKind::Unary(op, arg) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr_ty)
@@ -550,7 +555,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 dst_slot
             }
-            _ => panic!("expr {:?}",expr.kind)
+            _ => panic!("todo lower expr {:?}",expr.kind)
         }
     }
 
