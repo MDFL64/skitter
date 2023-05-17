@@ -52,8 +52,12 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
         let ret_slot = compiler.stack.alloc(out_ty);
         assert_eq!(ret_slot.index(),0);
-        for param in &ir.params {
-            compiler.alloc_pattern(param);
+        let param_slots: Vec<Slot> = ir.params.iter().map(|pat| {
+            compiler.alloc_pattern(pat)
+        }).collect();
+
+        for (pat,slot) in ir.params.iter().zip(param_slots) {
+            compiler.bind_pattern(pat, slot, false);
         }
 
         compiler.lower_expr(ir.root_expr,Some(Slot::new(0)));
@@ -103,6 +107,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 if let Some(init) = init {
                     self.lower_expr(*init, Some(dst_slot));
                 }
+                self.bind_pattern(pattern, dst_slot, false);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -617,7 +622,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                                 self.out_bc.push(Instr::SlotAddrOffset{ out: index_slot, arg: base_slot, offset: index_slot });
                             }
                             Place::Ptr(ptr_slot, offset) => {
-                                self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, offset));
+                                self.out_bc.push(Instr::PointerOffset3(index_slot, ptr_slot, offset));
                             }
                         }
                     }
@@ -630,7 +635,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                             assert_eq!(offset,0);
                             let elem_count = ptr_slot.offset_by(POINTER_SIZE.bytes());
                             self.out_bc.push(Instr::IndexCalcDyn{ arg_out: index_slot, elem_size, elem_count });
-                            self.out_bc.push(Instr::PointerOffset(index_slot, ptr_slot, 0));
+                            self.out_bc.push(Instr::PointerOffset3(index_slot, ptr_slot, 0));
                         } else {
                             panic!("invalid local(?!) slice index");
                         }
@@ -673,22 +678,27 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     fn alloc_pattern(&mut self, pat: &Pattern<'vm>) -> Slot {
         let ty = self.apply_subs(pat.ty);
         let slot = self.stack.alloc(ty);
-
-        self.bind_pattern(pat, slot);
         slot
     }
 
-    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot) {
+    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot, copy_values: bool) {
         match &pat.kind {
-            PatternKind::LocalBinding(var_id,mode) => {
+            PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
                 match mode {
                     BindingMode::Value => {
-                        println!("val {:?}",slot);
-                        self.locals.push((*var_id,slot));
+                        // copy values if there are possible aliases
+                        if copy_values || sub_pattern.is_some() {
+                            let ty = self.apply_subs(pat.ty);
+                            let var_slot = self.stack.alloc(ty);
+                            if let Some(instr) = bytecode_select::copy(var_slot, slot, ty.layout().assert_size()) {
+                                self.out_bc.push(instr);
+                            }
+                            self.locals.push((*local_id,var_slot));
+                        } else {
+                            self.locals.push((*local_id,slot));
+                        }
                     }
                     BindingMode::Ref => {
-                        println!("ref {:?}",slot);
-
                         let ty = self.apply_subs(pat.ty);
                         assert!(ty.layout().is_sized()); // todo???
                         // NOTE: mutability here may not be correct!
@@ -696,21 +706,65 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         let var_slot = self.stack.alloc(ref_ty);
 
                         self.out_bc.push(Instr::SlotAddr(var_slot, slot));
-                        self.locals.push((*var_id,var_slot));
+                        self.locals.push((*local_id,var_slot));
                     }
+                }
+                if let Some(sub_pattern) = sub_pattern {
+                    // copy values if there are possible aliases
+                    self.bind_pattern(sub_pattern, slot, true);
                 }
             }
             PatternKind::Struct { fields } => {
-                println!("struct {:?}",slot);
                 let layout = self.apply_subs(pat.ty).layout();
 
                 for field in fields {
                     let offset = layout.field_offsets[field.field as usize];
-                    self.bind_pattern(&field.pattern, slot.offset_by(offset));
+                    self.bind_pattern(&field.pattern, slot.offset_by(offset),copy_values);
                 }
             }
+            PatternKind::DeRef { sub_pattern } => {
+                self.bind_pattern_ref(sub_pattern, slot, 0);
+            }
             PatternKind::Hole => (),
-            _ => panic!("pat {:?}",pat.kind)
+        }
+    }
+
+    fn bind_pattern_ref(&mut self, pat: &Pattern<'vm>, ref_slot: Slot, ref_offset: i32) {
+        match &pat.kind {
+            PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
+                match mode {
+                    BindingMode::Value => {
+                        let ty = self.apply_subs(pat.ty);
+                        let var_slot = self.stack.alloc(ty);
+                        if let Some(instr) = bytecode_select::copy_from_ptr(var_slot, ref_slot, ty.layout().assert_size(), ref_offset) {
+                            self.out_bc.push(instr);
+                        }
+                        self.locals.push((*local_id,var_slot));
+                    }
+                    BindingMode::Ref => {
+                        let ty = self.apply_subs(pat.ty);
+                        assert!(ty.layout().is_sized()); // todo???
+                        // NOTE: mutability here may not be correct!
+                        let ref_ty = ty.ref_to(Mutability::Mut);
+                        let var_slot = self.stack.alloc(ref_ty);
+
+                        self.out_bc.push(Instr::PointerOffset2(var_slot, ref_slot, ref_offset));
+                        self.locals.push((*local_id,var_slot));
+                    }
+                }
+                if let Some(sub_pattern) = sub_pattern {
+                    self.bind_pattern_ref(sub_pattern, ref_slot, ref_offset);
+                }
+            }
+            PatternKind::Struct { fields } => {
+                let layout = self.apply_subs(pat.ty).layout();
+
+                for field in fields {
+                    let offset = layout.field_offsets[field.field as usize];
+                    self.bind_pattern_ref(&field.pattern, ref_slot,offset as i32);
+                }
+            }
+            _ => panic!("pat ref {:?}",pat)
         }
     }
 

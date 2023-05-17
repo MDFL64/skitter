@@ -2,6 +2,7 @@
 
 use std::str::FromStr;
 
+use clap::builder::TypedValueParser;
 use rustc_middle::thir;
 use rustc_middle::thir::Thir;
 use rustc_hir::def_id::LocalDefId;
@@ -98,9 +99,16 @@ pub enum ExprKind<'vm> {
 
 #[derive(Debug)]
 pub enum PatternKind<'vm> {
-    LocalBinding(u32,BindingMode),
-    Struct{
+    LocalBinding {
+        local_id: u32,
+        mode: BindingMode,
+        sub_pattern: Option<Box<Pattern<'vm>>>
+    },
+    Struct {
         fields: Vec<FieldPattern<'vm>>
+    },
+    DeRef{
+        sub_pattern: Box<Pattern<'vm>>
     },
     Hole
 }
@@ -453,17 +461,21 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                 return self.pattern(subpattern);
             }
             thir::PatKind::Binding{ref subpattern, ref var, mode,..} => {
-                assert!(subpattern.is_none());
                 let mode = match mode {
                     rustc_middle::thir::BindingMode::ByValue => BindingMode::Value,
                     rustc_middle::thir::BindingMode::ByRef(_) => BindingMode::Ref,
                 };
                 let hir_id = var.0;
-                // will probably not hold true for closures
+                // should hold true, even for closures? when are we ever going
+                // to bind a variable that doesn't belong to our current function?
                 assert_eq!(hir_id.owner.def_id,self.func_id);
 
                 let local_id = hir_id.local_id.as_u32();
-                PatternKind::LocalBinding(local_id,mode)
+                PatternKind::LocalBinding{
+                    local_id,
+                    mode,
+                    sub_pattern: subpattern.as_ref().map(|pat| Box::new(self.pattern(&pat)))
+                }
             }
             thir::PatKind::Leaf{ref subpatterns} => {
                 let fields: Vec<_> = subpatterns.iter().map(|child| {
@@ -473,6 +485,11 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     }
                 }).collect();
                 PatternKind::Struct { fields }
+            }
+            thir::PatKind::Deref{ref subpattern} => {
+                PatternKind::DeRef{
+                    sub_pattern: Box::new(self.pattern(subpattern))
+                }
             }
             thir::PatKind::Wild => PatternKind::Hole,
             _ => panic!("pattern kind {:?}",old.kind)

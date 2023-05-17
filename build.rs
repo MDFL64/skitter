@@ -360,11 +360,17 @@ fn write_exec_match() {
         let res = stack.add(arg.index()) as usize + offset;
         write_stack(stack, *out, res);
     }
-    Instr::PointerOffset(arg_out,arg_2,offset_n) => {
+    Instr::PointerOffset3(arg_out,arg_2,offset_n) => {
         let offset_1: usize = read_stack(stack, *arg_out);
         let offset_2: usize = read_stack(stack, *arg_2);
 
         let res = offset_1 + offset_2 + *offset_n as usize;
+        write_stack(stack, *arg_out, res);
+    }
+    Instr::PointerOffset2(arg_out,arg_2,offset_n) => {
+        let offset_1: usize = read_stack(stack, *arg_2);
+
+        let res = offset_1 + *offset_n as usize;
         write_stack(stack, *arg_out, res);
     }
     Instr::IndexCalc { arg_out, elem_size, elem_count } => {

@@ -273,7 +273,8 @@ pub enum Instr<'vm> {
 
     SlotAddr(Slot, Slot),
 
-    PointerOffset(Slot, Slot, i32),
+    PointerOffset3(Slot, Slot, i32),
+    PointerOffset2(Slot, Slot, i32),
     // name the fields since these are less straightforward
     SlotAddrOffset{out: Slot, arg: Slot, offset: Slot},
     IndexCalc{arg_out: Slot, elem_size: u32, elem_count: u32},
@@ -524,7 +525,8 @@ impl<'vm> Instr<'vm> {
 
             Instr::SlotAddr(x,_) => Some(x),
             Instr::SlotAddrOffset{out,..} => Some(out),
-            Instr::PointerOffset(x,_,_) => Some(x),
+            Instr::PointerOffset3(x,_,_) => Some(x),
+            Instr::PointerOffset2(x,_,_) => Some(x),
 
             Instr::IndexCalc{..} |
             Instr::IndexCalcDyn {..} => None,
