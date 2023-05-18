@@ -1,6 +1,6 @@
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
-use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt, BindingMode};
+use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt, BindingMode, BinaryOp};
 use crate::types::{Type, TypeKind, Sub, ItemWithSubs, Mutability};
 use crate::vm::Function;
 use crate::vm::instr::Instr;
@@ -57,7 +57,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
         }).collect();
 
         for (pat,slot) in ir.params.iter().zip(param_slots) {
-            compiler.bind_pattern(pat, slot, false);
+            compiler.bind_pattern(pat, slot, false, None);
         }
 
         compiler.lower_expr(ir.root_expr,Some(Slot::new(0)));
@@ -107,7 +107,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 if let Some(init) = init {
                     self.lower_expr(*init, Some(dst_slot));
                 }
-                self.bind_pattern(pattern, dst_slot, false);
+                self.bind_pattern(pattern, dst_slot, false, None);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -407,10 +407,10 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     self.lower_expr(*value, Some(loop_slot));
                 }
 
-                let break_index = self.out_bc.len();
+                let break_index = self.skip_instr(); //self.out_bc.len();
                 self.loop_breaks.push(BreakInfo{loop_id,break_index});
 
-                self.out_bc.push(Instr::Bad);
+                //self.out_bc.push(Instr::Bad);
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
@@ -560,6 +560,24 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 dst_slot
             }
+            ExprKind::Let{ pattern, init } => {
+                // the bool result
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr_ty)
+                });
+
+                // allocate space for our value, to avoid aliasing other variables
+                let value_slot = self.stack.alloc(self.expr_ty(*init));
+                self.lower_expr(*init, Some(value_slot));
+
+                let refutable = self.bind_pattern(pattern, value_slot, false, Some(dst_slot));
+
+                if !refutable {
+                    self.out_bc.push(Instr::I8_Const(dst_slot,1));
+                }
+
+                dst_slot
+            }
             _ => panic!("todo lower expr {:?}",expr.kind)
         }
     }
@@ -681,7 +699,10 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
         slot
     }
 
-    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot, copy_values: bool) {
+    /// Use to both setup variable bindings AND generate pattern matching code.
+    /// The returned value indicates whether the pattern is refutable.
+    /// If not, match_result_slot will NOT be written to.
+    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot, copy_values: bool, match_result_slot: Option<Slot>) -> bool {
         match &pat.kind {
             PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
                 match mode {
@@ -711,25 +732,54 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 }
                 if let Some(sub_pattern) = sub_pattern {
                     // copy values if there are possible aliases
-                    self.bind_pattern(sub_pattern, slot, true);
+                    self.bind_pattern(sub_pattern, slot, true, match_result_slot)
+                } else {
+                    false
                 }
             }
             PatternKind::Struct { fields } => {
                 let layout = self.apply_subs(pat.ty).layout();
 
+                let mut jump_gaps = Vec::new();
+
                 for field in fields {
                     let offset = layout.field_offsets[field.field as usize];
-                    self.bind_pattern(&field.pattern, slot.offset_by(offset),copy_values);
+                    let refutable = self.bind_pattern(&field.pattern, slot.offset_by(offset),copy_values,match_result_slot);
+
+                    if refutable && match_result_slot.is_some() {
+                        jump_gaps.push(self.skip_instr());
+                    }
                 }
+
+                if let Some(match_result_slot) = match_result_slot {
+                    for gap_index in jump_gaps.iter() {
+                        let gap_offset = -self.get_jump_offset(*gap_index);
+                        self.out_bc[*gap_index] = Instr::JumpF(gap_offset,match_result_slot);
+                    }
+                }
+
+                jump_gaps.len() > 0
             }
             PatternKind::DeRef { sub_pattern } => {
-                self.bind_pattern_ref(sub_pattern, slot, 0);
+                self.bind_pattern_ref(sub_pattern, slot, 0, match_result_slot)
             }
-            PatternKind::Hole => (),
+            PatternKind::LiteralValue(n) => {
+                // rufutable pattern, should have a result
+                let match_result_slot = match_result_slot.unwrap();
+
+                let size = pat.ty.layout().assert_size();
+                let lit_slot = self.stack.alloc(pat.ty);
+                self.out_bc.push(bytecode_select::literal(*n, size, lit_slot));
+                let (cmp_ctor,_) = bytecode_select::binary(BinaryOp::Eq, pat.ty);
+                self.out_bc.push(cmp_ctor(match_result_slot,slot,lit_slot));
+                true
+            } 
+            PatternKind::Hole => false,
         }
     }
 
-    fn bind_pattern_ref(&mut self, pat: &Pattern<'vm>, ref_slot: Slot, ref_offset: i32) {
+    /// Use to both setup variable bindings AND generate pattern matching code
+    fn bind_pattern_ref(&mut self, pat: &Pattern<'vm>, ref_slot: Slot, ref_offset: i32, match_result_slot: Option<Slot>) -> bool {
         match &pat.kind {
             PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
                 match mode {
@@ -753,7 +803,9 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     }
                 }
                 if let Some(sub_pattern) = sub_pattern {
-                    self.bind_pattern_ref(sub_pattern, ref_slot, ref_offset);
+                    self.bind_pattern_ref(sub_pattern, ref_slot, ref_offset, match_result_slot)
+                } else {
+                    false
                 }
             }
             PatternKind::Struct { fields } => {
@@ -761,10 +813,12 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 for field in fields {
                     let offset = layout.field_offsets[field.field as usize];
-                    self.bind_pattern_ref(&field.pattern, ref_slot,offset as i32);
+                    self.bind_pattern_ref(&field.pattern, ref_slot,offset as i32, match_result_slot);
                 }
+                false // TODO
             }
-            _ => panic!("pat ref {:?}",pat)
+            PatternKind::Hole | PatternKind::LiteralValue(_) => false, // TODO
+            PatternKind::DeRef {..} => panic!("deref pattern in ref context")
         }
     }
 

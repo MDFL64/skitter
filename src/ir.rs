@@ -8,7 +8,7 @@ use rustc_middle::thir::Thir;
 use rustc_hir::def_id::LocalDefId;
 
 use crate::rustc_worker::RustCContext;
-use crate::types::{Type};
+use crate::types::{Type, TypeKind};
 
 pub struct IRFunction<'vm> {
     pub root_expr: ExprId,
@@ -95,6 +95,8 @@ pub enum ExprKind<'vm> {
 
     Field{ lhs: ExprId, variant: u32, field: u32 },
     Index{ lhs: ExprId, index: ExprId },
+
+    Let{ pattern: Pattern<'vm>, init: ExprId },
 }
 
 #[derive(Debug)]
@@ -110,6 +112,9 @@ pub enum PatternKind<'vm> {
     DeRef{
         sub_pattern: Box<Pattern<'vm>>
     },
+    /// Small literals: integer, float, char, or bool types (same as the ExprKind)
+    LiteralValue(i128),
+
     Hole
 }
 
@@ -445,6 +450,12 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     index: self.expr_id(index),
                 }
             }
+            thir::ExprKind::Let{expr,ref pat} => {
+                ExprKind::Let {
+                    pattern: self.pattern(pat),
+                    init: self.expr_id(expr)
+                }
+            }
 
             _ => panic!("convert {:?}",old.kind)
         };
@@ -456,6 +467,8 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
     }
 
     fn pattern(&self, old: &thir::Pat<'tcx>) -> Pattern<'vm> {
+        let ty = self.ctx.type_from_rustc(old.ty);
+
         let kind = match old.kind {
             thir::PatKind::AscribeUserType{ref subpattern,..} => {
                 return self.pattern(subpattern);
@@ -489,6 +502,17 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
             thir::PatKind::Deref{ref subpattern} => {
                 PatternKind::DeRef{
                     sub_pattern: Box::new(self.pattern(subpattern))
+                }
+            }
+            thir::PatKind::Constant{ref value} => {
+
+                match ty.kind() {
+                    TypeKind::Int(..) | TypeKind::Char | TypeKind::Bool => {
+                        let size = rustc_abi::Size::from_bytes(ty.layout().assert_size());
+                        let bits = value.try_to_bits(size).expect("failed to get const bits");
+                        PatternKind::LiteralValue(bits as i128)
+                    }
+                    _ => panic!("const kind")
                 }
             }
             thir::PatKind::Wild => PatternKind::Hole,
