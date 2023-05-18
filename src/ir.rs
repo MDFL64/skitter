@@ -109,6 +109,9 @@ pub enum PatternKind<'vm> {
     Struct {
         fields: Vec<FieldPattern<'vm>>
     },
+    Or {
+        options: Vec<Pattern<'vm>>
+    },
     DeRef{
         sub_pattern: Box<Pattern<'vm>>
     },
@@ -498,6 +501,12 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     }
                 }).collect();
                 PatternKind::Struct { fields }
+            }
+            thir::PatKind::Or{ref pats} => {
+                let options = pats.iter().map(|child| {
+                    self.pattern(child)
+                }).collect();
+                PatternKind::Or{ options }
             }
             thir::PatKind::Deref{ref subpattern} => {
                 PatternKind::DeRef{

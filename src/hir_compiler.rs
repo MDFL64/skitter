@@ -57,7 +57,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
         }).collect();
 
         for (pat,slot) in ir.params.iter().zip(param_slots) {
-            compiler.bind_pattern(pat, slot, false, None);
+            compiler.match_pattern(pat, slot, None);
         }
 
         compiler.lower_expr(ir.root_expr,Some(Slot::new(0)));
@@ -107,7 +107,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 if let Some(init) = init {
                     self.lower_expr(*init, Some(dst_slot));
                 }
-                self.bind_pattern(pattern, dst_slot, false, None);
+                self.match_pattern(pattern, dst_slot, None);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -570,11 +570,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 let value_slot = self.stack.alloc(self.expr_ty(*init));
                 self.lower_expr(*init, Some(value_slot));
 
-                let refutable = self.bind_pattern(pattern, value_slot, false, Some(dst_slot));
-
-                if !refutable {
-                    self.out_bc.push(Instr::I8_Const(dst_slot,1));
-                }
+                self.match_pattern(pattern, value_slot, Some(dst_slot));
 
                 dst_slot
             }
@@ -700,39 +696,68 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     }
 
     /// Use to both setup variable bindings AND generate pattern matching code.
+    fn match_pattern(&mut self, pat: &Pattern<'vm>, source: Slot, match_result_slot: Option<Slot>) {
+        let refutable = self.match_pattern_internal(pat,Place::Local(source),false,match_result_slot);
+
+        if let Some(match_result_slot) = match_result_slot {
+            if !refutable {
+                self.out_bc.push(Instr::I8_Const(match_result_slot,1));
+            }
+        }
+    }
+    
+    /// If must_copy is true, we must copy values from the source. Otherwise we are free to re-use locals.
     /// The returned value indicates whether the pattern is refutable.
-    /// If not, match_result_slot will NOT be written to.
-    fn bind_pattern(&mut self, pat: &Pattern<'vm>, slot: Slot, copy_values: bool, match_result_slot: Option<Slot>) -> bool {
+    /// If not, match_result_slot will NOT be written to, and the caller must assume the match was successful
+    fn match_pattern_internal(&mut self, pat: &Pattern<'vm>, source: Place, must_copy: bool, match_result_slot: Option<Slot>) -> bool {
         match &pat.kind {
             PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
-                match mode {
-                    BindingMode::Value => {
+                match (mode,source) {
+                    (BindingMode::Value,Place::Local(source_slot)) => {                                
                         // copy values if there are possible aliases
-                        if copy_values || sub_pattern.is_some() {
+                        if must_copy || sub_pattern.is_some() {
                             let ty = self.apply_subs(pat.ty);
-                            let var_slot = self.stack.alloc(ty);
-                            if let Some(instr) = bytecode_select::copy(var_slot, slot, ty.layout().assert_size()) {
+                            let var_slot = self.find_or_alloc_local(*local_id, ty);
+                            if let Some(instr) = bytecode_select::copy(var_slot,source_slot,ty.layout().assert_size()) {
                                 self.out_bc.push(instr);
                             }
-                            self.locals.push((*local_id,var_slot));
                         } else {
-                            self.locals.push((*local_id,slot));
+                            self.assert_local_undef(*local_id);
+                            self.locals.push((*local_id,source_slot));
                         }
                     }
-                    BindingMode::Ref => {
+                    (BindingMode::Value,Place::Ptr(ref_slot,ref_offset)) => {
+                        // copy value from pointer
+                        let ty = self.apply_subs(pat.ty);
+                        let var_slot = self.find_or_alloc_local(*local_id, ty);
+                        if let Some(instr) = bytecode_select::copy_from_ptr(var_slot, ref_slot, ty.layout().assert_size(), ref_offset) {
+                            self.out_bc.push(instr);
+                        }
+                    }
+                    (BindingMode::Ref,Place::Local(source_slot)) => {
+                        // ref to local
                         let ty = self.apply_subs(pat.ty);
                         assert!(ty.layout().is_sized()); // todo???
                         // NOTE: mutability here may not be correct!
                         let ref_ty = ty.ref_to(Mutability::Mut);
-                        let var_slot = self.stack.alloc(ref_ty);
+                        let var_slot = self.find_or_alloc_local(*local_id, ref_ty);
+                        
+                        self.out_bc.push(Instr::SlotAddr(var_slot, source_slot));
+                    }
+                    (BindingMode::Ref,Place::Ptr(ref_slot,ref_offset)) => {
+                        // offset pointer
+                        let ty = self.apply_subs(pat.ty);
+                        assert!(ty.layout().is_sized()); // todo???
+                        // NOTE: mutability here may not be correct!
+                        let ref_ty = ty.ref_to(Mutability::Mut);
+                        let var_slot = self.find_or_alloc_local(*local_id, ref_ty);
 
-                        self.out_bc.push(Instr::SlotAddr(var_slot, slot));
-                        self.locals.push((*local_id,var_slot));
+                        self.out_bc.push(Instr::PointerOffset2(var_slot, ref_slot, ref_offset));
                     }
                 }
                 if let Some(sub_pattern) = sub_pattern {
                     // copy values if there are possible aliases
-                    self.bind_pattern(sub_pattern, slot, true, match_result_slot)
+                    self.match_pattern_internal(sub_pattern, source, true, match_result_slot)
                 } else {
                     false
                 }
@@ -741,12 +766,14 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 let layout = self.apply_subs(pat.ty).layout();
 
                 let mut jump_gaps = Vec::new();
+                let mut result = false;
 
                 for field in fields {
                     let offset = layout.field_offsets[field.field as usize];
-                    let refutable = self.bind_pattern(&field.pattern, slot.offset_by(offset),copy_values,match_result_slot);
+                    let refutable = self.match_pattern_internal(&field.pattern,source.offset_by(offset),must_copy,match_result_slot);
+                    result |= refutable;
 
-                    if refutable && match_result_slot.is_some() {
+                    if refutable && match_result_slot.is_some() && fields.len() > 1 {
                         jump_gaps.push(self.skip_instr());
                     }
                 }
@@ -758,67 +785,70 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     }
                 }
 
-                jump_gaps.len() > 0
+                result
+            }
+            PatternKind::Or { options } => {
+                let mut jump_gaps = Vec::new();
+                let mut result = true;
+
+                assert!(options.len() >= 2);
+
+                for option in options {
+                    // always copy values since a local may appear multiple times
+                    let refutable = self.match_pattern_internal(option,source,true,match_result_slot);
+                    if !refutable {
+                        // irrefutable pattern, no point in testing anything else
+                        result = false;
+                        break;
+                    } else {
+                        jump_gaps.push(self.skip_instr());
+                    }
+                }
+
+                if let Some(match_result_slot) = match_result_slot {
+                    for gap_index in jump_gaps.iter() {
+                        let gap_offset = -self.get_jump_offset(*gap_index);
+                        self.out_bc[*gap_index] = Instr::JumpT(gap_offset,match_result_slot);
+                    }
+                } else {
+                    panic!("or-pattern should always have a result slot");
+                }
+
+                result
             }
             PatternKind::DeRef { sub_pattern } => {
-                self.bind_pattern_ref(sub_pattern, slot, 0, match_result_slot)
+                if let Place::Local(source_slot) = source {
+                    // must_copy is probably irrelevant at this stage
+                    self.match_pattern_internal(sub_pattern, Place::Ptr(source_slot,0),true,match_result_slot)
+                } else {
+                    panic!("deref pattern in ref context?");
+                }
             }
             PatternKind::LiteralValue(n) => {
                 // rufutable pattern, should have a result
                 let match_result_slot = match_result_slot.unwrap();
 
+                let val_slot = match source {
+                    Place::Local(slot) => slot,
+                    Place::Ptr(ref_slot,ref_offset) => {
+                        let ty = self.apply_subs(pat.ty);
+                        let slot = self.stack.alloc(ty);
+                        if let Some(instr) = bytecode_select::copy_from_ptr(slot, ref_slot, ty.layout().assert_size(), ref_offset) {
+                            self.out_bc.push(instr);
+                        }
+                        slot
+                    }
+                };
+
                 let size = pat.ty.layout().assert_size();
                 let lit_slot = self.stack.alloc(pat.ty);
                 self.out_bc.push(bytecode_select::literal(*n, size, lit_slot));
+
                 let (cmp_ctor,_) = bytecode_select::binary(BinaryOp::Eq, pat.ty);
-                self.out_bc.push(cmp_ctor(match_result_slot,slot,lit_slot));
+                self.out_bc.push(cmp_ctor(match_result_slot,val_slot,lit_slot));
                 true
             } 
             PatternKind::Hole => false,
-        }
-    }
-
-    /// Use to both setup variable bindings AND generate pattern matching code
-    fn bind_pattern_ref(&mut self, pat: &Pattern<'vm>, ref_slot: Slot, ref_offset: i32, match_result_slot: Option<Slot>) -> bool {
-        match &pat.kind {
-            PatternKind::LocalBinding{local_id,mode,sub_pattern} => {
-                match mode {
-                    BindingMode::Value => {
-                        let ty = self.apply_subs(pat.ty);
-                        let var_slot = self.stack.alloc(ty);
-                        if let Some(instr) = bytecode_select::copy_from_ptr(var_slot, ref_slot, ty.layout().assert_size(), ref_offset) {
-                            self.out_bc.push(instr);
-                        }
-                        self.locals.push((*local_id,var_slot));
-                    }
-                    BindingMode::Ref => {
-                        let ty = self.apply_subs(pat.ty);
-                        assert!(ty.layout().is_sized()); // todo???
-                        // NOTE: mutability here may not be correct!
-                        let ref_ty = ty.ref_to(Mutability::Mut);
-                        let var_slot = self.stack.alloc(ref_ty);
-
-                        self.out_bc.push(Instr::PointerOffset2(var_slot, ref_slot, ref_offset));
-                        self.locals.push((*local_id,var_slot));
-                    }
-                }
-                if let Some(sub_pattern) = sub_pattern {
-                    self.bind_pattern_ref(sub_pattern, ref_slot, ref_offset, match_result_slot)
-                } else {
-                    false
-                }
-            }
-            PatternKind::Struct { fields } => {
-                let layout = self.apply_subs(pat.ty).layout();
-
-                for field in fields {
-                    let offset = layout.field_offsets[field.field as usize];
-                    self.bind_pattern_ref(&field.pattern, ref_slot,offset as i32, match_result_slot);
-                }
-                false // TODO
-            }
-            PatternKind::Hole | PatternKind::LiteralValue(_) => false, // TODO
-            PatternKind::DeRef {..} => panic!("deref pattern in ref context")
         }
     }
 
@@ -829,6 +859,25 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
             }
         }
         panic!("failed to find local");
+    }
+
+    fn find_or_alloc_local(&mut self, local: u32, ty: Type) -> Slot {
+        for (id,slot) in &self.locals {
+            if *id == local {
+                return *slot;
+            }
+        }
+        let var_slot = self.stack.alloc(ty);
+        self.locals.push((local,var_slot));
+        var_slot
+    }
+
+    fn assert_local_undef(&self, local: u32) {
+        for (id,_) in &self.locals {
+            if *id == local {
+                panic!("assert_local_undef failed");
+            }
+        }
     }
 
     fn skip_instr(&mut self) -> usize {
@@ -842,11 +891,24 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 enum Place {
     Local(Slot),
     /// Pointer with offset
     Ptr(Slot,i32)
+}
+
+impl Place {
+    pub fn offset_by(&self, n: u32) -> Self {
+        match self {
+            Place::Local(slot) => {
+                Place::Local(slot.offset_by(n))
+            }
+            Place::Ptr(slot,offset) => {
+                Place::Ptr(*slot,offset + n as i32)
+            }
+        }
+    }
 }
 
 #[derive(Default)]
