@@ -188,10 +188,10 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let ir = self.item.get_ir(&self.subs);
+            let (ir,new_subs) = self.item.get_ir(&self.subs);
             let path = self.item.path.as_string();
 
-            let bc = HirCompiler::compile(self.item.vm, &ir, &self.subs, path);
+            let bc = HirCompiler::compile(self.item.vm, &ir, &new_subs, path);
             let bc_ref = self.item.vm.alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);

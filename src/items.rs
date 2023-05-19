@@ -1,6 +1,6 @@
-use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash};
+use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, sub_list_to_string, TypeKind}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, sub_list_to_string, TypeKind, ItemWithSubs}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -212,6 +212,7 @@ pub struct TraitInfo {
 
 pub struct TraitImpl<'vm> {
     for_types: Vec<Sub<'vm>>,
+    impl_params: Vec<Sub<'vm>>,
     crate_id: CrateId,
     child_fn_items: Vec<(String,ItemId)>,
     child_tys: Vec<(String,Type<'vm>)>,
@@ -273,7 +274,7 @@ impl<'vm> Item<'vm> {
     }
 
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
-    pub fn get_ir(&self, subs: &[Sub<'vm>]) -> Arc<IRFunction<'vm>> {
+    pub fn get_ir<'a>(&self, subs: &'a [Sub<'vm>]) -> (Arc<IRFunction<'vm>>,Cow<'a,[Sub<'vm>]>) {
         
         let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -284,7 +285,8 @@ impl<'vm> Item<'vm> {
             let trait_item = crate_items.get(trait_info.trait_id);
             let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
             if let Some(resolved_func) = resolved_func {
-                return resolved_func.get_ir(&[]); // <- subs shouldn't be needed here (but might in bc generation!)
+                let (f,s) = resolved_func.item.get_ir(&resolved_func.subs);
+                return (f,Cow::Owned(s.into_owned()));
             }
         }
 
@@ -292,7 +294,7 @@ impl<'vm> Item<'vm> {
             {
                 let ir = ir.lock().unwrap();
                 if let Some(ir) = ir.as_ref() {
-                    return ir.clone();
+                    return (ir.clone(),subs.into());
                 }
             }
 
@@ -331,7 +333,7 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
+    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, impl_params: Vec<Sub<'vm>>, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -339,6 +341,7 @@ impl<'vm> Item<'vm> {
         let mut impl_list = impl_list.write().unwrap();
         impl_list.push(TraitImpl{
             for_types,
+            impl_params,
             crate_id,
             child_fn_items,
             child_tys
@@ -374,7 +377,7 @@ impl<'vm> Item<'vm> {
         panic!("trait ty lookup failed (no impl)");
     }
 
-    pub fn find_trait_fn(&self, subs: &[Sub<'vm>], member_name: &str) -> Option<&'vm Item> {
+    pub fn find_trait_fn(&self, subs: &[Sub<'vm>], member_name: &str) -> Option<ItemWithSubs<'vm>> {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -386,7 +389,10 @@ impl<'vm> Item<'vm> {
                 let crate_items = self.vm.get_crate_items(candidate.crate_id);
                 for (child_name,child_item) in candidate.child_fn_items.iter() {
                     if child_name == member_name {
-                        return Some(crate_items.get(*child_item));
+                        return Some(ItemWithSubs{
+                            item: crate_items.get(*child_item),
+                            subs: trait_subs_remap(subs,&candidate.for_types)
+                        });
                     }
                 }
                 //println!("{:?}::{} for {:?}",self.path,member_name,subs);
@@ -451,5 +457,69 @@ fn types_match<'vm>(a: Type<'vm>, b: Type<'vm>) -> bool {
         _ => {
             panic!("compare types {} == {}",a,b)
         }
+    }
+}
+
+fn trait_subs_remap<'vm>(in_subs: &[Sub<'vm>], trait_subs: &[Sub<'vm>]) -> Vec<Sub<'vm>> {
+
+    let mut remap: Vec<(u32,Type<'vm>)> = Vec::new();
+
+    // WARNING: subs lengths might not match, truncating to the shortest should work but I'm not sure
+    trait_subs_remap_subs(in_subs,trait_subs,&mut remap);
+
+    // todo, see above
+    assert!(in_subs.len() == trait_subs.len());
+
+    if remap.len() > 0 {
+        remap.sort_by_key(|pair| pair.0);
+
+        let mut final_subs = Vec::new();
+
+        for (i,ty) in remap {
+            if (i as usize) < final_subs.len() {
+                final_subs[i as usize] = Sub::Type(ty);
+            } else if (i as usize) == final_subs.len() {
+                final_subs.push(Sub::Type(ty));
+            } else {
+                panic!("~~~");
+            }
+        }
+
+        final_subs
+    } else {
+        Vec::new()
+    }
+}
+
+fn trait_subs_remap_subs<'vm>(in_subs: &[Sub<'vm>], trait_subs: &[Sub<'vm>], remap: &mut Vec<(u32,Type<'vm>)>) {
+    for pair in in_subs.iter().zip(trait_subs) {
+        match pair {
+            (Sub::Type(in_ty),Sub::Type(trait_ty)) => {
+                trait_subs_remap_ty(*in_ty,*trait_ty,remap);
+            }
+            (Sub::Lifetime,Sub::Lifetime) => (),
+            (Sub::Const,Sub::Const) => panic!("todo"),
+            _ => panic!("bad remap")
+        }
+    }
+}
+
+fn trait_subs_remap_ty<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, remap: &mut Vec<(u32,Type<'vm>)>) {
+    match (in_ty.kind(),trait_ty.kind()) {
+        (TypeKind::Adt(in_adt),TypeKind::Adt(trait_adt)) => {
+            trait_subs_remap_subs(&in_adt.subs,&trait_adt.subs,remap);
+        }
+        (TypeKind::Ref(in_ref,_),TypeKind::Ref(trait_ref,_)) => {
+            trait_subs_remap_ty(*in_ref,*trait_ref,remap);
+        }
+        // the important part
+        (_,TypeKind::Param(n)) => {
+            remap.push((*n,in_ty));
+        }
+
+        (TypeKind::Int(..),TypeKind::Int(..)) => (),
+        (TypeKind::Float(..),TypeKind::Float(..)) => (),
+        (TypeKind::Bool,TypeKind::Bool) => (),
+        _ => panic!("HUH? {:?} {:?}",in_ty,trait_ty)
     }
 }

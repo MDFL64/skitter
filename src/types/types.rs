@@ -27,7 +27,8 @@ pub enum TypeKind<'vm> {
     Dynamic,
     FunctionPointer,
 
-    Param(u32)
+    Param(u32),
+    Error
 }
 
 impl<'vm> TypeKind<'vm> {

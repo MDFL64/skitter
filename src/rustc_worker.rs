@@ -314,7 +314,9 @@ impl<'vm> RustCWorker<'vm> {
                                     // TODO convert all the subs and use them in lookups instead?
                                     let impl_for = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
-                                    trait_item.add_trait_impl(impl_for,this_crate,impl_item.children_fn,impl_assoc_tys);
+                                    let dummy = Vec::new();
+
+                                    trait_item.add_trait_impl(impl_for,dummy,this_crate,impl_item.children_fn,impl_assoc_tys);
                                 }
                             }
                         }
