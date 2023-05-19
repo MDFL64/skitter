@@ -50,6 +50,7 @@ pub struct Block {
     pub result: Option<ExprId>,
 }
 
+#[derive(Debug)]
 pub struct MatchArm<'vm> {
     pub pattern: Pattern<'vm>,
     pub expr: ExprId
@@ -603,5 +604,9 @@ impl<'vm> IRFunction<'vm> {
 
     pub fn block(&self, id: BlockId) -> &Block {
         &self.blocks[id.0 as usize]
+    }
+
+    pub fn arm(&self, id: ArmId) -> &MatchArm<'vm> {
+        &self.arms[id.0 as usize]
     }
 }

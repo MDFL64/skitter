@@ -594,6 +594,38 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 dst_slot
             }
+            ExprKind::Match{ arg, arms } => {
+                // the result value
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr_ty)
+                });
+
+                // allocate space for our value, to avoid aliasing other variables
+                let arg_slot = self.stack.alloc(self.expr_ty(*arg));
+                self.lower_expr(*arg, Some(arg_slot));
+
+                // the bool pattern match result slot
+                let bool_ty = self.vm.types.intern(TypeKind::Bool, self.vm);
+                let match_result_slot = self.stack.alloc(bool_ty);
+
+                let mut jump_gaps = Vec::new();
+
+                for arm_id in arms {
+                    let arm = self.in_func.arm(*arm_id);
+                    self.match_pattern(&arm.pattern, arg_slot, Some(match_result_slot));
+                    let check_end_index = self.skip_instr();
+                    self.lower_expr(arm.expr, Some(dst_slot));
+                    jump_gaps.push(self.skip_instr());
+
+                    self.out_bc[check_end_index] = Instr::JumpF(-self.get_jump_offset(check_end_index),match_result_slot);
+                }
+
+                for gap_index in jump_gaps {
+                    self.out_bc[gap_index] = Instr::Jump(-self.get_jump_offset(gap_index));
+                }
+
+                dst_slot
+            }
             _ => panic!("todo lower expr {:?}",expr.kind)
         }
     }

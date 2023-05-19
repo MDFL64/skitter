@@ -51,17 +51,6 @@ fn main() {
         test::test(&args.file_name);
     }
 
-    // used only to locate core lib sources
-    let rust_sysroot = if args.core {
-        Some(process::Command::new("rustc")
-            .arg("--print=sysroot")
-            .current_dir(".")
-            .output()
-            .unwrap())
-    } else {
-        None
-    };
-
     let mut vm = VM::new();
     vm.is_verbose = args.verbose;
     
@@ -111,6 +100,7 @@ fn set_panic_handler() {
     }));
 }
 
+// currently used only to locate core lib sources
 fn get_sysroot() -> String {
     let out = process::Command::new("rustc")
         .arg("--print=sysroot")
