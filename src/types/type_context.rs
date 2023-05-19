@@ -36,6 +36,16 @@ impl<'vm> Type<'vm> {
         self.1.types.intern(ref_kind, self.1)
     }
 
+    /// Check if a type is sized.
+    /// This must exist because without it, we would need to recursively generate layouts,
+    /// which is a non-terminating loop for self-referencing types.
+    pub fn is_sized(&self) -> bool {
+        match self.kind() {
+            TypeKind::Slice(_) => false,
+            _ => true
+        }
+    }
+
     pub fn sub(&self, subs: &[Sub<'vm>]) -> Self {
         if subs.len() == 0 {
             return *self;

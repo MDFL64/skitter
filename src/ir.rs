@@ -16,7 +16,8 @@ pub struct IRFunction<'vm> {
     pub return_ty: Type<'vm>,
     exprs: Vec<Expr<'vm>>,
     stmts: Vec<Stmt<'vm>>,
-    blocks: Vec<Block>
+    blocks: Vec<Block>,
+    arms: Vec<MatchArm<'vm>>
 }
 
 #[derive(Debug,Clone,Copy)]
@@ -26,11 +27,15 @@ pub struct StmtId(u32);
 #[derive(Debug,Clone,Copy)]
 pub struct ExprId(u32);
 
+#[derive(Debug,Clone,Copy)]
+pub struct ArmId(u32);
+
 pub struct Expr<'vm> {
     pub kind: ExprKind<'vm>,
     pub ty: Type<'vm>
 }
 
+#[derive(Debug)]
 pub enum Stmt<'vm> {
     Expr(ExprId),
     Let{
@@ -43,6 +48,11 @@ pub enum Stmt<'vm> {
 pub struct Block {
     pub stmts: Vec<StmtId>,
     pub result: Option<ExprId>,
+}
+
+pub struct MatchArm<'vm> {
+    pub pattern: Pattern<'vm>,
+    pub expr: ExprId
 }
 
 #[derive(Debug)]
@@ -97,6 +107,7 @@ pub enum ExprKind<'vm> {
     Index{ lhs: ExprId, index: ExprId },
 
     Let{ pattern: Pattern<'vm>, init: ExprId },
+    Match{arg: ExprId, arms: Vec<ArmId>}
 }
 
 #[derive(Debug)]
@@ -188,9 +199,6 @@ pub struct IRFunctionBuilder<'vm,'tcx> {
 
 impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
     pub fn build(ctx: RustCContext<'vm,'tcx>, func_id: LocalDefId, root: thir::ExprId, thir: &Thir<'tcx>) -> IRFunction<'vm> {
-        if ctx.vm.is_verbose {
-            println!("converting ir for {:?}",func_id);
-        }
 
         let builder = Self{
             ctx,
@@ -198,6 +206,16 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
         };
 
         let root_expr = builder.expr_id(root);
+
+        let arms = thir.arms.iter().map(|arm| {
+            assert!(arm.guard.is_none());
+            let pattern = builder.pattern(&arm.pattern);
+            let expr = builder.expr_id(arm.body);
+            MatchArm{
+                pattern,
+                expr
+            }
+        }).collect();
 
         let exprs = thir.exprs.iter().map(|old| builder.expr(old)).collect();
         let stmts = thir.stmts.iter().map(|old| builder.stmt(old)).collect();
@@ -229,7 +247,8 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
             root_expr,
             exprs,
             stmts,
-            blocks
+            blocks,
+            arms
         }
     }
 
@@ -412,6 +431,14 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
             }
             thir::ExprKind::Loop{body} => {
                 ExprKind::Loop(self.expr_id(body))
+            }
+            thir::ExprKind::Match{scrutinee,ref arms} => {
+
+                let arms = arms.iter().map(|arm_id| {
+                    ArmId(arm_id.as_u32())
+                }).collect();
+
+                ExprKind::Match{arg: self.expr_id(scrutinee), arms}
             }
 
             thir::ExprKind::Call{ty,fun,ref args,..} => {

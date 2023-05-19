@@ -449,15 +449,30 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         dst_slot
                     }
                     Place::Ptr(src_slot, offset) => {
-                        assert_eq!(offset,0);
+                        //println!("? {:?}",expr_ty);
 
-                        if let Some(dst_slot) = dst_slot {
-                            self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, expr_ty.layout().assert_size()).unwrap());
+                        let ref_size = expr_ty.layout().assert_size();
 
+                        if offset != 0 {
+                            // todo fat pointers
+                            assert!(ref_size == POINTER_SIZE.bytes());
+
+                            let dst_slot = dst_slot.unwrap_or_else(|| {
+                                self.stack.alloc(expr_ty)
+                            });
+
+                            self.out_bc.push(Instr::PointerOffset2(dst_slot, src_slot, offset));
                             dst_slot
                         } else {
-                            src_slot
+                            if let Some(dst_slot) = dst_slot {
+                                self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, ref_size).unwrap());
+    
+                                dst_slot
+                            } else {
+                                src_slot
+                            }
                         }
+
                     }
                 }
             }

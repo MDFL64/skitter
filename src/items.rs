@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, sub_list_to_string, TypeKind}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -296,6 +296,10 @@ impl<'vm> Item<'vm> {
                 }
             }
 
+            if self.vm.is_verbose {
+                println!("converting ir for {:?} {:?}",self.path,subs);
+            }
+
             self.vm.build_function_ir(self.crate_id,self.item_id);
         }
     }
@@ -356,7 +360,7 @@ impl<'vm> Item<'vm> {
         let impl_list = impl_list.read().unwrap();
 
         for candidate in impl_list.iter() {
-            if check_types_match(&candidate.for_types,subs) {
+            if subs_match(&candidate.for_types,subs) {
                 for (child_name,child_ty) in candidate.child_tys.iter() {
                     if *child_name == parent_trait.ident {
                         return *child_ty;
@@ -378,7 +382,7 @@ impl<'vm> Item<'vm> {
         let impl_list = impl_list.read().unwrap();
 
         for candidate in impl_list.iter() {
-            if check_types_match(&candidate.for_types,subs) {
+            if subs_match(&candidate.for_types,subs) {
                 let crate_items = self.vm.get_crate_items(candidate.crate_id);
                 for (child_name,child_item) in candidate.child_fn_items.iter() {
                     if child_name == member_name {
@@ -395,6 +399,57 @@ impl<'vm> Item<'vm> {
     }
 }
 
-fn check_types_match<'vm>(a: &[Sub<'vm>], b: &[Sub<'vm>]) -> bool {
-    a == b
+/// Compares types loosely, allowing param types to match anything.
+fn subs_match<'vm>(a: &[Sub<'vm>], b: &[Sub<'vm>]) -> bool {
+
+    if a.len() != b.len() {
+        return false;
+    }
+
+    for pair in a.iter().zip(b) {
+        match pair {
+            (Sub::Type(a),Sub::Type(b)) => {
+                if !types_match(*a,*b) {
+                    return false;
+                }
+            },
+            _ => {
+                if pair.0 != pair.1 {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
+}
+
+/// Compares types loosely, allowing param types to match anything.
+fn types_match<'vm>(a: Type<'vm>, b: Type<'vm>) -> bool {
+    if a == b {
+        return true;
+    }
+
+    match (a.kind(),b.kind()) {
+        (TypeKind::Adt(a),TypeKind::Adt(b)) => {
+            (a.item == b.item) && subs_match(&a.subs, &b.subs)
+        },
+        (TypeKind::Ptr(a_ref,a_mut),TypeKind::Ptr(b_ref,b_mut)) => {
+            (a_mut == b_mut) && types_match(*a_ref, *b_ref)
+        }
+
+        (TypeKind::Param(_),_) | (_,TypeKind::Param(_)) => true,
+
+        (TypeKind::Adt(..),_) | (_,TypeKind::Adt(..)) |
+        (TypeKind::Ptr(..),_) | (_,TypeKind::Ptr(..)) |
+
+        (TypeKind::Bool,_) | (_,TypeKind::Bool) |
+        (TypeKind::Char,_) | (_,TypeKind::Char) |
+        (TypeKind::Never,_) | (_,TypeKind::Never) |
+        (TypeKind::Int(..),_) | (_,TypeKind::Int(..)) |
+        (TypeKind::Float(..),_) | (_,TypeKind::Float(..)) => false,
+        _ => {
+            panic!("compare types {} == {}",a,b)
+        }
+    }
 }

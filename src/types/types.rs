@@ -1,3 +1,5 @@
+use std::fmt::{Display, Write};
+
 use crate::items::Item;
 
 use super::Type;
@@ -99,6 +101,52 @@ impl ArraySize {
             *n
         } else {
             panic!("expected static sized array, got const param");
+        }
+    }
+}
+
+// pretty printing for types
+impl<'vm> Display for Sub<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Sub::Type(ty) => write!(f,"{}",ty),
+            Sub::Lifetime => write!(f,"'_"),
+            Sub::Const => write!(f,"<const>")
+        }
+    }
+}
+
+pub fn sub_list_to_string<'vm>(subs: &[Sub<'vm>]) -> String {
+    let mut res = "<".to_owned();
+    for (i,sub) in subs.iter().enumerate() {
+        if i>0 {
+            res.push(',');
+        }
+        write!(res,"{}",sub).ok();
+    }
+    res.push('>');
+    res
+}
+
+impl<'vm> Display for Type<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind() {
+            TypeKind::Adt(item_with_subs) => {
+                write!(f,"{}",item_with_subs.item.path.as_string())?;
+                if item_with_subs.subs.len() > 0 {
+                    write!(f,"{}",sub_list_to_string(&item_with_subs.subs))?;
+                }
+                Ok(())
+            }
+            TypeKind::Ref(ty,mutability) => {
+                match mutability {
+                    Mutability::Const => write!(f,"&{}",ty),
+                    Mutability::Mut => write!(f,"&mut {}",ty),
+                }
+            }
+            _ => {
+                write!(f,"{:?}",self)
+            }
         }
     }
 }

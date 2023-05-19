@@ -263,9 +263,7 @@ impl<'vm> RustCWorker<'vm> {
                         for item_id in adt_items {
                             let item = items.get(item_id);
 
-                            
                             let adt_def = tcx.adt_def(item.did);
-                            let is_enum = adt_def.is_enum();
 
                             let variant_fields = adt_def.variants().iter().map(|variant| {
                                 variant.fields.iter().map(|field| {

@@ -67,8 +67,7 @@ impl Layout {
             TypeKind::Ptr(ref_ty,_) => {
                 let ptr_size = POINTER_SIZE.bytes();
 
-                let ref_layout = Layout::from(*ref_ty);
-                if ref_layout.is_sized() {
+                if ref_ty.is_sized() {
                     Layout::simple(ptr_size)
                 } else {
                     Self {
