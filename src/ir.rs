@@ -109,6 +109,10 @@ pub enum PatternKind<'vm> {
     Struct {
         fields: Vec<FieldPattern<'vm>>
     },
+    Enum {
+        fields: Vec<FieldPattern<'vm>>,
+        variant_index: u32
+    },
     Or {
         options: Vec<Pattern<'vm>>
     },
@@ -501,6 +505,18 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     }
                 }).collect();
                 PatternKind::Struct { fields }
+            }
+            thir::PatKind::Variant{ref subpatterns, variant_index,..} => {
+                let fields: Vec<_> = subpatterns.iter().map(|child| {
+                    FieldPattern{
+                        field: child.field.as_u32(),
+                        pattern: self.pattern(&child.pattern)
+                    }
+                }).collect();
+                PatternKind::Enum{
+                    fields,
+                    variant_index: variant_index.as_u32()
+                }
             }
             thir::PatKind::Or{ref pats} => {
                 let options = pats.iter().map(|child| {

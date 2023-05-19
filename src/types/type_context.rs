@@ -132,6 +132,14 @@ impl<'vm> Type<'vm> {
         let impl_table = self.0.impl_table.read().unwrap();
         impl_table.get(name).copied()
     }
+
+    pub fn get_adt_discriminator_ty(&self) -> Option<Type<'vm>> {
+        let TypeKind::Adt(ItemWithSubs{item,subs}) = self.kind() else {
+            panic!("get_adt_discriminator_ty: not an adt");
+        };
+        let info = item.get_adt_info();
+        info.discriminator_ty
+    }
 }
 
 impl<'vm> std::fmt::Debug for Type<'vm> {
@@ -360,7 +368,7 @@ impl<'vm> TypeContext<'vm> {
         }
     }
 
-    fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
+    pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
         let mut inner = self.table.lock().unwrap();
         let entry = inner.entry(kind.clone());
 

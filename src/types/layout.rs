@@ -6,7 +6,7 @@ use super::{FloatWidth, ItemWithSubs};
 pub struct Layout {
     pub maybe_size: Option<u32>,
     pub align: u32,
-    pub field_offsets: Vec<u32>
+    pub field_offsets: Vec<Vec<u32>>
 }
 
 impl Layout {
@@ -39,7 +39,7 @@ impl Layout {
             TypeKind::Bool => Layout::simple(1),
             TypeKind::Char => Layout::simple(4),
             TypeKind::Tuple(fields) => {
-                Layout::compound(fields.iter().copied())
+                Layout::compound(std::iter::once(fields.iter().copied()),None)
             }
             TypeKind::Array(elem_ty,count) => {
                 let elem_layout = elem_ty.layout();
@@ -79,13 +79,15 @@ impl Layout {
                 }
             }
             TypeKind::Adt(ItemWithSubs{item,subs}) => {
-                let fields = item.get_adt_fields();
+                let info = item.get_adt_info();
 
-                let fixed_fields = fields.iter().map(|field| {
-                    field.sub(subs)
+                let fixed_fields = info.variant_fields.iter().map(|fields| {
+                    fields.iter().map(|field| {
+                        field.sub(subs)
+                    })
                 });
 
-                Layout::compound(fixed_fields)
+                Layout::compound(fixed_fields,info.discriminator_ty)
             }
             TypeKind::FunctionDef(_) => {
                 Layout::simple(0)
@@ -94,28 +96,42 @@ impl Layout {
         }
     }
 
-    fn compound<'vm>(fields: impl Iterator<Item=Type<'vm>>) -> Self {
-        let mut size = 0;
+    fn compound<'vm>(variants: impl Iterator<Item=impl Iterator<Item=Type<'vm>>>, discriminator_ty: Option<Type<'vm>>) -> Self
+    {
+        let mut full_size = 0;
         let mut align = 1;
 
-        let field_offsets = fields.map(|ty| {
-            let layout = Layout::from(ty);
+        let base_size = if let Some(discriminator_ty) = discriminator_ty {
+            let dl = discriminator_ty.layout();
+            align = dl.align;
+            dl.assert_size()
+        } else {
+            0
+        };
 
-            size = crate::abi::align(size, layout.align);
-
-            let offset = size;
-
-            // todo unsized structs
-            size += layout.assert_size();
-            align = align.max(layout.align);
-
-            offset
+        let field_offsets = variants.map(|fields| {
+            let mut size = base_size;
+            let res = fields.map(|ty| {
+                let layout = Layout::from(ty);
+    
+                size = crate::abi::align(size, layout.align);
+    
+                let offset = size;
+    
+                // todo unsized structs
+                size += layout.assert_size();
+                align = align.max(layout.align);
+    
+                offset
+            }).collect();
+            full_size = full_size.max(size);
+            res
         }).collect();
 
-        size = crate::abi::align(size, align);
+        full_size = crate::abi::align(full_size, align);
 
         Layout {
-            maybe_size: Some(size),
+            maybe_size: Some(full_size),
             align,
             field_offsets
         }

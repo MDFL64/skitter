@@ -189,7 +189,7 @@ pub enum ItemKind<'vm> {
         parent_trait: Option<TraitInfo>
     },
     Adt{
-        fields: OnceLock<Vec<Type<'vm>>>
+        info: OnceLock<AdtInfo<'vm>>
     },
     Trait{
         impl_list: RwLock<Vec<TraitImpl<'vm>>>
@@ -197,6 +197,11 @@ pub enum ItemKind<'vm> {
     AssociatedType{
         parent_trait: TraitInfo
     }
+}
+
+pub struct AdtInfo<'vm> {
+    pub variant_fields: Vec<Vec<Type<'vm>>>,
+    pub discriminator_ty: Option<Type<'vm>>
 }
 
 /// Always refers to a trait item in the same crate.
@@ -243,7 +248,7 @@ impl<'vm> ItemKind<'vm> {
 
     pub fn new_adt() -> Self {
         Self::Adt{
-            fields: Default::default()
+            info: Default::default()
         }
     }
 
@@ -306,20 +311,20 @@ impl<'vm> Item<'vm> {
         *dest = Some(Arc::new(new_ir));
     }
 
-    pub fn get_adt_fields(&self) -> &Vec<Type<'vm>> {
-        let ItemKind::Adt{fields} = &self.kind else {
+    pub fn get_adt_info(&self) -> &AdtInfo<'vm> {
+        let ItemKind::Adt{info} = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        fields.get().expect("adt missing fields")
+        info.get().expect("adt missing fields")
     }
 
-    pub fn set_adt_fields(&self, new_fields: Vec<Type<'vm>>) {
-        let ItemKind::Adt{fields} = &self.kind else {
+    pub fn set_adt_info(&self, new_info: AdtInfo<'vm>) {
+        let ItemKind::Adt{info} = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        fields.set(new_fields).ok();
+        info.set(new_info).ok();
     }
 
     pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {

@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::Type, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo}};
 
 /////////////////////////
 
@@ -263,19 +263,28 @@ impl<'vm> RustCWorker<'vm> {
                         for item_id in adt_items {
                             let item = items.get(item_id);
 
+                            
                             let adt_def = tcx.adt_def(item.did);
-                            let variants = adt_def.variants();
+                            let is_enum = adt_def.is_enum();
 
-                            // todo real structs
-                            //assert!(variants.len() == 1);
-                            if variants.len() > 0 {
-                                let fields: Vec<_> = variants[rustc_abi::VariantIdx::from_u32(0)].fields.iter().map(|field| {
+                            let variant_fields = adt_def.variants().iter().map(|variant| {
+                                variant.fields.iter().map(|field| {
                                     let ty = tcx.type_of(field.did).skip_binder();
                                     vm.types.type_from_rustc(ty, &ctx)
-                                }).collect();
-    
-                                item.set_adt_fields(fields);
-                            }
+                                }).collect()
+                            }).collect();
+
+                            let discriminator_ty = if adt_def.is_enum() {
+                                let kind = TypeKind::Int(IntWidth::I32,IntSign::Unsigned);
+                                Some(vm.types.intern(kind, vm))
+                            } else {
+                                None
+                            };
+        
+                            item.set_adt_info(AdtInfo{
+                                variant_fields,
+                                discriminator_ty
+                            });
                         }
 
                         // fill impls

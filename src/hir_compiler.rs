@@ -520,7 +520,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     self.stack.alloc(expr_ty)
                 });
 
-                for (field,offset) in fields.iter().zip(expr_ty.layout().field_offsets.iter()) {
+                for (field,offset) in fields.iter().zip(expr_ty.layout().field_offsets[0].iter()) {
                     let field_slot = dst_slot.offset_by(*offset);
                     self.lower_expr(*field, Some(field_slot));
                 }
@@ -550,10 +550,15 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     self.stack.alloc(expr_ty)
                 });
 
-                assert!(*variant == 0);
+                if let Some(discriminator_ty) = expr_ty.get_adt_discriminator_ty() {
+                    let dl = discriminator_ty.layout();
+                    self.out_bc.push(bytecode_select::literal(*variant as i128, dl.assert_size(), dst_slot));
+                }
+
+                let expr_layout = expr_ty.layout();
 
                 for (field_index,expr) in fields.iter() {
-                    let offset = expr_ty.layout().field_offsets[*field_index as usize];
+                    let offset = expr_layout.field_offsets[*variant as usize][*field_index as usize];
                     let field_slot = dst_slot.offset_by(offset);
                     self.lower_expr(*expr, Some(field_slot));
                 }
@@ -597,7 +602,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 assert!(*variant == 0);
 
-                let field_offset = self.expr_ty(*lhs).layout().field_offsets[*field as usize];
+                let layout = self.expr_ty(*lhs).layout();
+                let field_offset = layout.field_offsets[*variant as usize][*field as usize];
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(base_slot) => {
@@ -769,12 +775,20 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 let mut result = false;
 
                 for field in fields {
-                    let offset = layout.field_offsets[field.field as usize];
+                    let offset = layout.field_offsets[0][field.field as usize];
                     let refutable = self.match_pattern_internal(&field.pattern,source.offset_by(offset),must_copy,match_result_slot);
                     result |= refutable;
 
-                    if refutable && match_result_slot.is_some() && fields.len() > 1 {
+                    if refutable && match_result_slot.is_some() {
                         jump_gaps.push(self.skip_instr());
+                    }
+                }
+
+                // cut out unnecessary jumps
+                if let Some(last_gap) = jump_gaps.last() {
+                    if *last_gap == self.out_bc.len()-1 {
+                        jump_gaps.pop();
+                        self.out_bc.pop();
                     }
                 }
 
@@ -786,6 +800,49 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 }
 
                 result
+            }
+            PatternKind::Enum{ fields, variant_index } => {
+                let layout = self.apply_subs(pat.ty).layout();
+
+                let mut jump_gaps = Vec::new();
+
+                // test the discriminator by building a fake literal pattern
+                {
+                    let discriminator_ty = pat.ty.get_adt_discriminator_ty().expect("no discriminator type");
+                    let fake_pattern = Pattern{
+                        kind: PatternKind::LiteralValue(*variant_index as i128),
+                        ty: discriminator_ty
+                    };
+                    self.match_pattern_internal(&fake_pattern, source, must_copy, match_result_slot);
+                    jump_gaps.push(self.skip_instr());
+                }
+
+                for field in fields {
+                    let offset = layout.field_offsets[*variant_index as usize][field.field as usize];
+                    let refutable = self.match_pattern_internal(&field.pattern,source.offset_by(offset),must_copy,match_result_slot);
+
+                    if refutable && match_result_slot.is_some() {
+                        jump_gaps.push(self.skip_instr());
+                    }
+                }
+
+                // cut out unnecessary jumps
+                if let Some(last_gap) = jump_gaps.last() {
+                    if *last_gap == self.out_bc.len()-1 {
+                        jump_gaps.pop();
+                        self.out_bc.pop();
+                    }
+                }
+
+                if let Some(match_result_slot) = match_result_slot {
+                    for gap_index in jump_gaps.iter() {
+                        let gap_offset = -self.get_jump_offset(*gap_index);
+                        self.out_bc[*gap_index] = Instr::JumpF(gap_offset,match_result_slot);
+                    }
+                }
+
+                // we could technically optimize for the case of single-variant enums, but why?
+                true
             }
             PatternKind::Or { options } => {
                 let mut jump_gaps = Vec::new();
@@ -802,6 +859,14 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         break;
                     } else {
                         jump_gaps.push(self.skip_instr());
+                    }
+                }
+
+                // cut out unnecessary jumps
+                if let Some(last_gap) = jump_gaps.last() {
+                    if *last_gap == self.out_bc.len()-1 {
+                        jump_gaps.pop();
+                        self.out_bc.pop();
                     }
                 }
 
