@@ -133,12 +133,10 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
             ExprKind::VarRef{..} |
             ExprKind::Field{..} |
             ExprKind::Index{..} => {
-                let size = expr_ty.layout().assert_size();
-
                 match self.expr_to_place(id) {
                     Place::Local(local_slot) => {
                         if let Some(dst_slot) = dst_slot {
-                            if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, size) {
+                            if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, expr_ty) {
                                 self.out_bc.push(instr);
                             }
                             
@@ -152,7 +150,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                             self.stack.alloc(expr_ty)
                         });
 
-                        if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr_slot, size, offset) {
+                        if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr_slot, expr_ty, offset) {
                             self.out_bc.push(instr);
                         }
 
@@ -225,12 +223,12 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 match self.expr_to_place(*lhs) {
                     Place::Local(lhs_slot) => {
-                        if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, assign_ty.layout().assert_size()) {
+                        if let Some(instr) = bytecode_select::copy(lhs_slot, rhs_slot, assign_ty) {
                             self.out_bc.push(instr);
                         }
                     }
                     Place::Ptr(ptr_slot,offset) => {
-                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, assign_ty.layout().assert_size(), offset) {
+                        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, assign_ty, offset) {
                             self.out_bc.push(instr);
                         }
                     }
@@ -253,13 +251,12 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     }
                     Place::Ptr(ptr_slot,offset) => {
                         let assign_ty = self.expr_ty(*lhs);
-                        let assign_size = assign_ty.layout().assert_size();
-                        
+
                         let tmp_slot = self.stack.alloc(assign_ty);
                         
-                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, assign_size, offset).unwrap());
+                        self.out_bc.push(bytecode_select::copy_from_ptr(tmp_slot, ptr_slot, assign_ty, offset).unwrap());
                         self.out_bc.push(ctor(tmp_slot,tmp_slot,rhs_slot));
-                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, assign_size, offset).unwrap());
+                        self.out_bc.push(bytecode_select::copy_to_ptr(ptr_slot, tmp_slot, assign_ty, offset).unwrap());
                     }
                 }
 
@@ -298,7 +295,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 self.out_bc.push(Instr::Call(ret_slot, func));
                 if let Some(dst_slot) = dst_slot {
-                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty.layout().assert_size()) {
+                    if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty) {
                         self.out_bc.push(instr);
                     }
                     dst_slot
@@ -465,7 +462,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                             dst_slot
                         } else {
                             if let Some(dst_slot) = dst_slot {
-                                self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, ref_size).unwrap());
+                                self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, expr_ty).unwrap());
     
                                 dst_slot
                             } else {
@@ -484,9 +481,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                 let ptr = self.lower_expr(*arg, None);
 
-                let size = expr_ty.layout().assert_size();
-
-                if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, size, 0) {
+                if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, expr_ty, 0) {
                     self.out_bc.push(instr);
                 }
 
@@ -521,7 +516,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                         // copy base
                         let ptr_size = POINTER_SIZE.bytes();
-                        self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, ptr_size).unwrap());
+                        self.out_bc.push(bytecode_select::copy(dst_slot, src_slot, self.vm.ty_usize()).unwrap());
                         self.out_bc.push(bytecode_select::literal(meta as i128,ptr_size,dst_slot.offset_by(ptr_size)));
                     }
                     _ => panic!("todo ptr cast {:?}",cast)
@@ -657,7 +652,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         Place::Local(base_slot.offset_by(field_offset))
                     }
                     Place::Ptr(ptr_slot, offset) => {
-                        Place::Ptr(ptr_slot, offset + field_offset as i32)
+                        Place::Ptr(ptr_slot, offset + field_offset)
                     }
                 }
             }
@@ -771,7 +766,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         if must_copy || sub_pattern.is_some() {
                             let ty = self.apply_subs(pat.ty);
                             let var_slot = self.find_or_alloc_local(*local_id, ty);
-                            if let Some(instr) = bytecode_select::copy(var_slot,source_slot,ty.layout().assert_size()) {
+                            if let Some(instr) = bytecode_select::copy(var_slot,source_slot,ty) {
                                 self.out_bc.push(instr);
                             }
                         } else {
@@ -783,7 +778,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                         // copy value from pointer
                         let ty = self.apply_subs(pat.ty);
                         let var_slot = self.find_or_alloc_local(*local_id, ty);
-                        if let Some(instr) = bytecode_select::copy_from_ptr(var_slot, ref_slot, ty.layout().assert_size(), ref_offset) {
+                        if let Some(instr) = bytecode_select::copy_from_ptr(var_slot, ref_slot, ty, ref_offset) {
                             self.out_bc.push(instr);
                         }
                     }
@@ -945,7 +940,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     Place::Ptr(ref_slot,ref_offset) => {
                         let ty = self.apply_subs(pat.ty);
                         let slot = self.stack.alloc(ty);
-                        if let Some(instr) = bytecode_select::copy_from_ptr(slot, ref_slot, ty.layout().assert_size(), ref_offset) {
+                        if let Some(instr) = bytecode_select::copy_from_ptr(slot, ref_slot, ty, ref_offset) {
                             self.out_bc.push(instr);
                         }
                         slot
@@ -1007,7 +1002,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 enum Place {
     Local(Slot),
     /// Pointer with offset
-    Ptr(Slot,i32)
+    Ptr(Slot,u32)
 }
 
 impl Place {
@@ -1017,7 +1012,7 @@ impl Place {
                 Place::Local(slot.offset_by(n))
             }
             Place::Ptr(slot,offset) => {
-                Place::Ptr(*slot,offset + n as i32)
+                Place::Ptr(*slot,offset + n)
             }
         }
     }

@@ -9,8 +9,12 @@ use crate::items::ExternCrate;
 use crate::items::Item;
 use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
+use crate::types::IntSign;
+use crate::types::IntWidth;
 use crate::types::Sub;
+use crate::types::Type;
 use crate::types::TypeContext;
+use crate::types::TypeKind;
 use crate::vm::instr::Slot;
 
 use std::sync::atomic::AtomicPtr;
@@ -135,6 +139,10 @@ impl<'vm> VM<'vm> {
             }
         }
     }
+
+    pub fn ty_usize(&'vm self) -> Type<'vm> {
+        self.types.intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned),self)
+    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
@@ -202,8 +210,8 @@ impl<'vm> Function<'vm> {
 impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Function")
-            //.field("def_id", &self.def_id)
-            //.field("subs", &self.subs)
+            .field("item", &self.item)
+            .field("subs",&self.subs)
             .finish()
     }
 }

@@ -4,7 +4,7 @@ use ahash::AHashMap;
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject, AliasKind};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, Item, CrateId, ItemId}};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, CrateId, ItemId}};
 
 use colosseum::sync::Arena;
 
@@ -331,7 +331,7 @@ impl<'vm> TypeContext<'vm> {
         }
     }
 
-    fn def_from_rustc<'tcx>(&'vm self, did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> ItemWithSubs<'vm> {
+    pub fn def_from_rustc<'tcx>(&'vm self, did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> ItemWithSubs<'vm> {
         let item = if let Some(item) = ctx.items.find_by_did(did) {
             item
         } else {

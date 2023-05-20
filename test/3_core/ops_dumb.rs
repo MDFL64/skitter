@@ -1,6 +1,6 @@
 // A dumb test for a non-issue.
 
-use core::ops::Add;
+use std::ops::Add;
 
 mod _builtin;
 

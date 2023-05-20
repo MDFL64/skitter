@@ -57,12 +57,29 @@ fn write_bulk_move_ss(instr: &str, ty: &str, source: &mut String) {
     ));
 }
 
-fn write_bulk_move_ps(instr: &str, ty: &str, source: &mut String) {
+/*fn write_bulk_move_ps(instr: &str, ty: &str, source: &mut String) {
     source.push_str(&format!(
         "
     Instr::{instr}(dst, src, n) => {{
         let src_ptr = stack.add(*src as usize) as *mut {ty};
         let dst_ptr: *mut {ty} = read_stack(stack, *dst);
+        for i in 0..(*n as usize) {{
+            let s = src_ptr.add(i);
+            let d = dst_ptr.add(i);
+
+            *d = *s;
+        }}
+    }}"
+    ));
+}*/
+
+fn write_bulk_move_sp(instr: &str, ty: &str, source: &mut String) {
+    source.push_str(&format!(
+        "
+    Instr::{instr}(dst, src, offset, n) => {{
+        let src_ptr: *mut u8 = read_stack(stack, *src);
+        let src_ptr: *mut {ty} = src_ptr.add(*offset as usize) as _;
+        let dst_ptr = stack.add(src.index()) as *mut {ty};
         for i in 0..(*n as usize) {{
             let s = src_ptr.add(i);
             let d = dst_ptr.add(i);
@@ -326,7 +343,13 @@ fn write_exec_match() {
     //write_bulk_move_ss("MovSS4N", "u32", &mut source);
     //write_bulk_move_ps("MovPS4N", "u32", &mut source);
 
-    write_bulk_move_ss("MovSSN","u8",&mut source);
+    write_bulk_move_ss("MovSS1N","u8",&mut source);
+    write_bulk_move_ss("MovSS2N","u16",&mut source);
+    write_bulk_move_ss("MovSS4N","u32",&mut source);
+    write_bulk_move_ss("MovSS8N","u64",&mut source);
+    write_bulk_move_ss("MovSS16N","u128",&mut source);
+
+    write_bulk_move_sp("MovSP8N", "u64", &mut source);
 
     source.push_str(
         r#"

@@ -257,24 +257,38 @@ pub enum Instr<'vm> {
     MovSS4(Slot, Slot),
     MovSS8(Slot, Slot),
     MovSS16(Slot, Slot),
-    MovSSN(Slot, Slot, u32),
+    MovSS1N(Slot, Slot, u32),
+    MovSS2N(Slot, Slot, u32),
+    MovSS4N(Slot, Slot, u32),
+    MovSS8N(Slot, Slot, u32),
+    MovSS16N(Slot, Slot, u32),
 
-    MovSP1(Slot, Slot, i32),
-    MovSP2(Slot, Slot, i32),
-    MovSP4(Slot, Slot, i32),
-    MovSP8(Slot, Slot, i32),
-    MovSP16(Slot, Slot, i32),
+    MovSP1(Slot, Slot, u32),
+    MovSP2(Slot, Slot, u32),
+    MovSP4(Slot, Slot, u32),
+    MovSP8(Slot, Slot, u32),
+    MovSP16(Slot, Slot, u32),
+    MovSP1N(Slot, Slot, u16, u16),
+    MovSP2N(Slot, Slot, u16, u16),
+    MovSP4N(Slot, Slot, u16, u16),
+    MovSP8N(Slot, Slot, u16, u16),
+    MovSP16N(Slot, Slot, u16, u16),
 
-    MovPS1(Slot, Slot, i32),
-    MovPS2(Slot, Slot, i32),
-    MovPS4(Slot, Slot, i32),
-    MovPS8(Slot, Slot, i32),
-    MovPS16(Slot, Slot, i32),
+    MovPS1(Slot, Slot, u32),
+    MovPS2(Slot, Slot, u32),
+    MovPS4(Slot, Slot, u32),
+    MovPS8(Slot, Slot, u32),
+    MovPS16(Slot, Slot, u32),
+    MovPS1N(Slot, Slot, u16, u16),
+    MovPS2N(Slot, Slot, u16, u16),
+    MovPS4N(Slot, Slot, u16, u16),
+    MovPS8N(Slot, Slot, u16, u16),
+    MovPS16N(Slot, Slot, u16, u16),
 
     SlotAddr(Slot, Slot),
 
-    PointerOffset3(Slot, Slot, i32),
-    PointerOffset2(Slot, Slot, i32),
+    PointerOffset3(Slot, Slot, u32),
+    PointerOffset2(Slot, Slot, u32),
     // name the fields since these are less straightforward
     SlotAddrOffset{out: Slot, arg: Slot, offset: Slot},
     IndexCalc{arg_out: Slot, elem_size: u32, elem_count: u32},
@@ -515,13 +529,33 @@ impl<'vm> Instr<'vm> {
             Instr::MovSS4(x,_) |
             Instr::MovSS8(x,_) |
             Instr::MovSS16(x,_) |
-            Instr::MovSSN(x,_,_) |
+            Instr::MovSS1N(x,_,_) |
+            Instr::MovSS2N(x,_,_) |
+            Instr::MovSS4N(x,_,_) |
+            Instr::MovSS8N(x,_,_) |
+            Instr::MovSS16N(x,_,_) |
 
             Instr::MovSP1(x,_,_) |
             Instr::MovSP2(x,_,_) |
             Instr::MovSP4(x,_,_) |
             Instr::MovSP8(x,_,_) |
-            Instr::MovSP16(x,_,_) => Some(x),
+            Instr::MovSP16(x,_,_) |
+            Instr::MovSP1N(x,_,_,_) |
+            Instr::MovSP2N(x,_,_,_) |
+            Instr::MovSP4N(x,_,_,_) |
+            Instr::MovSP8N(x,_,_,_) |
+            Instr::MovSP16N(x,_,_,_) => Some(x),
+
+            Instr::MovPS1(x,_,_) |
+            Instr::MovPS2(x,_,_) |
+            Instr::MovPS4(x,_,_) |
+            Instr::MovPS8(x,_,_) |
+            Instr::MovPS16(x,_,_) |
+            Instr::MovPS1N(x,_,_,_) |
+            Instr::MovPS2N(x,_,_,_) |
+            Instr::MovPS4N(x,_,_,_) |
+            Instr::MovPS8N(x,_,_,_) |
+            Instr::MovPS16N(x,_,_,_) => Some(x),
 
             Instr::SlotAddr(x,_) => Some(x),
             Instr::SlotAddrOffset{out,..} => Some(out),
@@ -531,11 +565,6 @@ impl<'vm> Instr<'vm> {
             Instr::IndexCalc{..} |
             Instr::IndexCalcDyn {..} => None,
 
-            Instr::MovPS1(_,_,_) |
-            Instr::MovPS2(_,_,_) |
-            Instr::MovPS4(_,_,_) |
-            Instr::MovPS8(_,_,_) |
-            Instr::MovPS16(_,_,_) |
             Instr::Jump(_) |
             Instr::JumpF(_, _) |
             Instr::JumpT(_, _) |

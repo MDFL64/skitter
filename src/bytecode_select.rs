@@ -1,5 +1,7 @@
-/// Just a few utility functions for picking the right bytecode instructions
 
+// Just a few utility functions for picking the right bytecode instructions
+
+use crate::abi::POINTER_SIZE;
 use crate::ir::{UnaryOp, BinaryOp};
 use crate::types::{TypeKind, IntSign, Type};
 use crate::{vm::instr::{Slot, Instr}};
@@ -16,47 +18,98 @@ pub fn literal<'vm>(n: i128, size: u32, slot: Slot) -> Instr<'vm> {
 }
 
 // TODO NONE OF THESE ACCOUNT FOR ALIGNMENT!
-pub fn copy<'vm>(dst: Slot, src: Slot, size: u32) -> Option<Instr<'vm>> {
+pub fn copy<'vm>(dst: Slot, src: Slot, ty: Type<'vm>) -> Option<Instr<'vm>> {
+    let layout = ty.layout();
+    let size = layout.assert_size();
+    let align = layout.align;
+
     if size == 0 {
         None
-    } else {
+    } else if size == align {
+        // simple cases, size = alignment
         Some(match size {
             1  => Instr::MovSS1(dst, src),
             2  => Instr::MovSS2(dst, src),
             4  => Instr::MovSS4(dst, src),
             8  => Instr::MovSS8(dst, src),
             16 => Instr::MovSS16(dst, src),
-            _ => Instr::MovSSN(dst, src, size)
+            _ => panic!("alignment larger than 16")
+        })
+    } else {
+        let count = size / align;
+        Some(match align {
+            1  => Instr::MovSS1N(dst, src, count),
+            2  => Instr::MovSS2N(dst, src, count),
+            4  => Instr::MovSS4N(dst, src, count),
+            8  => Instr::MovSS8N(dst, src, count),
+            16 => Instr::MovSS16N(dst, src, count),
+            _ => panic!("alignment larger than 16")
         })
     }
 }
 
-pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'vm>> {
+pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> Option<Instr<'vm>> {
+    let layout = ty.layout();
+    let size = layout.assert_size();
+    let align = layout.align;
+
     if size == 0 {
         None
-    } else {
+    } else if size == align {
         Some(match size {
             1  => Instr::MovSP1(dst, src, offset),
             2  => Instr::MovSP2(dst, src, offset),
             4  => Instr::MovSP4(dst, src, offset),
             8  => Instr::MovSP8(dst, src, offset),
             16 => Instr::MovSP16(dst, src, offset),
-            _ => panic!("copy from ptr {}",size)
+            _ => panic!("alignment larger than 16")
+        })
+    } else {
+        let count = size / align;
+        // todo: fall back to boxed instruction for large counts and offsets
+        let count_narrow: u16 = count.try_into().expect("count too large");
+        let offset_narrow: u16 = offset.try_into().expect("offset too large");
+
+        Some(match align {
+            1  => Instr::MovSP1N(dst, src, offset_narrow, count_narrow),
+            2  => Instr::MovSP2N(dst, src, offset_narrow, count_narrow),
+            4  => Instr::MovSP4N(dst, src, offset_narrow, count_narrow),
+            8  => Instr::MovSP8N(dst, src, offset_narrow, count_narrow),
+            16 => Instr::MovSP16N(dst, src, offset_narrow, count_narrow),
+            _ => panic!("alignment larger than 16")
         })
     }
 }
 
-pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, size: u32, offset: i32) -> Option<Instr<'vm>> {
+pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> Option<Instr<'vm>> {
+    let layout = ty.layout();
+    let size = layout.assert_size();
+    let align = layout.align;
+
     if size == 0 {
         None
-    } else {
+    } else if size == align {
         Some(match size {
             1  => Instr::MovPS1(dst, src, offset),
             2  => Instr::MovPS2(dst, src, offset),
             4  => Instr::MovPS4(dst, src, offset),
             8  => Instr::MovPS8(dst, src, offset),
             16 => Instr::MovPS16(dst, src, offset),
-            _ => panic!("copy to ptr {}",size)
+            _ => panic!("alignment larger than 16")
+        })
+    } else {
+        let count = size / align;
+        // todo: fall back to boxed instruction for large counts and offsets
+        let count_narrow: u16 = count.try_into().expect("count too large");
+        let offset_narrow: u16 = offset.try_into().expect("offset too large");
+
+        Some(match align {
+            1  => Instr::MovPS1N(dst, src, offset_narrow, count_narrow),
+            2  => Instr::MovPS2N(dst, src, offset_narrow, count_narrow),
+            4  => Instr::MovPS4N(dst, src, offset_narrow, count_narrow),
+            8  => Instr::MovPS8N(dst, src, offset_narrow, count_narrow),
+            16 => Instr::MovPS16N(dst, src, offset_narrow, count_narrow),
+            _ => panic!("alignment larger than 16")
         })
     }
 }
@@ -253,6 +306,15 @@ pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot,Slot,Slot) -> Instr<'vm>,
         (BinaryOp::Gt,TypeKind::Char,4) => { swap = true; Instr::I32_U_Lt }
         (BinaryOp::LtEq,TypeKind::Char,4) => Instr::I32_U_LtEq,
         (BinaryOp::GtEq,TypeKind::Char,4) => { swap = true; Instr::I32_U_LtEq }
+
+        (BinaryOp::Eq,TypeKind::Ptr(..),_) => {
+            assert_eq!(size,POINTER_SIZE.bytes());
+            match size {
+                4 => Instr::I32_Eq,
+                8 => Instr::I64_Eq,
+                _ => panic!()
+            }
+        }
 
         _ => panic!("no binary op: {:?} {:?}",op,ty)
     };

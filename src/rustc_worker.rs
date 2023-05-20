@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl}};
 
 /////////////////////////
 
@@ -64,6 +64,7 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
 
 #[derive(Debug)]
 struct ImplItem<'tcx> {
+    did: LocalDefId,
     subject: rustc_middle::ty::ImplSubject<'tcx>,
     children_fn: Vec<(String,ItemId)>,
     children_ty: Vec<(String,LocalDefId)>,
@@ -241,6 +242,7 @@ impl<'vm> RustCWorker<'vm> {
                                     }
                                     
                                     impl_items.push(ImplItem{
+                                        did: impl_id,
                                         subject,
                                         children_fn: impl_list_fn,
                                         children_ty: impl_list_ty
@@ -301,6 +303,20 @@ impl<'vm> RustCWorker<'vm> {
                                 ImplSubject::Trait(trait_ref) => {
                                     let trait_did = trait_ref.def_id;
 
+                                    let mut bounds = Vec::new();
+                                    let predicates = tcx.predicates_of(impl_item.did);
+                                    for (p,_) in predicates.predicates {
+                                        let p = p.kind().skip_binder();
+                                        if let rustc_middle::ty::PredicateKind::Clause(p) = p {
+                                            if let rustc_middle::ty::Clause::Trait(p) = p {
+                                                if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
+                                                    let bound = vm.types.def_from_rustc(p.trait_ref.def_id,p.trait_ref.substs,&ctx);
+                                                    bounds.push(bound);
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
                                         trait_item
                                     } else {
@@ -311,12 +327,15 @@ impl<'vm> RustCWorker<'vm> {
                                         trait_crate_items.find_by_path(&trait_path).expect("couldn't find trait")
                                     };
 
-                                    // TODO convert all the subs and use them in lookups instead?
-                                    let impl_for = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
+                                    let for_types = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
-                                    let dummy = Vec::new();
-
-                                    trait_item.add_trait_impl(impl_for,dummy,this_crate,impl_item.children_fn,impl_assoc_tys);
+                                    trait_item.add_trait_impl(TraitImpl{
+                                        crate_id: this_crate,
+                                        for_types,
+                                        child_fn_items: impl_item.children_fn,
+                                        child_tys: impl_assoc_tys,
+                                        bounds
+                                    });
                                 }
                             }
                         }

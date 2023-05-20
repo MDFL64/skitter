@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, sub_list_to_string, TypeKind, ItemWithSubs}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -211,11 +211,12 @@ pub struct TraitInfo {
 }
 
 pub struct TraitImpl<'vm> {
-    for_types: Vec<Sub<'vm>>,
-    impl_params: Vec<Sub<'vm>>,
-    crate_id: CrateId,
-    child_fn_items: Vec<(String,ItemId)>,
-    child_tys: Vec<(String,Type<'vm>)>,
+    pub for_types: Vec<Sub<'vm>>,
+    //impl_params: Vec<Sub<'vm>>,
+    pub crate_id: CrateId,
+    pub child_fn_items: Vec<(String,ItemId)>,
+    pub child_tys: Vec<(String,Type<'vm>)>,
+    pub bounds: Vec<ItemWithSubs<'vm>>
 }
 
 impl<'vm> ItemKind<'vm> {
@@ -333,19 +334,13 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn add_trait_impl(&self, for_types: Vec<Sub<'vm>>, impl_params: Vec<Sub<'vm>>, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
+    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut impl_list = impl_list.write().unwrap();
-        impl_list.push(TraitImpl{
-            for_types,
-            impl_params,
-            crate_id,
-            child_fn_items,
-            child_tys
-        });
+        impl_list.push(info);
     }
 
     pub fn resolve_associated_ty(&self, subs: &[Sub<'vm>]) -> Type<'vm> {
@@ -511,6 +506,12 @@ fn trait_subs_remap_ty<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, remap: &mut V
         }
         (TypeKind::Ref(in_ref,_),TypeKind::Ref(trait_ref,_)) => {
             trait_subs_remap_ty(*in_ref,*trait_ref,remap);
+        }
+        (TypeKind::Tuple(in_list),TypeKind::Tuple(trait_list)) => {
+            assert!(in_list.len() == trait_list.len());
+            for (in_ty,trait_ty) in in_list.iter().zip(trait_list) {
+                trait_subs_remap_ty(*in_ty,*trait_ty,remap);
+            }
         }
         // the important part
         (_,TypeKind::Param(n)) => {
