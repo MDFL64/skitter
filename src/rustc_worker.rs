@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts}};
 
 /////////////////////////
 
@@ -317,6 +317,19 @@ impl<'vm> RustCWorker<'vm> {
                                         }
                                     }
 
+                                    let rustc_generics = tcx.generics_of(impl_item.did);
+
+                                    let mut generics = GenericCounts::default();
+
+                                    for gp in &rustc_generics.params {
+                                        use rustc_middle::ty::GenericParamDefKind;
+                                        match gp.kind {
+                                            GenericParamDefKind::Lifetime => generics.lifetimes += 1,
+                                            GenericParamDefKind::Type{..} => generics.types += 1,
+                                            GenericParamDefKind::Const{..} => generics.consts += 1,
+                                        }
+                                    }
+
                                     let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
                                         trait_item
                                     } else {
@@ -334,7 +347,8 @@ impl<'vm> RustCWorker<'vm> {
                                         for_types,
                                         child_fn_items: impl_item.children_fn,
                                         child_tys: impl_assoc_tys,
-                                        bounds
+                                        bounds,
+                                        generics
                                     });
                                 }
                             }

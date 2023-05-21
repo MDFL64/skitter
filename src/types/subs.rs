@@ -16,6 +16,14 @@ impl<'vm> Sub<'vm> {
             _ => self.clone()
         }
     }
+
+    pub fn is_concrete(&self) -> bool {
+        match self {
+            Sub::Type(ty) => ty.is_concrete(),
+            Sub::Lifetime => true,
+            Sub::Const => todo!()
+        }
+    }
 }
 
 // pretty printing for types
@@ -40,6 +48,10 @@ impl<'vm> SubList<'vm> {
             field.sub(subs)
         }).collect();
         SubList{ list: new_subs }
+    }
+
+    pub fn is_concrete(&self) -> bool {
+        self.list.iter().all(|sub| sub.is_concrete())
     }
 }
 

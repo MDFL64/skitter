@@ -128,7 +128,7 @@ impl<'vm> VM<'vm> {
         // fetch bytecode
         let bc = func.bytecode();
 
-        // run
+        // run bytecode
         unsafe {            
             let mut pc = 0;
             let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);

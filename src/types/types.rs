@@ -30,7 +30,7 @@ pub enum TypeKind<'vm> {
     FunctionPointer,
 
     Param(u32),
-    Error
+    //Error
 }
 
 impl<'vm> TypeKind<'vm> {
@@ -126,9 +126,10 @@ impl<'vm> Type<'vm> {
     }
 
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
-        if subs.list.len() == 0 {
+        // do not do this, it just causes confusing bugs
+        /*if subs.list.len() == 0 {
             return *self;
-        }
+        }*/
         // todo add a field which indicates whether a type accepts subs, fast return if not
         let vm = self.1;
         match self.kind() {
@@ -198,6 +199,26 @@ impl<'vm> Type<'vm> {
         }
     }
 
+    pub fn is_concrete(&self) -> bool {
+        match self.kind() {
+            // primitive types
+            TypeKind::Int(..) |
+            TypeKind::Float(..) |
+            TypeKind::Bool |
+            TypeKind::Char => true,
+            TypeKind::Tuple(children) => {
+                children.iter().all(|child| child.is_concrete())
+            }
+            TypeKind::Adt(adt) => {
+                adt.subs.is_concrete()
+            }
+            TypeKind::Ref(child,_) => {
+                child.is_concrete()
+            }
+            _ => panic!("is concrete? {}",self)
+        }
+    }
+
     pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
         if self.kind().is_dummy() {
             //println!("skip impl {:?}",self.kind());
@@ -252,10 +273,29 @@ impl<'vm> Display for Type<'vm> {
         match self.kind() {
             TypeKind::Adt(item_with_subs) => {
                 write!(f,"{}",item_with_subs.item.path.as_string())?;
-                if item_with_subs.subs.len() > 0 {
-                    write!(f,"{}",sub_list_to_string(&item_with_subs.subs))?;
+                if item_with_subs.subs.list.len() > 0 {
+                    write!(f,"{}",item_with_subs.subs)?;
                 }
                 Ok(())
+            }
+            TypeKind::Int(width,sign) => {
+                match (width,sign) {
+                    (IntWidth::I8,IntSign::Signed) => write!(f,"i8"),
+                    (IntWidth::I16,IntSign::Signed) => write!(f,"i16"),
+                    (IntWidth::I32,IntSign::Signed) => write!(f,"i32"),
+                    (IntWidth::I64,IntSign::Signed) => write!(f,"i64"),
+                    (IntWidth::I128,IntSign::Signed) => write!(f,"i128"),
+                    (IntWidth::ISize,IntSign::Signed) => write!(f,"isize"),
+
+                    (IntWidth::I8,IntSign::Unsigned) => write!(f,"u8"),
+                    (IntWidth::I16,IntSign::Unsigned) => write!(f,"u16"),
+                    (IntWidth::I32,IntSign::Unsigned) => write!(f,"u32"),
+                    (IntWidth::I64,IntSign::Unsigned) => write!(f,"u64"),
+                    (IntWidth::I128,IntSign::Unsigned) => write!(f,"u128"),
+                    (IntWidth::ISize,IntSign::Unsigned) => write!(f,"usize"),
+
+                    _ => todo!("{:?}",self)
+                }
             }
             TypeKind::Ref(ty,mutability) => {
                 match mutability {

@@ -134,13 +134,14 @@ impl<'vm> TypeContext<'vm> {
     }
 
     pub fn subs_from_rustc<'tcx>(&'vm self, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> SubList<'vm> {
-        args.iter().map(|s| {
+        let list = args.iter().map(|s| {
             match s.unpack() {
                 GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
                 GenericArgKind::Lifetime(_) => Sub::Lifetime,
                 GenericArgKind::Const(_) => Sub::Const,
             }
-        }).collect()
+        }).collect();
+        SubList{ list }
     }
 
     fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> Option<ItemPath> {
