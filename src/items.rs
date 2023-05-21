@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -185,7 +185,7 @@ impl<'vm> Hash for Item<'vm> {
 pub enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        mono_instances: Mutex<HashMap<Vec<Sub<'vm>>,&'vm Function<'vm>>>,
+        mono_instances: Mutex<HashMap<SubList<'vm>,&'vm Function<'vm>>>,
         parent_trait: Option<TraitInfo>
     },
     Adt{
@@ -211,7 +211,7 @@ pub struct TraitInfo {
 }
 
 pub struct TraitImpl<'vm> {
-    pub for_types: Vec<Sub<'vm>>,
+    pub for_types: SubList<'vm>,
     //impl_params: Vec<Sub<'vm>>,
     pub crate_id: CrateId,
     pub child_fn_items: Vec<(String,ItemId)>,
@@ -262,20 +262,20 @@ impl<'vm> ItemKind<'vm> {
 }
 
 impl<'vm> Item<'vm> {
-    pub fn get_function(&'vm self, subs: &[Sub<'vm>]) -> &'vm Function<'vm> {
+    pub fn get_function(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
 
         let ItemKind::Function{mono_instances,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut mono_instances = mono_instances.lock().unwrap();
-        mono_instances.entry(subs.to_owned()).or_insert_with(|| {
-            self.vm.alloc_function(self, subs.to_owned())
+        mono_instances.entry(subs.clone()).or_insert_with(|| {
+            self.vm.alloc_function(self, subs.clone())
         })
     }
 
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
-    pub fn get_ir<'a>(&self, subs: &'a [Sub<'vm>]) -> (Arc<IRFunction<'vm>>,Cow<'a,[Sub<'vm>]>) {
+    pub fn get_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
         
         let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -295,7 +295,7 @@ impl<'vm> Item<'vm> {
             {
                 let ir = ir.lock().unwrap();
                 if let Some(ir) = ir.as_ref() {
-                    return (ir.clone(),subs.into());
+                    return (ir.clone(),Cow::Borrowed(subs));
                 }
             }
 
@@ -343,7 +343,7 @@ impl<'vm> Item<'vm> {
         impl_list.push(info);
     }
 
-    pub fn resolve_associated_ty(&self, subs: &[Sub<'vm>]) -> Type<'vm> {
+    pub fn resolve_associated_ty(&self, subs: &SubList<'vm>) -> Type<'vm> {
         let ItemKind::AssociatedType{parent_trait} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -372,7 +372,7 @@ impl<'vm> Item<'vm> {
         panic!("trait ty lookup failed (no impl)");
     }
 
-    pub fn find_trait_fn(&self, subs: &[Sub<'vm>], member_name: &str) -> Option<ItemWithSubs<'vm>> {
+    pub fn find_trait_fn(&self, subs: &SubList<'vm>, member_name: &str) -> Option<ItemWithSubs<'vm>> {
         let ItemKind::Trait{impl_list} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -401,7 +401,7 @@ impl<'vm> Item<'vm> {
 }
 
 /// Compares types loosely, allowing param types to match anything.
-fn subs_match<'vm>(a: &[Sub<'vm>], b: &[Sub<'vm>]) -> bool {
+fn subs_match<'vm>(a: &SubList<'vm>, b: &SubList<'vm>) -> bool {
 
     if a.len() != b.len() {
         return false;
@@ -455,7 +455,7 @@ fn types_match<'vm>(a: Type<'vm>, b: Type<'vm>) -> bool {
     }
 }
 
-fn trait_subs_remap<'vm>(in_subs: &[Sub<'vm>], trait_subs: &[Sub<'vm>]) -> Vec<Sub<'vm>> {
+fn trait_subs_remap<'vm>(in_subs: &SubList<'vm>, trait_subs: &SubList<'vm>) -> Vec<Sub<'vm>> {
 
     let mut remap: Vec<(u32,Type<'vm>)> = Vec::new();
 

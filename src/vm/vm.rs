@@ -2,7 +2,7 @@ use colosseum::sync::Arena;
 
 use std::sync::RwLock;
 use std::sync::atomic::Ordering;
-use crate::hir_compiler::HirCompiler;
+use crate::bytecode_compiler::HirCompiler;
 use crate::items::CrateId;
 use crate::items::CrateItems;
 use crate::items::ExternCrate;
@@ -12,6 +12,7 @@ use crate::rustc_worker::RustCWorker;
 use crate::types::IntSign;
 use crate::types::IntWidth;
 use crate::types::Sub;
+use crate::types::SubList;
 use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
@@ -86,7 +87,7 @@ impl<'vm> VM<'vm> {
         worker.build_function_ir(item_id);
     }
 
-    pub fn alloc_function(&'vm self, item: &'vm Item<'vm>, subs: Vec<Sub<'vm>>) -> &'vm Function<'vm> {
+    pub fn alloc_function(&'vm self, item: &'vm Item<'vm>, subs: SubList<'vm>) -> &'vm Function<'vm> {
         let func = Function {
             item,
             subs,
@@ -156,7 +157,7 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
 /// A monomorphized function which may contain bytecode or machine code
 pub struct Function<'vm> {
     item: &'vm Item<'vm>,
-    subs: Vec<Sub<'vm>>,
+    subs: SubList<'vm>,
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>
 }

@@ -1,13 +1,13 @@
 use crate::abi::POINTER_SIZE;
 use crate::bytecode_select;
 use crate::ir::{IRFunction, BlockId, StmtId, ExprId, ExprKind, LogicOp, Pattern, PatternKind, PointerCast, Stmt, BindingMode, BinaryOp};
-use crate::types::{Type, TypeKind, Sub, ItemWithSubs, Mutability};
+use crate::types::{Type, TypeKind, ItemWithSubs, Mutability, SubList};
 use crate::vm::Function;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
 pub struct HirCompiler<'vm,'f> {
-    in_func_subs: &'f [Sub<'vm>],
+    in_func_subs: &'f SubList<'vm>,
     in_func: &'f IRFunction<'vm>,
     out_bc: Vec<Instr<'vm>>,
     vm: &'vm vm::VM<'vm>,
@@ -30,7 +30,7 @@ struct BreakInfo {
 }
 
 impl<'vm,'f> HirCompiler<'vm,'f> {
-    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: &[Sub<'vm>], path: &str) -> Vec<Instr<'vm>> {
+    pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: &'f SubList<'vm>, path: &str) -> Vec<Instr<'vm>> {
 
         if vm.is_verbose {
             println!("compiling {:?} for {:?}",path,subs);

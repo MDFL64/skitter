@@ -19,7 +19,7 @@ extern crate rustc_metadata;
 
 mod vm;
 
-mod hir_compiler;
+mod bytecode_compiler;
 mod bytecode_select;
 mod cli;
 mod test;

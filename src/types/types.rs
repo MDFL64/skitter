@@ -1,8 +1,10 @@
-use std::fmt::{Display, Write};
+use std::{fmt::{Display, Write}, sync::{OnceLock, RwLock}};
 
-use crate::items::Item;
+use ahash::AHashMap;
 
-use super::Type;
+use crate::{items::{Item, CrateId, ItemId}, vm::VM};
+
+use super::{layout::Layout, Type, subs::{Sub, SubList}};
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
 pub enum TypeKind<'vm> {
@@ -69,25 +71,9 @@ pub enum Mutability {
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
-pub enum Sub<'vm> {
-    Type(Type<'vm>),
-    Lifetime,
-    Const
-}
-
-impl<'vm> Sub<'vm> {
-    pub fn sub(&self, subs: &[Sub<'vm>]) -> Self {
-        match self {
-            Sub::Type(ty) => Sub::Type(ty.sub(subs)),
-            _ => self.clone()
-        }
-    }
-}
-
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
 pub struct ItemWithSubs<'vm> {
     pub item: &'vm Item<'vm>,
-    pub subs: Vec<Sub<'vm>>
+    pub subs: SubList<'vm>
 }
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
@@ -106,28 +92,160 @@ impl ArraySize {
     }
 }
 
-// pretty printing for types
-impl<'vm> Display for Sub<'vm> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Sub::Type(ty) => write!(f,"{}",ty),
-            Sub::Lifetime => write!(f,"'_"),
-            Sub::Const => write!(f,"<const>")
+impl<'vm> Type<'vm> {
+    pub fn kind(&self) -> &TypeKind<'vm> {
+        &self.0.kind
+    }
+
+    pub fn layout(&self) -> &'vm Layout {
+        self.0.layout.get_or_init(|| {
+            super::layout::Layout::from(*self)
+        })
+    }
+
+    pub fn sign(&self) -> IntSign {
+        match self.kind() {
+            TypeKind::Int(_,sign) => *sign,
+            _ => IntSign::Unsigned
         }
+    }
+
+    pub fn ref_to(&self, m: Mutability) -> Self {
+        let ref_kind = TypeKind::Ref(*self, m);
+        self.1.types.intern(ref_kind, self.1)
+    }
+
+    /// Check if a type is sized.
+    /// This must exist because without it, we would need to recursively generate layouts,
+    /// which is a non-terminating loop for self-referencing types.
+    pub fn is_sized(&self) -> bool {
+        match self.kind() {
+            TypeKind::Slice(_) => false,
+            _ => true
+        }
+    }
+
+    pub fn sub(&self, subs: &SubList<'vm>) -> Self {
+        if subs.list.len() == 0 {
+            return *self;
+        }
+        // todo add a field which indicates whether a type accepts subs, fast return if not
+        let vm = self.1;
+        match self.kind() {
+            TypeKind::Param(n) => {
+                let sub = &subs.list[*n as usize];
+                if let Sub::Type(sub_ty) = sub {
+                    *sub_ty
+                } else {
+                    panic!("bad sub");
+                }
+            }
+            TypeKind::Ref(ref_ty,mutability) => {
+                let ref_ty = ref_ty.sub(subs);
+                vm.types.intern(TypeKind::Ref(ref_ty,*mutability),vm)
+            }
+            TypeKind::Ptr(ref_ty,mutability) => {
+                let ref_ty = ref_ty.sub(subs);
+                vm.types.intern(TypeKind::Ptr(ref_ty,*mutability),vm)
+            }
+            TypeKind::Tuple(fields) => {
+                // fast path, will become redundant if above optimization is implemented
+                if fields.len() == 0 {
+                    return *self;
+                }
+                let new_fields = fields.iter().map(|field| {
+                    field.sub(subs)
+                }).collect();
+                vm.types.intern(TypeKind::Tuple(new_fields), vm)
+            }
+            TypeKind::Adt(adt) => {
+                // fast path, will become redundant if above optimization is implemented
+                if adt.subs.list.len() == 0 {
+                    return *self;
+                }
+                let new_subs = adt.subs.sub(subs);
+                let new_ty = TypeKind::Adt(ItemWithSubs{
+                    item: adt.item,
+                    subs: new_subs
+                });
+                vm.types.intern(new_ty, vm)
+            }
+            TypeKind::FunctionDef(func) => {
+                // fast path, will become redundant if above optimization is implemented
+                if func.subs.list.len() == 0 {
+                    return *self;
+                }
+                let new_subs = func.subs.sub(subs);
+                let new_ty = TypeKind::FunctionDef(ItemWithSubs{
+                    item: func.item,
+                    subs: new_subs
+                });
+                vm.types.intern(new_ty, vm)
+            }
+            TypeKind::AssociatedType(assoc_ty) => {
+                // todo gadt's ???
+
+                let new_subs = assoc_ty.subs.sub(subs);
+
+                assoc_ty.item.resolve_associated_ty(&new_subs)
+            }
+            // These types never accept subs.
+            TypeKind::Int(..) |
+            TypeKind::Float(_) |
+            TypeKind::Bool |
+            TypeKind::Char => *self,
+            _ => panic!("todo sub {:?} with {:?}",self,subs)
+        }
+    }
+
+    pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
+        if self.kind().is_dummy() {
+            //println!("skip impl {:?}",self.kind());
+            return;
+        }
+
+        let mut impl_table = self.0.impl_table.write().unwrap();
+        for (name,item_id) in child_fn_items {
+            let old = impl_table.insert(name,(crate_id,item_id));
+            assert!(old.is_none());
+        }
+    }
+
+    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId,ItemId)> {
+        let impl_table = self.0.impl_table.read().unwrap();
+        impl_table.get(name).copied()
+    }
+
+    pub fn get_adt_discriminator_ty(&self) -> Option<Type<'vm>> {
+        let TypeKind::Adt(ItemWithSubs{item,subs}) = self.kind() else {
+            panic!("get_adt_discriminator_ty: not an adt");
+        };
+        let info = item.get_adt_info();
+        info.discriminator_ty
     }
 }
 
-pub fn sub_list_to_string<'vm>(subs: &[Sub<'vm>]) -> String {
-    let mut res = "<".to_owned();
-    for (i,sub) in subs.iter().enumerate() {
-        if i>0 {
-            res.push(',');
-        }
-        write!(res,"{}",sub).ok();
+impl<'vm> std::fmt::Debug for Type<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.kind.fmt(f)
     }
-    res.push('>');
-    res
 }
+
+impl<'vm> std::hash::Hash for Type<'vm> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.0 as *const _ as usize);
+    }
+}
+
+impl<'vm> std::cmp::PartialEq for Type<'vm> {
+    fn eq(&self, other: &Self) -> bool {
+        let a = self.0 as *const _;
+        let b = other.0 as *const _;
+        a == b
+    }
+}
+
+impl<'vm> std::cmp::Eq for Type<'vm> {}
 
 impl<'vm> Display for Type<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
