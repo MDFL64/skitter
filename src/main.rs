@@ -16,6 +16,7 @@ extern crate rustc_mir_dataflow;
 extern crate rustc_ast;
 extern crate rustc_abi;
 extern crate rustc_metadata;
+extern crate rustc_target;
 
 mod vm;
 
@@ -28,6 +29,7 @@ mod ir;
 mod types;
 mod items;
 mod rustc_worker;
+mod builtins;
 
 use std::process;
 
@@ -87,7 +89,7 @@ fn main() {
         
         vm.wait_for_setup(main_crate);
 
-        let main_path = ItemPath::new_value("::main".to_owned());
+        let main_path = ItemPath::main();
 
         let main_item = vm
             .get_crate_items(main_crate)

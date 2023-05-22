@@ -20,7 +20,7 @@ pub enum TypeKind<'vm> {
     Tuple(Vec<Type<'vm>>),
     Array(Type<'vm>,ArraySize),
     Slice(Type<'vm>),
-    Str,
+    StringSlice,
 
     FunctionDef(ItemWithSubs<'vm>),
     Adt(ItemWithSubs<'vm>),
@@ -120,7 +120,8 @@ impl<'vm> Type<'vm> {
     /// which is a non-terminating loop for self-referencing types.
     pub fn is_sized(&self) -> bool {
         match self.kind() {
-            TypeKind::Slice(_) => false,
+            TypeKind::Slice(_) |
+            TypeKind::StringSlice => false,
             _ => true
         }
     }
@@ -203,6 +204,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Int(..) |
             TypeKind::Float(_) |
             TypeKind::Bool |
+            TypeKind::StringSlice |
             TypeKind::Char => *self,
             _ => panic!("todo sub {:?} with {:?}",self,subs)
         }
@@ -302,9 +304,10 @@ impl<'vm> Display for Type<'vm> {
                     (IntWidth::I64,IntSign::Unsigned) => write!(f,"u64"),
                     (IntWidth::I128,IntSign::Unsigned) => write!(f,"u128"),
                     (IntWidth::ISize,IntSign::Unsigned) => write!(f,"usize"),
-
-                    _ => todo!("{:?}",self)
                 }
+            }
+            TypeKind::StringSlice => {
+                write!(f,"str")
             }
             TypeKind::Ref(ty,mutability) => {
                 match mutability {

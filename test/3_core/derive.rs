@@ -1,6 +1,6 @@
 mod _builtin;
 
-#[derive(Clone,PartialEq,Default)]
+#[derive(Clone,PartialEq,Default,PartialOrd)]
 struct Thing<'a> {
     x: i32,
     y: bool,
@@ -28,5 +28,7 @@ fn main() {
         _builtin::print_bool(thing1 != thing2);
         _builtin::print_bool(thing1 == thing3);
         _builtin::print_bool(thing1 != thing3);
+
+        _builtin::print_bool(thing1 > thing2);
     }
 }

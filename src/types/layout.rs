@@ -62,6 +62,13 @@ impl Layout {
                     field_offsets: Vec::new()
                 }
             }
+            TypeKind::StringSlice => {
+                Layout {
+                    maybe_size: None,
+                    align: 1,
+                    field_offsets: Vec::new()
+                }
+            }
 
             TypeKind::Ref(ref_ty,_) |
             TypeKind::Ptr(ref_ty,_) => {
@@ -89,6 +96,9 @@ impl Layout {
                 Layout::compound(fixed_fields,info.discriminator_ty)
             }
             TypeKind::FunctionDef(_) => {
+                Layout::simple(0)
+            }
+            TypeKind::Never => {
                 Layout::simple(0)
             }
             _ => panic!("can't layout: {:?}",kind)

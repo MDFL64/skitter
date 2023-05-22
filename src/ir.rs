@@ -83,6 +83,8 @@ pub enum ExprKind<'vm> {
     LiteralValue(i128),
     /// Zero-sized type literals
     LiteralVoid,
+    /// Literal used for strings. Can't lower to a pointer at this stage because it would break serialization.
+    LiteralString(&'vm str),
 
     Unary(UnaryOp,ExprId),
     Binary(BinaryOp,ExprId,ExprId),
@@ -359,6 +361,9 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     }
                     LitKind::Char(c) => {
                         ExprKind::LiteralValue(c as i128)
+                    }
+                    LitKind::Str(sym,_) => {
+                        ExprKind::LiteralString(self.ctx.vm.alloc_string(sym.as_str().to_owned()))
                     }
                     _ => panic!("lit other {:?}",lit.node)
                 }

@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait, setup_rust_intrinsic}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -102,18 +102,18 @@ impl<'vm> CrateItems<'vm> {
 pub struct ItemPath(NameSpace,String);
 
 impl ItemPath {
-    pub fn new_type(path: String) -> Self {
-        ItemPath(NameSpace::Type,path)
+    pub fn main() -> Self {
+        Self(NameSpace::Value,"::main".to_owned())
     }
-
-    pub fn new_value(path: String) -> Self {
-        ItemPath(NameSpace::Value,path)
+    pub fn can_find(&self) -> bool {
+        match self.0 {
+            NameSpace::DebugOnly => false,
+            _ => true
+        }
     }
-
-    pub fn new_debug(path: String) -> Self {
-        ItemPath(NameSpace::DebugOnly,path)
+    pub fn new_debug(name: String) -> Self {
+        Self(NameSpace::DebugOnly,name)
     }
-
     pub fn as_string(&self) -> &str {
         &self.1
     }
@@ -186,7 +186,8 @@ pub enum ItemKind<'vm> {
     Function{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<SubList<'vm>,&'vm Function<'vm>>>,
-        parent_trait: Option<TraitInfo>
+        parent_trait: Option<TraitInfo>,
+        extern_name: Option<String>
     },
     Adt{
         info: OnceLock<AdtInfo<'vm>>
@@ -198,11 +199,6 @@ pub enum ItemKind<'vm> {
     AssociatedType{
         parent_trait: TraitInfo
     }
-}
-
-#[derive(Copy,Clone)]
-pub enum BuiltinTrait {
-    Sized
 }
 
 pub struct AdtInfo<'vm> {
@@ -238,7 +234,8 @@ impl<'vm> ItemKind<'vm> {
         Self::Function{
             ir: Default::default(),
             mono_instances: Default::default(),
-            parent_trait: None
+            parent_trait: None,
+            extern_name: None
         }
     }
 
@@ -249,7 +246,17 @@ impl<'vm> ItemKind<'vm> {
             parent_trait: Some(TraitInfo{
                 trait_id,
                 ident
-            })
+            }),
+            extern_name: None
+        }
+    }
+
+    pub fn new_function_extern(name: String) -> Self {
+        Self::Function{
+            ir: Default::default(),
+            mono_instances: Default::default(),
+            parent_trait: None,
+            extern_name: Some(name)
         }
     }
 
@@ -279,14 +286,20 @@ impl<'vm> ItemKind<'vm> {
 impl<'vm> Item<'vm> {
     pub fn get_function(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
 
-        let ItemKind::Function{mono_instances,..} = &self.kind else {
+        let ItemKind::Function{mono_instances,extern_name,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut mono_instances = mono_instances.lock().unwrap();
-        mono_instances.entry(subs.clone()).or_insert_with(|| {
+        let result_func = mono_instances.entry(subs.clone()).or_insert_with(|| {
             self.vm.alloc_function(self, subs.clone())
-        })
+        });
+
+        if let Some(extern_name) = extern_name {
+            setup_rust_intrinsic(self.vm,result_func,extern_name,subs);
+        }
+
+        result_func
     }
 
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
@@ -413,7 +426,7 @@ impl<'vm> Item<'vm> {
         };
 
         if let Some(builtin) = builtin.get() {
-            let builtin_res = self.find_trait_builtin(*builtin,subs);
+            let builtin_res = builtin.find(subs);
             if let Some((a,b)) = builtin_res {
                 return Some(callback(&a,b));
             }
@@ -457,35 +470,6 @@ impl<'vm> Item<'vm> {
         }
         
         None
-    }
-
-    fn find_trait_builtin(&self, builtin: BuiltinTrait, subs: &SubList<'vm>) -> Option<(TraitImpl<'vm>,SubList<'vm>)> {
-
-        let dummy = || {
-            let trait_impl = TraitImpl{
-                bounds: Default::default(),
-                child_fn_items: Default::default(),
-                child_tys: Default::default(),
-                crate_id: CrateId(0),
-                for_types: subs.clone(),
-                generics: GenericCounts{ lifetimes: 0, types: 0, consts: 0 }
-            };
-            (trait_impl,SubList{list:vec!()})
-        };
-
-        match builtin {
-            BuiltinTrait::Sized => {
-                assert!(subs.list.len() == 1);
-                let Sub::Type(ty) = subs.list[0] else {
-                    panic!("bad lookup for core::marker::Sized");
-                };
-                if ty.is_sized() {
-                    Some(dummy())
-                } else {
-                    None
-                }
-            }
-        }
     }
 }
 
@@ -581,5 +565,46 @@ fn type_match<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, res_map: &mut SubMap<'
         _ => {
             panic!("match types {} == {}",in_ty,trait_ty)
         }
+    }
+}
+
+/// Get a path from rustc.
+pub fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> ItemPath {
+    use rustc_hir::definitions::DefPathData;
+
+    let mut result = String::new();
+
+    let mut is_debug = false;
+
+    // we only handle trivial paths
+    for elem in in_path.data.iter() {
+        match elem.data {
+            DefPathData::ValueNs(sym) |
+            DefPathData::TypeNs(sym) => {
+                result.push_str("::");
+                result.push_str(sym.as_str());
+            }
+            DefPathData::Impl => {
+                result.push_str("::{impl}");
+                is_debug = true;
+            }
+            DefPathData::ForeignMod => {
+                // do nothing
+            }
+            //DefPathData
+            _ => panic!("todo path {:?} {}",elem.data,in_path.to_string_no_crate_verbose())
+        }
+    }
+
+    if is_debug {
+        ItemPath(NameSpace::DebugOnly,result)
+    } else if let Some(last_elem) = in_path.data.last() {
+        match last_elem.data {
+            DefPathData::ValueNs(_) => ItemPath(NameSpace::Value,result),
+            DefPathData::TypeNs(_) => ItemPath(NameSpace::Type,result),
+            _ => panic!("can't determine namespace: {:?}",last_elem.data)
+        }
+    } else {
+        panic!("zero element path?");
     }
 }

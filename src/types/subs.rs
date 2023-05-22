@@ -24,6 +24,13 @@ impl<'vm> Sub<'vm> {
             Sub::Const => todo!()
         }
     }
+
+    pub fn assert_ty(&self) -> Type<'vm> {
+        match self {
+            Sub::Type(ty) => *ty,
+            _ => panic!("not a type")
+        }
+    }
 }
 
 // pretty printing for types

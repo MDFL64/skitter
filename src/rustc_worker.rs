@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, BuiltinTrait}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc}, builtins::BuiltinTrait};
 
 /////////////////////////
 
@@ -144,7 +144,6 @@ impl<'vm> RustCWorker<'vm> {
                                 // useless to us
                                 HirItemKind::Use(..) |
                                 HirItemKind::Mod(_) |
-                                HirItemKind::ForeignMod{..} |
                                 HirItemKind::ExternCrate(_) |
                                 HirItemKind::Macro(..) |
                                 HirItemKind::TyAlias(..) |
@@ -157,25 +156,52 @@ impl<'vm> RustCWorker<'vm> {
                                 HirItemKind::Static(..) => {
                                     // todo?
                                 }
+                                HirItemKind::ForeignMod{abi,items: mod_items} => {
+                                    //let local_id = item.owner_id.def_id;
+                                    //let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+                                    for item in mod_items {
+                                        // only statics and functions are permitted according to ref
+                                        let local_id = item.id.owner_id.def_id;
+                                        let item_path = path_from_rustc(&hir.def_path(local_id));
+                                        
+                                        let item = hir.foreign_item(item.id);
+                                        
+                                        use rustc_hir::ForeignItemKind;
+                                        match item.kind {
+                                            ForeignItemKind::Fn(..) => {
+                                                let kind = if abi == rustc_target::spec::abi::Abi::RustIntrinsic {
+                                                    ItemKind::new_function_extern(item.ident.as_str().to_owned())
+                                                } else {
+                                                    ItemKind::new_function()
+                                                };
+
+                                                items.add_item(vm,kind,item_path,local_id);
+                                            }
+                                            ForeignItemKind::Type => {
+                                                // opaque types, eww
+                                            }
+                                            _ => panic!("todo foreign item {:?}",item_path)
+                                        }
+                                    }
+
+                                }
                                 HirItemKind::Fn(..) => {
                                     let local_id = item.owner_id.def_id;
-                                    let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+                                    let item_path = path_from_rustc(&hir.def_path(local_id));
 
-                                    let path = ItemPath::new_value(item_path);
                                     let kind = ItemKind::new_function();
 
-                                    items.add_item(vm,kind,path,local_id);
+                                    items.add_item(vm,kind,item_path,local_id);
                                 }
                                 HirItemKind::Struct(..) |
                                 HirItemKind::Enum(..) |
                                 HirItemKind::Union(..) => {
                                     let local_id = item.owner_id.def_id;
-                                    let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+                                    let item_path = path_from_rustc(&hir.def_path(local_id));
 
-                                    let path = ItemPath::new_type(item_path);
                                     let kind = ItemKind::new_adt();
 
-                                    let item_id = items.add_item(vm,kind,path,local_id);
+                                    let item_id = items.add_item(vm,kind,item_path,local_id);
                                     adt_items.push(item_id);
                                 }
                                 // todo impls
@@ -183,30 +209,27 @@ impl<'vm> RustCWorker<'vm> {
                                     // trait item
                                     let (trait_item,trait_path) = {
                                         let local_id = item.owner_id.def_id;
-                                        let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+                                        let item_path = path_from_rustc(&hir.def_path(local_id));
     
-                                        let path = ItemPath::new_type(item_path.clone());
                                         let kind = ItemKind::new_trait();
     
-                                        let item_id = items.add_item(vm,kind,path,local_id);
+                                        let item_id = items.add_item(vm,kind,item_path.clone(),local_id);
                                         (item_id,item_path)
                                     };
 
                                     for item in child_items {
                                         let local_id = item.id.owner_id.def_id;
-
-                                        let item_path = format!("{}::{}",trait_path,item.ident);
+                                        let item_path = path_from_rustc(&hir.def_path(local_id));
+                                        // these should be REAL PATHS
 
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
-                                                let path = ItemPath::new_value(item_path);
                                                 let kind = ItemKind::new_function_with_trait(trait_item,item.ident.as_str().to_owned());
-                                                items.add_item(vm,kind,path,local_id);
+                                                items.add_item(vm,kind,item_path,local_id);
                                             }
                                             AssocItemKind::Type => {
-                                                let path = ItemPath::new_type(item_path);
                                                 let kind = ItemKind::new_associated_type(trait_item, item.ident.as_str().to_owned());
-                                                items.add_item(vm,kind,path,local_id);
+                                                items.add_item(vm,kind,item_path,local_id);
                                             }
                                             _ => () // constants unhandled
                                         }
@@ -227,20 +250,18 @@ impl<'vm> RustCWorker<'vm> {
 
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
-
-                                        let item_path = format!("{}::{}",base_path,item.ident);
+                                        // these are DEBUG ONLY paths, might require some adjustment
                                         
-                                        let path = ItemPath::new_debug(item_path);
-
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
+                                                let item_path = ItemPath::new_debug(format!("{}::{}",base_path,item.ident));
+                                                //let item_path = path_from_rustc(&hir.def_path(local_id)).unwrap();
+
                                                 let kind = ItemKind::new_function();
-                                                let item_id = items.add_item(vm,kind,path,local_id);
+                                                let item_id = items.add_item(vm,kind,item_path,local_id);
                                                 impl_list_fn.push((item.ident.as_str().to_owned(),item_id));
                                             }
                                             AssocItemKind::Type => {
-                                                //let kind = ItemKind::new_associated_type();
-                                                //let item_id = items.add_item(vm,kind,path,local_id);
                                                 impl_list_ty.push((item.ident.as_str().to_owned(),local_id));
                                             }
                                             _ => () // constants unhandled
@@ -339,7 +360,7 @@ impl<'vm> RustCWorker<'vm> {
                                     let trait_item = if let Some(trait_item) = items.find_by_did(trait_did) {
                                         trait_item
                                     } else {
-                                        let trait_path = ItemPath::new_type(tcx.def_path(trait_did).to_string_no_crate_verbose());
+                                        let trait_path = path_from_rustc(&tcx.def_path(trait_did));
                                         let trait_crate_id = ctx.items.find_crate_id(tcx, trait_did.krate);
                                         let trait_crate_items = vm.get_crate_items(trait_crate_id);
     

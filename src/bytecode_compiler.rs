@@ -171,6 +171,21 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     Slot::DUMMY
                 })
             }
+            ExprKind::LiteralString(string) => {
+                let dst_slot = dst_slot.unwrap_or_else(|| {
+                    self.stack.alloc(expr_ty)
+                });
+
+                let ptr = string.as_ptr() as usize;
+                let len = string.len();
+
+                let ptr_size = POINTER_SIZE.bytes();
+
+                self.out_bc.push(bytecode_select::literal(ptr as i128, ptr_size, dst_slot));
+                self.out_bc.push(bytecode_select::literal(len as i128, ptr_size, dst_slot.offset_by(ptr_size)));
+
+                dst_slot
+            }
             ExprKind::Unary(op, arg) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr_ty)
@@ -710,7 +725,8 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
             ExprKind::Block{..} |
             ExprKind::Tuple{..} |
             ExprKind::Binary{..} |
-            ExprKind::Ref{..} | // TODO special case? is *& a no-op or does it create a temporary?
+            ExprKind::Ref{..} |
+            ExprKind::Array(_) |
             ExprKind::LiteralValue{..} => {
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
@@ -1019,13 +1035,13 @@ impl Place {
 }
 
 #[derive(Default)]
-struct CompilerStack {
+pub struct CompilerStack {
     entries: Vec<StackEntry>,
     top: u32
 }
 
 impl CompilerStack {
-    fn alloc(&mut self, ty: Type) -> Slot {
+    pub fn alloc(&mut self, ty: Type) -> Slot {
         let layout = ty.layout();
 
         self.align(layout.align);

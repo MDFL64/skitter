@@ -21,8 +21,21 @@ pub fn main() {
 
     //let d = (10i32).to_be();
 
-    //let bytes = a.to_le_bytes();
-    //_builtin::print_int(a.ilog10() as _);
+    _builtin::print_int(a.swap_bytes() as _);
+
+    let bytes = c.to_le_bytes();
+    _builtin::print_int(bytes[0] as _);
+    _builtin::print_int(bytes[1] as _);
+    _builtin::print_int(bytes[2] as _);
+    _builtin::print_int(bytes[3] as _);
+
+    let bytes = c.to_be_bytes();
+    _builtin::print_int(bytes[0] as _);
+    _builtin::print_int(bytes[1] as _);
+    _builtin::print_int(bytes[2] as _);
+    _builtin::print_int(bytes[3] as _);
+
+    //_builtin::print_int(b.ilog10() as _);
     //let min = a.min(b);
 
     //let c = a.count_zeros();

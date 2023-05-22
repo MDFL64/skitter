@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::{Mutex}};
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject, AliasKind};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath}};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, path_from_rustc}};
 
 use colosseum::sync::Arena;
 
@@ -91,7 +91,7 @@ impl<'vm> TypeContext<'vm> {
                 TypeKind::Slice(member_ty)
             }
             TyKind::Str => {
-                TypeKind::Str
+                TypeKind::StringSlice
             }
 
             TyKind::Adt(adt,subs) => {
@@ -144,35 +144,13 @@ impl<'vm> TypeContext<'vm> {
         SubList{ list }
     }
 
-    fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> Option<ItemPath> {
-        use rustc_hir::definitions::DefPathData;
-
-        // we only handle trivial paths
-        for elem in in_path.data.iter() {
-            match elem.data {
-                DefPathData::ValueNs(_) |
-                DefPathData::TypeNs(_) => (),
-                _ => return None
-            }
-        }
-
-        if let Some(last_elem) = in_path.data.last() {
-            match last_elem.data {
-                DefPathData::ValueNs(_) => Some(ItemPath::new_value(in_path.to_string_no_crate_verbose())),
-                DefPathData::TypeNs(_) => Some(ItemPath::new_type(in_path.to_string_no_crate_verbose())),
-                _ => panic!("? {:?}",last_elem.data)
-            }
-        } else {
-            panic!("zero element path?");
-        }
-    }
-
     pub fn def_from_rustc<'tcx>(&'vm self, did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm,'tcx>) -> ItemWithSubs<'vm> {
         let item = if let Some(item) = ctx.items.find_by_did(did) {
             item
         } else {
             let def_path = ctx.tcx.def_path(did);
-            if let Some(item_path) = Self::path_from_rustc(&def_path) {
+            let item_path = path_from_rustc(&def_path);
+            if item_path.can_find() {
                 assert!(did.krate != rustc_hir::def_id::LOCAL_CRATE);
                 let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
                 let crate_items = ctx.vm.get_crate_items(trait_crate_id);
@@ -180,29 +158,27 @@ impl<'vm> TypeContext<'vm> {
                 if let Some(item) = crate_items.find_by_path(&item_path) {
                     item
                 } else {
-                    panic!("couldn't find item: {:?} / {:?}",item_path,def_path)
+                    panic!("couldn't find item: {:?} -> {:?}",def_path,item_path)
                 }
-            } else {
-                if let Some(parent_impl) = ctx.tcx.impl_of_method(did) {
-                    let subject = ctx.tcx.impl_subject(parent_impl).skip_binder();
-                    let ident = ctx.tcx.item_name(did);
-                    match subject {
-                        ImplSubject::Inherent(ty) => {
-                            let ty = self.type_from_rustc(ty, ctx);
-                            if let Some((crate_id,item_id)) = ty.find_impl_member(ident.as_str()) {
-                                let crate_items = ctx.vm.get_crate_items(crate_id);
-                                crate_items.get(item_id)
-                            } else {
-                                panic!("missing type impl");
-                            }
-                        }
-                        ImplSubject::Trait(trait_ref) => {
-                            panic!("todo trait ref");
+            } else if let Some(parent_impl) = ctx.tcx.impl_of_method(did) {
+                let subject = ctx.tcx.impl_subject(parent_impl).skip_binder();
+                let ident = ctx.tcx.item_name(did);
+                match subject {
+                    ImplSubject::Inherent(ty) => {
+                        let ty = self.type_from_rustc(ty, ctx);
+                        if let Some((crate_id,item_id)) = ty.find_impl_member(ident.as_str()) {
+                            let crate_items = ctx.vm.get_crate_items(crate_id);
+                            crate_items.get(item_id)
+                        } else {
+                            panic!("missing type impl");
                         }
                     }
-                } else {
-                    panic!("can't resolve path: {:?}",did);
+                    ImplSubject::Trait(trait_ref) => {
+                        panic!("todo trait ref");
+                    }
                 }
+            } else {
+                panic!("couldn't find item: {:?} -> {:?}",def_path,item_path)
             }
         };
 

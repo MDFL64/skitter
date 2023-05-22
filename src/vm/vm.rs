@@ -5,14 +5,12 @@ use std::sync::atomic::Ordering;
 use crate::bytecode_compiler::HirCompiler;
 use crate::items::CrateId;
 use crate::items::CrateItems;
-use crate::items::ExternCrate;
 use crate::items::Item;
 use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::IntSign;
 use crate::types::IntWidth;
-use crate::types::Sub;
 use crate::types::SubList;
 use crate::types::Type;
 use crate::types::TypeContext;
@@ -32,7 +30,8 @@ pub struct VM<'vm> {
 
     arena_items: Arena<CrateItems<'vm>>,
     arena_functions: Arena<Function<'vm>>,
-    arena_bytecode: Arena<Vec<Instr<'vm>>>
+    arena_bytecode: Arena<Vec<Instr<'vm>>>,
+    arena_strings: Arena<String>,
 }
 
 impl<'vm> VM<'vm> {
@@ -48,6 +47,7 @@ impl<'vm> VM<'vm> {
             arena_items: Arena::new(),
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
+            arena_strings: Arena::new()
         }
     }
 
@@ -113,6 +113,10 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &Vec<Instr<'vm>> {
         self.arena_bytecode.alloc(bc)
+    }
+
+    pub fn alloc_string(&'vm self, str: String) -> &'vm str {
+        self.arena_strings.alloc(str)
     }
 
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
