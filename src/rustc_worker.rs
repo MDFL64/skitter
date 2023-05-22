@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts}};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, BuiltinTrait}};
 
 /////////////////////////
 
@@ -70,8 +70,14 @@ struct ImplItem<'tcx> {
     children_ty: Vec<(String,LocalDefId)>,
 }
 
+pub struct RustCWorkerConfig<'a> {
+    pub source_root: &'a str,
+    pub extern_crates: Vec<ExternCrate>,
+    pub is_core: bool,
+}
+
 impl<'vm> RustCWorker<'vm> {
-    pub fn new<'s>(source_root: &str, extern_crates: Vec<ExternCrate>, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
+    pub fn new<'s>(worker_config: RustCWorkerConfig, scope: &'s std::thread::Scope<'s,'vm>, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self {
 
         let is_verbose = vm.is_verbose;
 
@@ -96,7 +102,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(source_root.into()),
+            input: config::Input::File(worker_config.source_root.into()),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -117,7 +123,7 @@ impl<'vm> RustCWorker<'vm> {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
                         
-                        let mut items = CrateItems::new(this_crate,extern_crates);
+                        let mut items = CrateItems::new(this_crate,worker_config.extern_crates);
                         
                         let hir = tcx.hir();
 
@@ -351,6 +357,16 @@ impl<'vm> RustCWorker<'vm> {
                                         generics
                                     });
                                 }
+                            }
+                        }
+
+                        if worker_config.is_core {
+
+                            let lang_items = tcx.lang_items();
+                            {
+                                let sized_trait = lang_items.sized_trait().unwrap();
+                                let sized_trait = items.find_by_did(sized_trait).unwrap();
+                                sized_trait.trait_set_builtin(BuiltinTrait::Sized);
                             }
                         }
 

@@ -35,7 +35,7 @@ use clap::Parser;
 use types::SubList;
 use vm::VM;
 
-use crate::{items::{ItemPath, ExternCrate}};
+use crate::{items::{ItemPath, ExternCrate}, rustc_worker::RustCWorkerConfig};
 
 // seems neutral or slower than the system allocator (wsl), todo more tests
 //use mimalloc::MiMalloc;
@@ -66,7 +66,12 @@ fn main() {
             // make sure core root exists
             assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_worker(&core_root,vec!(), scope);
+            let core_crate = vm.add_worker(RustCWorkerConfig{
+                source_root: &core_root,
+                extern_crates: vec!(),
+                is_core: true
+            },scope);
+
             vm.wait_for_setup(core_crate);
             extern_crates.push(ExternCrate{
                 id: core_crate,
@@ -74,7 +79,12 @@ fn main() {
             });
         }
 
-        let main_crate = vm.add_worker(&args.file_name,extern_crates, scope);
+        let main_crate = vm.add_worker(RustCWorkerConfig{
+            source_root: &args.file_name,
+            extern_crates,
+            is_core: false
+        },scope);
+        
         vm.wait_for_setup(main_crate);
 
         let main_path = ItemPath::new_value("::main".to_owned());

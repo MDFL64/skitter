@@ -76,7 +76,7 @@ pub struct ItemWithSubs<'vm> {
     pub subs: SubList<'vm>
 }
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+#[derive(Debug,Hash,PartialEq,Eq,Clone,Copy)]
 pub enum ArraySize {
     Static(u32),
     ConstParam(u32)
@@ -159,6 +159,14 @@ impl<'vm> Type<'vm> {
                 }).collect();
                 vm.types.intern(TypeKind::Tuple(new_fields), vm)
             }
+            TypeKind::Array(child_ty,size) => {
+                // todo subs for const size
+                size.assert_static();
+                vm.types.intern(TypeKind::Array(child_ty.sub(subs),*size), vm)
+            }
+            TypeKind::Slice(child_ty) => {
+                vm.types.intern(TypeKind::Slice(child_ty.sub(subs)), vm)
+            }
             TypeKind::Adt(adt) => {
                 // fast path, will become redundant if above optimization is implemented
                 if adt.subs.list.len() == 0 {
@@ -191,6 +199,7 @@ impl<'vm> Type<'vm> {
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
             // These types never accept subs.
+            TypeKind::Never |
             TypeKind::Int(..) |
             TypeKind::Float(_) |
             TypeKind::Bool |

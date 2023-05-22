@@ -192,11 +192,17 @@ pub enum ItemKind<'vm> {
         info: OnceLock<AdtInfo<'vm>>
     },
     Trait{
-        impl_list: RwLock<Vec<TraitImpl<'vm>>>
+        impl_list: RwLock<Vec<TraitImpl<'vm>>>,
+        builtin: OnceLock<BuiltinTrait>
     },
     AssociatedType{
         parent_trait: TraitInfo
     }
+}
+
+#[derive(Copy,Clone)]
+pub enum BuiltinTrait {
+    Sized
 }
 
 pub struct AdtInfo<'vm> {
@@ -264,7 +270,8 @@ impl<'vm> ItemKind<'vm> {
 
     pub fn new_trait() -> Self {
         Self::Trait{
-            impl_list: Default::default()
+            impl_list: Default::default(),
+            builtin: Default::default(),
         }
     }
 }
@@ -343,12 +350,19 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn add_trait_impl(&self, info: TraitImpl<'vm>) {
-        let ItemKind::Trait{impl_list} = &self.kind else {
+        let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut impl_list = impl_list.write().unwrap();
         impl_list.push(info);
+    }
+
+    pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {
+        let ItemKind::Trait{builtin,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+        builtin.set(new_builtin).ok();
     }
 
     pub fn resolve_associated_ty(&self, subs: &SubList<'vm>) -> Type<'vm> {
@@ -382,20 +396,28 @@ impl<'vm> Item<'vm> {
                     });
                 }
             }
-            panic!("failed to find associated function");
+            None
         }).expect("failed to find trait")
     }
 
     pub fn trait_has_impl(&self, subs: &SubList<'vm>) -> bool {
-        self.find_trait_impl(subs,|trait_impl,subs| {
+        self.find_trait_impl(subs,|_,_| {
             ()
         }).is_some()
     }
 
     pub fn find_trait_impl<T>(&self, subs: &SubList<'vm>, callback: impl FnOnce(&TraitImpl<'vm>,SubList<'vm>)->T) -> Option<T> {
-        let ItemKind::Trait{impl_list} = &self.kind else {
+
+        let ItemKind::Trait{impl_list,builtin} = &self.kind else {
             panic!("item kind mismatch");
         };
+
+        if let Some(builtin) = builtin.get() {
+            let builtin_res = self.find_trait_builtin(*builtin,subs);
+            if let Some((a,b)) = builtin_res {
+                return Some(callback(&a,b));
+            }
+        }
 
         let impl_list = impl_list.read().unwrap();
 
@@ -417,26 +439,53 @@ impl<'vm> Item<'vm> {
                 }
 
                 if candidate.bounds.len() > 0 {
+                    //println!("?? {}",candidate.for_types);
                     for bound in &candidate.bounds {
                         let types_to_check = bound.subs.sub(&trait_subs);
-                        println!("? {} has {}",types_to_check,bound.item.path.as_string());
                         let res = bound.item.trait_has_impl(&types_to_check);
-                        println!("> {}",res);
+                        //println!("- {} has {}? {}",types_to_check,bound.item.path.as_string(),res);
 
                         if !res {
                             // failed, try next candidate
                             continue 'search;
                         }
                     }
-                    panic!();
                 }
-                // TODO additional checks
 
                 return Some(callback(candidate,trait_subs));
             }
         }
-
+        
         None
+    }
+
+    fn find_trait_builtin(&self, builtin: BuiltinTrait, subs: &SubList<'vm>) -> Option<(TraitImpl<'vm>,SubList<'vm>)> {
+
+        let dummy = || {
+            let trait_impl = TraitImpl{
+                bounds: Default::default(),
+                child_fn_items: Default::default(),
+                child_tys: Default::default(),
+                crate_id: CrateId(0),
+                for_types: subs.clone(),
+                generics: GenericCounts{ lifetimes: 0, types: 0, consts: 0 }
+            };
+            (trait_impl,SubList{list:vec!()})
+        };
+
+        match builtin {
+            BuiltinTrait::Sized => {
+                assert!(subs.list.len() == 1);
+                let Sub::Type(ty) = subs.list[0] else {
+                    panic!("bad lookup for core::marker::Sized");
+                };
+                if ty.is_sized() {
+                    Some(dummy())
+                } else {
+                    None
+                }
+            }
+        }
     }
 }
 
