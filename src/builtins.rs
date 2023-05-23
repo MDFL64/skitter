@@ -1,4 +1,4 @@
-use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, TypeKind}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE};
+use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE};
 
 #[derive(Copy,Clone)]
 pub enum BuiltinTrait {
@@ -36,152 +36,178 @@ impl BuiltinTrait {
 }
 
 /// Initializes a rust intrinsic function, by either setting bytecode or setting a native function to call
-pub fn setup_rust_intrinsic<'vm>(vm: &'vm VM<'vm>, func: &Function<'vm>, name: &str, subs: &SubList<'vm>) {
+pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<'vm>, out_bc: &mut Vec<Instr<'vm>>, stack: &mut CompilerStack, arg_slots: Vec<Slot>, out_slot: Slot) {
     match name {
         "transmute" => {
-            // this is pretty nasty and is filled with a bunch of possibly un-needed sanity checks
-            // the best thing we could do is detect it while compiling the caller and convert it straight to a copy, which would remove a redundant copy
             assert!(subs.list.len() == 2);
+            assert!(arg_slots.len() == 1);
+
             let arg = subs.list[0].assert_ty();
             let res = subs.list[1].assert_ty();
 
-            let size = arg.layout().assert_size();
+            let min_align_ty = std::cmp::min_by_key(arg, res, |ty: &Type| ty.layout().align);
 
-            assert_eq!(size,res.layout().assert_size());
-            
-            // must be at 0
-            let res_slot = Slot::new(0);
-            // must be here, since the sizes are equal and alignments are factors of the size
-            let arg_slot = Slot::new(size);
-            
-            let mut bc = Vec::new();
-
-            if let Some(copy) = bytecode_select::copy(res_slot, arg_slot, arg) {
-                bc.push(copy);
+            if let Some(copy) = bytecode_select::copy(out_slot, arg_slots[0], min_align_ty) {
+                out_bc.push(copy);
             }
-            bc.push(Instr::Return);
-
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
         }
         "bswap" => {
-            // also nasty, do we just want a specialized instruction for this? is it common enough to matter?
             assert!(subs.list.len() == 1);
-            let arg_res = subs.list[0].assert_ty();
+            assert!(arg_slots.len() == 1);
 
+            let arg_res = subs.list[0].assert_ty();
             let size = arg_res.layout().assert_size();
 
-            // must be at 0
-            let res_slot = Slot::new(0);
-            // must be here, since the sizes are equal and alignments are factors of the size
-            let arg_slot = Slot::new(size);
-
-            let mut bc = Vec::new();
+            let arg_slot = arg_slots[0];
 
             for i in 0..size {
-                bc.push(Instr::MovSS1(res_slot.offset_by(i), arg_slot.offset_by(size - i - 1)));
+                out_bc.push(Instr::MovSS1(out_slot.offset_by(i), arg_slot.offset_by(size - i - 1)));
             }
-            bc.push(Instr::Return);
-
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
         }
         "min_align_of" => {
-            // not super offensive
             assert!(subs.list.len() == 1);
-            let arg = subs.list[0].assert_ty();
+            assert!(arg_slots.len() == 0);
 
-            let res = arg.layout().align;
+            let arg_ty = subs.list[0].assert_ty();
 
-            let bc = vec!(
-                bytecode_select::literal(res as _, POINTER_SIZE.bytes(), Slot::new(0)),
-                Instr::Return
-            );
+            let res = arg_ty.layout().align;
 
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
+            out_bc.push(bytecode_select::literal(res as _, POINTER_SIZE.bytes(), out_slot));
         }
         "size_of" => {
-            // not super offensive
             assert!(subs.list.len() == 1);
-            let arg = subs.list[0].assert_ty();
+            assert!(arg_slots.len() == 0);
 
-            let res = arg.layout().assert_size();
+            let arg_ty = subs.list[0].assert_ty();
 
-            let bc = vec!(
-                bytecode_select::literal(res as _, POINTER_SIZE.bytes(), Slot::new(0)),
-                Instr::Return
-            );
+            let res = arg_ty.layout().assert_size();
 
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
+            out_bc.push(bytecode_select::literal(res as _, POINTER_SIZE.bytes(), out_slot));
         }
         "min_align_of_val" => {
             assert!(subs.list.len() == 1);
-            let arg = subs.list[0].assert_ty();
+            assert!(arg_slots.len() == 1);
 
-            if let TypeKind::Dynamic = arg.kind() {
+            let arg_ty = subs.list[0].assert_ty();
+
+            if let TypeKind::Dynamic = arg_ty.kind() {
+                // it may be best to just force alignment to the max for these cases and use that compile-time value
                 panic!("todo, trait objects may have alignment only decidable at run-time");
+            } else {
+                // everything else should be decidable at compile-time
+                let res = arg_ty.layout().align;
+    
+                out_bc.push(bytecode_select::literal(res as _, POINTER_SIZE.bytes(), out_slot));
             }
-
-            let res = arg.layout().align;
-
-            let bc = vec!(
-                bytecode_select::literal(res as _, POINTER_SIZE.bytes(), Slot::new(0)),
-                Instr::Return
-            );
-
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
         }
         "size_of_val" => {
             assert!(subs.list.len() == 1);
-            let arg = subs.list[0].assert_ty();
+            assert!(arg_slots.len() == 1);
 
-            let bc = if let Some(size) = arg.layout().maybe_size {
-                vec!(
-                    bytecode_select::literal(size as _, POINTER_SIZE.bytes(), Slot::new(0)),
-                    Instr::Return
-                )
+            let arg_ty = subs.list[0].assert_ty();
+
+            if let Some(size) = arg_ty.layout().maybe_size {
+                out_bc.push(bytecode_select::literal(size as _, POINTER_SIZE.bytes(), out_slot));
             } else {
-                
-                fn byte_slice_sizer<'vm>(vm: &'vm VM<'vm>) -> Vec<Instr<'vm>> {
-                    let ptr_size = POINTER_SIZE.bytes();
-                    vec!(
-                        bytecode_select::copy(Slot::new(0), Slot::new(ptr_size*2), vm.ty_usize()).unwrap(),
-                        Instr::Return
-                    )
-                }
+                let arg_slot = arg_slots[0];
 
                 let ptr_size = POINTER_SIZE.bytes();
+
+                let byte_slice_size = || {
+                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), vm.ty_usize()).unwrap()
+                };
                 
-                match arg.kind() {
+                match arg_ty.kind() {
                     TypeKind::Slice(child_ty) => {
                         let (mul_ctor,_) = bytecode_select::binary(crate::ir::BinaryOp::Mul, vm.ty_usize());
 
                         let elem_size = child_ty.layout().assert_size();
 
                         if elem_size == 1 {
-                            byte_slice_sizer(vm)
+                            out_bc.push(byte_slice_size());
                         } else {
-                            vec!(
-                                bytecode_select::literal(elem_size as _, ptr_size, Slot::new(ptr_size*3)),
-                                mul_ctor(Slot::new(0),Slot::new(ptr_size*2),Slot::new(ptr_size*3)),
-                                Instr::Return
-                            )
+                            out_bc.push(bytecode_select::literal(elem_size as _, ptr_size, out_slot));
+                            out_bc.push(mul_ctor(out_slot,out_slot,arg_slot.offset_by(ptr_size)));
                         }
                     }
-                    TypeKind::StringSlice => byte_slice_sizer(vm),
+                    TypeKind::StringSlice => out_bc.push(byte_slice_size()),
                     _ => panic!("todo unsized value size")
                 }
             };
+        }
+        "const_eval_select" => {
+            // we always select the runtime impl
+            // it is unsound to make the two impls behave differently, so this should hopefully be okay
+            // it might cause some tests to fail though?
+            assert!(subs.list.len() == 4);
+            assert!(arg_slots.len() == 3);
 
-            let bc = vm.alloc_bytecode(bc);
-            func.set_bytecode(bc);
+            let source_slot = arg_slots[0];
+            let args_ty = subs.list[0].assert_ty();
+            let res_ty = subs.list[3].assert_ty();
+            let func = subs.list[2].assert_ty().func_item().unwrap();
+            let func = func.item.func_get(&func.subs);
+
+            let TypeKind::Tuple(arg_tys) = args_ty.kind() else {
+                panic!("const_eval_select: bad args ty");
+            };
+
+            stack.align_for_call();
+            let call_slot = stack.alloc(res_ty);
+            for (arg_ty,arg_offset) in arg_tys.iter().zip(&args_ty.layout().field_offsets[0]) {
+                let arg_slot = stack.alloc(*arg_ty);
+                
+                if let Some(copy) = bytecode_select::copy(arg_slot, source_slot.offset_by(*arg_offset), *arg_ty) {
+                    out_bc.push(copy);
+                }
+            }
+            out_bc.push(Instr::Call(call_slot, func));
+
+            if let Some(copy) = bytecode_select::copy(out_slot, call_slot, res_ty) {
+                out_bc.push(copy);
+            }
+        }
+        "read_via_copy" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg_slot = arg_slots[0];
+
+            if let Some(copy) = bytecode_select::copy_from_ptr(out_slot, arg_slot, arg_ty, 0) {
+                out_bc.push(copy);
+            }
+        }
+        "write_via_move" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let ptr_slot = arg_slots[0];
+            let val_slot = arg_slots[1];
+
+            if let Some(copy) = bytecode_select::copy_to_ptr(ptr_slot, val_slot, arg_ty, 0) {
+                out_bc.push(copy);
+            }
+        }
+        "ctpop" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg_slot = arg_slots[0];
+
+            match arg_ty.layout().assert_size() {
+                1 => out_bc.push(Instr::I8_PopCount(out_slot, arg_slot)),
+                2 => out_bc.push(Instr::I16_PopCount(out_slot, arg_slot)),
+                4 => out_bc.push(Instr::I32_PopCount(out_slot, arg_slot)),
+                8 => out_bc.push(Instr::I64_PopCount(out_slot, arg_slot)),
+                16 => out_bc.push(Instr::I128_PopCount(out_slot, arg_slot)),
+                _ => panic!("can't ctpop {}",arg_ty)
+            }
         }
         _ => {
-            println!("{}{}",name,subs);
-            panic!("attempt setup intrinsic");
+            panic!("attempt compile intrinsic: {}{}",name,subs);
         }
     }
 }

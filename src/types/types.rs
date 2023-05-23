@@ -255,6 +255,15 @@ impl<'vm> Type<'vm> {
         let info = item.get_adt_info();
         info.discriminator_ty
     }
+
+    pub fn func_item(&self) -> Option<ItemWithSubs<'vm>> {
+        match self.kind() {
+            TypeKind::FunctionDef(item) => {
+                Some(item.clone())
+            }
+            _ => None
+        }
+    }
 }
 
 impl<'vm> std::fmt::Debug for Type<'vm> {
@@ -282,12 +291,23 @@ impl<'vm> std::cmp::Eq for Type<'vm> {}
 impl<'vm> Display for Type<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind() {
-            TypeKind::Adt(item_with_subs) => {
+            TypeKind::Adt(item_with_subs) | TypeKind::FunctionDef(item_with_subs) => {
                 write!(f,"{}",item_with_subs.item.path.as_string())?;
                 if item_with_subs.subs.list.len() > 0 {
                     write!(f,"{}",item_with_subs.subs)?;
                 }
                 Ok(())
+            }
+            TypeKind::Tuple(children) => {
+                write!(f,"(")?;
+                for (i,ty) in children.iter().enumerate() {
+                    if i > 0 {
+                        write!(f,",")?;
+                    }
+                    write!(f,"{}",ty)?;
+                }
+                write!(f,")")
+
             }
             TypeKind::Int(width,sign) => {
                 match (width,sign) {
@@ -313,6 +333,12 @@ impl<'vm> Display for Type<'vm> {
                 match mutability {
                     Mutability::Const => write!(f,"&{}",ty),
                     Mutability::Mut => write!(f,"&mut {}",ty),
+                }
+            }
+            TypeKind::Ptr(ty,mutability) => {
+                match mutability {
+                    Mutability::Const => write!(f,"*const {}",ty),
+                    Mutability::Mut => write!(f,"*mut {}",ty),
                 }
             }
             _ => {

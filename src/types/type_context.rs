@@ -170,7 +170,7 @@ impl<'vm> TypeContext<'vm> {
                             let crate_items = ctx.vm.get_crate_items(crate_id);
                             crate_items.get(item_id)
                         } else {
-                            panic!("missing type impl");
+                            panic!("couldn't find type impl {}::{}",ty,ident);
                         }
                     }
                     ImplSubject::Trait(trait_ref) => {

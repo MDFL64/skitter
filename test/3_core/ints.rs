@@ -13,8 +13,6 @@ pub fn main() {
     let c = (7i32).pow(10);
     _builtin::print_int(c as _);
 
-    //let d = (10i32).swap_bytes();
-
     //let e = (5i32).reverse_bits();
 
     //let f = (2i32).rotate_left(5);
@@ -34,6 +32,17 @@ pub fn main() {
     _builtin::print_int(bytes[1] as _);
     _builtin::print_int(bytes[2] as _);
     _builtin::print_int(bytes[3] as _);
+
+    _builtin::print_bool((1u32).is_power_of_two());
+    _builtin::print_bool((2u32).is_power_of_two());
+    _builtin::print_bool((3u32).is_power_of_two());
+    _builtin::print_bool((4u32).is_power_of_two());
+    _builtin::print_bool((5u32).is_power_of_two());
+    _builtin::print_bool((6u32).is_power_of_two());
+    _builtin::print_bool((7u32).is_power_of_two());
+    _builtin::print_bool((8u32).is_power_of_two());
+    _builtin::print_bool((9u32).is_power_of_two());
+
 
     //_builtin::print_int(b.ilog10() as _);
     //let min = a.min(b);

@@ -304,7 +304,14 @@ pub enum Instr<'vm> {
 
     Return,
     Bad,
-    Debug(Box<String>)
+    Debug(Box<String>),
+
+    // RUST INTRINSICS
+    I8_PopCount(Slot, Slot),
+    I16_PopCount(Slot, Slot),
+    I32_PopCount(Slot, Slot),
+    I64_PopCount(Slot, Slot),
+    I128_PopCount(Slot, Slot),
 }
 
 impl<'vm> Instr<'vm> {
@@ -572,6 +579,12 @@ impl<'vm> Instr<'vm> {
             Instr::Bad |
             Instr::Debug(_) |
             Instr::Call(_, _) => None,
+
+            Instr::I8_PopCount(x,_) |
+            Instr::I16_PopCount(x,_) |
+            Instr::I32_PopCount(x,_) |
+            Instr::I64_PopCount(x,_) |
+            Instr::I128_PopCount(x,_) => Some(x),
         }
     }
 }

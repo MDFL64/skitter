@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait, setup_rust_intrinsic}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait}};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -284,9 +284,9 @@ impl<'vm> ItemKind<'vm> {
 }
 
 impl<'vm> Item<'vm> {
-    pub fn get_function(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
+    pub fn func_get(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
 
-        let ItemKind::Function{mono_instances,extern_name,..} = &self.kind else {
+        let ItemKind::Function{mono_instances,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -295,15 +295,19 @@ impl<'vm> Item<'vm> {
             self.vm.alloc_function(self, subs.clone())
         });
 
-        if let Some(extern_name) = extern_name {
-            setup_rust_intrinsic(self.vm,result_func,extern_name,subs);
-        }
-
         result_func
     }
 
+    pub fn func_get_extern(&self) -> &Option<String> {
+        let ItemKind::Function{extern_name,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        extern_name
+    }
+
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
-    pub fn get_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
+    pub fn func_get_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
         
         let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -314,7 +318,7 @@ impl<'vm> Item<'vm> {
             let trait_item = crate_items.get(trait_info.trait_id);
             let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
             if let Some(resolved_func) = resolved_func {
-                let (f,s) = resolved_func.item.get_ir(&resolved_func.subs);
+                let (f,s) = resolved_func.item.func_get_ir(&resolved_func.subs);
                 return (f,Cow::Owned(s.into_owned()));
             }
         }
@@ -328,7 +332,7 @@ impl<'vm> Item<'vm> {
             }
 
             if self.vm.is_verbose {
-                println!("converting ir for {:?} {:?}",self.path,subs);
+                println!("converting ir for {}{}",self.path.as_string(),subs);
             }
 
             self.vm.build_function_ir(self.crate_id,self.item_id);

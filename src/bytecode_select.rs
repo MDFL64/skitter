@@ -332,6 +332,7 @@ pub fn cast<'vm>(arg_ty: Type, res_ty: Type) -> fn(Slot,Slot) -> Instr<'vm> {
         (TypeKind::Bool,TypeKind::Int(..)) |
         (TypeKind::Ptr(..),TypeKind::Int(..)) |
         (TypeKind::Int(..),TypeKind::Ptr(..)) |
+        (TypeKind::Ptr(..),TypeKind::Ptr(..)) |
         (TypeKind::Char,TypeKind::Int(..)) |
         (TypeKind::Int(..),TypeKind::Char) => {
             

@@ -202,7 +202,7 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let (ir,new_subs) = self.item.get_ir(&self.subs);
+            let (ir,new_subs) = self.item.func_get_ir(&self.subs);
             let path = self.item.path.as_string();
 
             let bc = HirCompiler::compile(self.item.vm, &ir, &new_subs, path);

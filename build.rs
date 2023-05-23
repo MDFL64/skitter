@@ -213,6 +213,7 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.wrapping_shr(b as _)",
         source,
     );
+    write_unary(&format!("{}_PopCount", big), unsigned, "x.count_ones()", source);
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {
