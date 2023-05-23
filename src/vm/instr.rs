@@ -263,6 +263,7 @@ pub enum Instr<'vm> {
     MovSS8N(Slot, Slot, u32),
     MovSS16N(Slot, Slot, u32),
 
+    // NOTE: we could actually make ONE of these u16's wider, if we change the layout to: (u16, Slot, Slot, u32), or just remove the c abi restriction
     MovSP1(Slot, Slot, u32),
     MovSP2(Slot, Slot, u32),
     MovSP4(Slot, Slot, u32),
@@ -307,6 +308,8 @@ pub enum Instr<'vm> {
     Debug(Box<String>),
 
     // RUST INTRINSICS
+    WriteBytes{size: u16, dst: Slot, val: Slot, count: Slot},
+
     I8_PopCount(Slot, Slot),
     I16_PopCount(Slot, Slot),
     I32_PopCount(Slot, Slot),
@@ -585,6 +588,8 @@ impl<'vm> Instr<'vm> {
             Instr::I32_PopCount(x,_) |
             Instr::I64_PopCount(x,_) |
             Instr::I128_PopCount(x,_) => Some(x),
+
+            Instr::WriteBytes{..} => None
         }
     }
 }

@@ -215,10 +215,7 @@ impl<'vm> Function<'vm> {
 
 impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Function")
-            .field("item", &self.item)
-            .field("subs",&self.subs)
-            .finish()
+        write!(f,"Function(\"{}{}\")",self.item.path.as_string(),self.subs)
     }
 }
 

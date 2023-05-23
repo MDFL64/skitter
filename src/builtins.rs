@@ -2,7 +2,8 @@ use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, Ty
 
 #[derive(Copy,Clone)]
 pub enum BuiltinTrait {
-    Sized
+    Sized,
+    DiscriminantKind
 }
 
 impl BuiltinTrait {
@@ -31,6 +32,19 @@ impl BuiltinTrait {
                     None
                 }
             }
+            BuiltinTrait::DiscriminantKind => {
+                // todo this should handle things like Option<Box<T>>
+                assert!(subs.list.len() == 1);
+                if let Some(discrim_ty) = subs.list[0].assert_ty().get_adt_discriminator_ty() {
+                    let mut res = dummy();
+    
+                    res.0.child_tys.push(("Discriminant".to_owned(),discrim_ty));
+    
+                    Some(res)
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -44,6 +58,8 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
 
             let arg = subs.list[0].assert_ty();
             let res = subs.list[1].assert_ty();
+
+            assert_eq!(arg.layout().assert_size(), res.layout().assert_size());
 
             let min_align_ty = std::cmp::min_by_key(arg, res, |ty: &Type| ty.layout().align);
 
@@ -135,6 +151,29 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
                 }
             };
         }
+        "variant_count" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 0);
+
+            let arg_ty = subs.list[0].assert_ty();
+
+            // get the number of variants
+            let res = arg_ty.layout().field_offsets.len();
+
+            // we should maybe panic if not checking an enum, but this is probably okay
+
+            out_bc.push(bytecode_select::literal(res as _, POINTER_SIZE.bytes(), out_slot));
+        }
+        "discriminant_value" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let discrim_ty = arg_ty.get_adt_discriminator_ty().expect("missing discriminator type");
+
+            out_bc.push(bytecode_select::copy_from_ptr(out_slot, arg_slots[0], discrim_ty, 0).unwrap());
+        }
+        //""
         "const_eval_select" => {
             // we always select the runtime impl
             // it is unsound to make the two impls behave differently, so this should hopefully be okay
@@ -205,6 +244,20 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
                 16 => out_bc.push(Instr::I128_PopCount(out_slot, arg_slot)),
                 _ => panic!("can't ctpop {}",arg_ty)
             }
+        }
+        "assert_zero_valid" | "assert_inhabited" => {
+            // do nothing yeehaw
+        }
+        "write_bytes" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 3);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let size = arg_ty.layout().assert_size();
+            // todo it might be cleaner to multiply the size in bytecode, instead of having a limit attached to the instruction
+            let small_size: u16 = size.try_into().expect("size too large!");
+
+            out_bc.push(Instr::WriteBytes{ size: small_size, dst: arg_slots[0], val: arg_slots[1], count: arg_slots[2] });
         }
         _ => {
             panic!("attempt compile intrinsic: {}{}",name,subs);

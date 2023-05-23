@@ -30,5 +30,6 @@ fn main() {
         _builtin::print_bool(thing1 != thing3);
 
         _builtin::print_bool(thing1 > thing2);
+        _builtin::print_bool(thing1 > thing3);
     }
 }

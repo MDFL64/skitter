@@ -57,12 +57,13 @@ fn write_bulk_move_ss(instr: &str, ty: &str, source: &mut String) {
     ));
 }
 
-/*fn write_bulk_move_ps(instr: &str, ty: &str, source: &mut String) {
+fn write_bulk_move_sp(instr: &str, ty: &str, source: &mut String) {
     source.push_str(&format!(
         "
-    Instr::{instr}(dst, src, n) => {{
-        let src_ptr = stack.add(*src as usize) as *mut {ty};
-        let dst_ptr: *mut {ty} = read_stack(stack, *dst);
+    Instr::{instr}(dst, src, offset, n) => {{
+        let src_ptr: *mut u8 = read_stack(stack, *src);
+        let src_ptr: *mut {ty} = src_ptr.add(*offset as usize) as _;
+        let dst_ptr = stack.add(dst.index()) as *mut {ty};
         for i in 0..(*n as usize) {{
             let s = src_ptr.add(i);
             let d = dst_ptr.add(i);
@@ -71,15 +72,15 @@ fn write_bulk_move_ss(instr: &str, ty: &str, source: &mut String) {
         }}
     }}"
     ));
-}*/
+}
 
-fn write_bulk_move_sp(instr: &str, ty: &str, source: &mut String) {
+fn write_bulk_move_ps(instr: &str, ty: &str, source: &mut String) {
     source.push_str(&format!(
         "
     Instr::{instr}(dst, src, offset, n) => {{
-        let src_ptr: *mut u8 = read_stack(stack, *src);
-        let src_ptr: *mut {ty} = src_ptr.add(*offset as usize) as _;
-        let dst_ptr = stack.add(src.index()) as *mut {ty};
+        let dst_ptr: *mut u8 = read_stack(stack, *dst);
+        let dst_ptr: *mut {ty} = dst_ptr.add(*offset as usize) as _;
+        let src_ptr = stack.add(src.index()) as *mut {ty};
         for i in 0..(*n as usize) {{
             let s = src_ptr.add(i);
             let d = dst_ptr.add(i);
@@ -350,7 +351,10 @@ fn write_exec_match() {
     write_bulk_move_ss("MovSS8N","u64",&mut source);
     write_bulk_move_ss("MovSS16N","u128",&mut source);
 
+    write_bulk_move_sp("MovSP4N", "u32", &mut source);
     write_bulk_move_sp("MovSP8N", "u64", &mut source);
+
+    write_bulk_move_ps("MovPS4N","u32",&mut source);
 
     source.push_str(
         r#"
@@ -418,6 +422,17 @@ fn write_exec_match() {
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),
+    Instr::WriteBytes { size, dst, val, count } => {
+        let dst: *mut u8 = read_stack(stack, *dst);
+        let val: u8 = read_stack(stack, *val);
+        let count: usize = read_stack(stack, *count);
+
+        let total_bytes = count * *size as usize;
+        for i in 0..total_bytes {
+            let byte_dst = dst.add(i);
+            *byte_dst = val;
+        }
+    }
     _ => panic!("NYI {:?}",instr)
 }"#,
     );

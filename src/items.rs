@@ -162,7 +162,7 @@ pub struct Item<'vm> {
 
 impl<'vm> std::fmt::Debug for Item<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Item").field("path", &self.path).finish()
+        write!(f,"Item({:?})",self.path.as_string())
     }
 }
 
@@ -398,7 +398,9 @@ impl<'vm> Item<'vm> {
                 }
             }
             panic!("failed to find associated type")
-        }).expect("failed to find trait")
+        }).unwrap_or_else(|| {
+            panic!("failed to find {} for {}",self.path.as_string(),subs);
+        })
     }
 
     pub fn find_trait_fn(&self, subs: &SubList<'vm>, member_name: &str) -> Option<ItemWithSubs<'vm>> {
@@ -414,7 +416,9 @@ impl<'vm> Item<'vm> {
                 }
             }
             None
-        }).expect("failed to find trait")
+        }).unwrap_or_else(|| {
+            panic!("failed to find {} for {}",self.path.as_string(),subs);
+        })
     }
 
     pub fn trait_has_impl(&self, subs: &SubList<'vm>) -> bool {

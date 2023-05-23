@@ -753,6 +753,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
             ExprKind::Binary{..} |
             ExprKind::Ref{..} |
             ExprKind::Array(_) |
+            ExprKind::Adt{..} |
             ExprKind::LiteralValue{..} => {
                 let res = self.lower_expr(id, None);
                 Place::Local(res)

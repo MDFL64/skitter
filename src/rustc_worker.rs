@@ -385,9 +385,14 @@ impl<'vm> RustCWorker<'vm> {
 
                             let lang_items = tcx.lang_items();
                             {
-                                let sized_trait = lang_items.sized_trait().unwrap();
-                                let sized_trait = items.find_by_did(sized_trait).unwrap();
-                                sized_trait.trait_set_builtin(BuiltinTrait::Sized);
+                                let lang_trait = lang_items.sized_trait().unwrap();
+                                let lang_trait = items.find_by_did(lang_trait).unwrap();
+                                lang_trait.trait_set_builtin(BuiltinTrait::Sized);
+                            }
+                            {
+                                let lang_trait = lang_items.discriminant_kind_trait().unwrap();
+                                let lang_trait = items.find_by_did(lang_trait).unwrap();
+                                lang_trait.trait_set_builtin(BuiltinTrait::DiscriminantKind);
                             }
                         }
 
