@@ -149,6 +149,14 @@ impl<'vm> VM<'vm> {
     pub fn ty_usize(&'vm self) -> Type<'vm> {
         self.types.intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned),self)
     }
+
+    pub fn ty_bool(&'vm self) -> Type<'vm> {
+        self.types.intern(TypeKind::Bool,self)
+    }
+
+    pub fn ty_param(&'vm self, n: u32) -> Type<'vm> {
+        self.types.intern(TypeKind::Param(n),self)
+    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
@@ -202,7 +210,7 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let (ir,new_subs) = self.item.func_get_ir(&self.subs);
+            let (ir,new_subs) = self.item.func_ir(&self.subs);
             let path = self.item.path.as_string();
 
             let bc = HirCompiler::compile(self.item.vm, &ir, &new_subs, path);

@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::{items::GenericCounts, vm::VM};
+
 use super::Type;
 
 #[derive(Debug,Hash,PartialEq,Eq,Clone)]
@@ -50,6 +52,26 @@ pub struct SubList<'vm> {
 }
 
 impl<'vm> SubList<'vm> {
+    pub fn from_summary(summary: &GenericCounts, vm: &'vm VM<'vm>) -> Self {
+        let total = summary.lifetimes + summary.types + summary.consts;
+        let mut list = Vec::with_capacity(total as usize);
+
+        for _ in 0..summary.lifetimes {
+            list.push(Sub::Lifetime);
+        }
+        for _ in 0..summary.types {
+            let index = list.len() as u32;
+            let ty = vm.ty_param(index);
+
+            list.push(Sub::Type(ty));
+        }
+        for _ in 0..summary.consts {
+            list.push(Sub::Const);
+        }
+
+        SubList{list}
+    }
+
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
         let new_subs: Vec<_> = self.list.iter().map(|field| {
             field.sub(subs)

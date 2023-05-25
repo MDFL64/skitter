@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc}, builtins::BuiltinTrait};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig}, builtins::BuiltinTrait};
 
 /////////////////////////
 
@@ -87,9 +87,15 @@ impl<'vm> RustCWorker<'vm> {
         // fixme?
         let self_profile = if false { config::SwitchWithOptPath::Enabled(None) } else { config::SwitchWithOptPath::Disabled };
 
+        let crate_name = if worker_config.is_core {
+            Some("core".to_owned())
+        } else {
+            None
+        };
+
         let config = rustc_interface::Config {
             opts: config::Options {
-                //maybe_sysroot: Some(path::PathBuf::from(sysroot)), //Some(path::PathBuf::from("./bunk/")), // sysroot
+                crate_name,
                 edition: rustc_span::edition::Edition::Edition2021,
                 unstable_features: rustc_feature::UnstableFeatures::Cheat,
                 cg: config::CodegenOptions {
@@ -207,20 +213,19 @@ impl<'vm> RustCWorker<'vm> {
                                 // todo impls
                                 HirItemKind::Trait(_is_auto,_safety,_generics,_bounds,child_items) => {
                                     // trait item
-                                    let (trait_item,trait_path) = {
+                                    let trait_item = {
                                         let local_id = item.owner_id.def_id;
                                         let item_path = path_from_rustc(&hir.def_path(local_id));
     
                                         let kind = ItemKind::new_trait();
     
                                         let item_id = items.add_item(vm,kind,item_path.clone(),local_id);
-                                        (item_id,item_path)
+                                        item_id
                                     };
 
                                     for item in child_items {
                                         let local_id = item.id.owner_id.def_id;
                                         let item_path = path_from_rustc(&hir.def_path(local_id));
-                                        // these should be REAL PATHS
 
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
@@ -250,12 +255,10 @@ impl<'vm> RustCWorker<'vm> {
 
                                     for item in impl_info.items {
                                         let local_id = item.id.owner_id.def_id;
-                                        // these are DEBUG ONLY paths, might require some adjustment
                                         
                                         match item.kind {
                                             AssocItemKind::Fn{..} => {
                                                 let item_path = ItemPath::new_debug(format!("{}::{}",base_path,item.ident));
-                                                //let item_path = path_from_rustc(&hir.def_path(local_id)).unwrap();
 
                                                 let kind = ItemKind::new_function();
                                                 let item_id = items.add_item(vm,kind,item_path,local_id);
@@ -393,6 +396,11 @@ impl<'vm> RustCWorker<'vm> {
                                 let lang_trait = lang_items.discriminant_kind_trait().unwrap();
                                 let lang_trait = items.find_by_did(lang_trait).unwrap();
                                 lang_trait.trait_set_builtin(BuiltinTrait::DiscriminantKind);
+                            }
+                            {
+                                let lang_trait = lang_items.fn_once_trait().unwrap();
+                                let lang_trait = items.find_by_did(lang_trait).unwrap();
+                                lang_trait.trait_set_builtin(BuiltinTrait::FnOnce);
                             }
                         }
 

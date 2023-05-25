@@ -1,8 +1,6 @@
-use std::{fmt::{Display, Write}, sync::{OnceLock, RwLock}};
+use std::fmt::Display;
 
-use ahash::AHashMap;
-
-use crate::{items::{Item, CrateId, ItemId}, vm::VM};
+use crate::items::{Item, CrateId, ItemId};
 
 use super::{layout::Layout, Type, subs::{Sub, SubList}};
 
@@ -25,9 +23,13 @@ pub enum TypeKind<'vm> {
     FunctionDef(ItemWithSubs<'vm>),
     Adt(ItemWithSubs<'vm>),
     AssociatedType(ItemWithSubs<'vm>),
+
+    // not properly implemented yet
     Foreign,
+    Opaque,
     Dynamic,
     FunctionPointer,
+    Closure,
 
     Param(u32),
     //Error
@@ -223,7 +225,13 @@ impl<'vm> Type<'vm> {
             TypeKind::Adt(adt) => {
                 adt.subs.is_concrete()
             }
+            TypeKind::FunctionDef(fun) => {
+                fun.subs.is_concrete()
+            }
             TypeKind::Ref(child,_) => {
+                child.is_concrete()
+            }
+            TypeKind::Slice(child) => {
                 child.is_concrete()
             }
             _ => panic!("is concrete? {}",self)

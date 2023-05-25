@@ -1,9 +1,10 @@
-use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE};
+use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE, ir::BinaryOp};
 
 #[derive(Copy,Clone)]
 pub enum BuiltinTrait {
     Sized,
-    DiscriminantKind
+    DiscriminantKind,
+    FnOnce
 }
 
 impl BuiltinTrait {
@@ -44,6 +45,30 @@ impl BuiltinTrait {
                 } else {
                     None
                 }
+            }
+            BuiltinTrait::FnOnce => {
+                assert!(subs.list.len() == 2);
+                let for_ty = subs.list[0].assert_ty();
+                let args_ty = subs.list[1].assert_ty();
+
+                if let TypeKind::Tuple(args) = args_ty.kind() {
+                    if let TypeKind::FunctionDef(fun) = for_ty.kind() {
+                        let sig = fun.item.func_sig(&fun.subs);
+
+                        // todo how to handle generics?
+                        for in_ty in sig.inputs.iter() {
+                            assert!(in_ty.is_concrete());
+                        }
+                        assert!(&sig.inputs == args);
+
+                        let mut res = dummy();
+                        //res.0.child_fn_items.push(("call_once".to_owned(),))
+                        return Some(res);
+                    }
+                } else {
+                    println!("warning, Fn with non-tuple args");
+                }
+                None
             }
         }
     }
@@ -185,7 +210,7 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
             let args_ty = subs.list[0].assert_ty();
             let res_ty = subs.list[3].assert_ty();
             let func = subs.list[2].assert_ty().func_item().unwrap();
-            let func = func.item.func_get(&func.subs);
+            let func = func.item.func_mono(&func.subs);
 
             let TypeKind::Tuple(arg_tys) = args_ty.kind() else {
                 panic!("const_eval_select: bad args ty");
@@ -248,6 +273,14 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
         "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
         }
+        "unlikely" => {
+            assert!(subs.list.len() == 0);
+            assert!(arg_slots.len() == 1);
+
+            // copying here isn't so great, ideally we could make the res slot optional like in the main compiler
+            let copy = bytecode_select::copy(out_slot, arg_slots[0], vm.ty_bool()).unwrap();
+            out_bc.push(copy);
+        }
         "write_bytes" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 3);
@@ -258,6 +291,21 @@ pub fn compile_rust_intrinsic<'vm>(name: &str, subs: &SubList<'vm>, vm: &'vm VM<
             let small_size: u16 = size.try_into().expect("size too large!");
 
             out_bc.push(Instr::WriteBytes{ size: small_size, dst: arg_slots[0], val: arg_slots[1], count: arg_slots[2] });
+        }
+        // ugh
+        "add_with_overflow" => {
+            // TODO make this actually work, probably just implement more arithmetic instructions :(
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+
+            let (ctor,_) = bytecode_select::binary(BinaryOp::Add, arg_ty);
+            out_bc.push(ctor(out_slot,arg_slots[0],arg_slots[1]));
+            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
+            // signed: same signs on inputs, differ from output
+            // unsigned: (a + b < a)
         }
         _ => {
             panic!("attempt compile intrinsic: {}{}",name,subs);

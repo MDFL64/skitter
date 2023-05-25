@@ -96,7 +96,7 @@ fn main() {
             .find_by_path(&main_path)
             .expect("no main found");
 
-        let main_fn = main_item.func_get(&SubList{list:Vec::new()});
+        let main_fn = main_item.func_mono(&SubList{list:Vec::new()});
 
         vm.call(&main_fn,0);
 

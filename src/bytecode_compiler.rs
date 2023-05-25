@@ -49,7 +49,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
             loop_breaks: Vec::new()
         };
 
-        let out_ty = compiler.apply_subs(ir.return_ty);
+        let out_ty = compiler.apply_subs(ir.sig.output);
 
         let ret_slot = compiler.stack.alloc(out_ty);
         assert_eq!(ret_slot.index(),0);
@@ -296,7 +296,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
 
                     dst_slot
                 } else {
-                    let func = func_ref.item.func_get(&func_ref.subs);
+                    let func = func_ref.item.func_mono(&func_ref.subs);
                     let call_start_instr = self.out_bc.len();
                     
                     // evaluate arguments and write them to a virtual call frame
@@ -641,7 +641,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 self.lower_expr(*arg, Some(arg_slot));
 
                 // the bool pattern match result slot
-                let bool_ty = self.vm.types.intern(TypeKind::Bool, self.vm);
+                let bool_ty = self.vm.ty_bool();
                 let match_result_slot = self.stack.alloc(bool_ty);
 
                 let mut jump_gaps = Vec::new();

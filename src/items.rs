@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait}};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait}, rustc_worker::RustCContext};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -28,6 +28,10 @@ impl<'vm> CrateItems<'vm> {
             extern_crate_list,
             extern_crate_id_cache: Default::default(),
         }
+    }
+
+    pub fn all(&self) -> impl Iterator<Item = &Item<'vm>> {
+        self.items.iter()
     }
 
     pub fn count(&self) -> usize {
@@ -201,6 +205,39 @@ pub enum ItemKind<'vm> {
     }
 }
 
+#[derive(Debug)]
+pub struct FunctionSig<'vm> {
+    pub inputs: Vec<Type<'vm>>,
+    pub output: Type<'vm>
+}
+
+impl<'vm> FunctionSig<'vm> {
+    pub fn from_rustc<'tcx>(rs_sig: &rustc_middle::ty::FnSig<'tcx>, ctx: &RustCContext<'vm,'tcx>) -> Self {
+        
+        let inputs = rs_sig.inputs().iter().map(|ty| {
+            ctx.vm.types.type_from_rustc(*ty, ctx)
+        }).collect();
+        let output = ctx.vm.types.type_from_rustc(rs_sig.output(), ctx);
+
+        Self {
+            inputs,
+            output
+        }
+    }
+
+    pub fn sub(&self, subs: &SubList<'vm>) -> Self {
+        let inputs = self.inputs.iter().map(|ty| {
+            ty.sub(subs)
+        }).collect();
+        let output = self.output.sub(subs);
+
+        Self {
+            inputs,
+            output
+        }
+    }
+}
+
 pub struct AdtInfo<'vm> {
     pub variant_fields: Vec<Vec<Type<'vm>>>,
     pub discriminator_ty: Option<Type<'vm>>
@@ -235,7 +272,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_instances: Default::default(),
             parent_trait: None,
-            extern_name: None
+            extern_name: None,
         }
     }
 
@@ -284,7 +321,16 @@ impl<'vm> ItemKind<'vm> {
 }
 
 impl<'vm> Item<'vm> {
-    pub fn func_get(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
+    pub fn is_func(&self) -> bool {
+        if let ItemKind::Function{..} = &self.kind {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get a monomorphic VM function from a function item.
+    pub fn func_mono(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
 
         let ItemKind::Function{mono_instances,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -306,8 +352,14 @@ impl<'vm> Item<'vm> {
         extern_name
     }
 
+    pub fn func_sig<'a>(&self, subs: &'a SubList<'vm>) -> FunctionSig<'vm> {
+        let (ir,new_subs) = self.func_ir(subs);
+
+        ir.sig.sub(&new_subs)
+    }
+
     /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
-    pub fn func_get_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
+    pub fn func_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
         
         let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -317,9 +369,8 @@ impl<'vm> Item<'vm> {
             let crate_items = self.vm.get_crate_items(self.crate_id);
             let trait_item = crate_items.get(trait_info.trait_id);
             let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
-            if let Some(resolved_func) = resolved_func {
-                let (f,s) = resolved_func.item.func_get_ir(&resolved_func.subs);
-                return (f,Cow::Owned(s.into_owned()));
+            if let Some((ir,new_subs)) = resolved_func {
+                return (ir,Cow::Owned(new_subs));
             }
         }
 
@@ -403,16 +454,16 @@ impl<'vm> Item<'vm> {
         })
     }
 
-    pub fn find_trait_fn(&self, subs: &SubList<'vm>, member_name: &str) -> Option<ItemWithSubs<'vm>> {
+    pub fn find_trait_fn(&self, subs: &SubList<'vm>, member_name: &str) -> Option<(Arc<IRFunction<'vm>>,SubList<'vm>)> {
 
         self.find_trait_impl(subs,|trait_impl,subs| {
             let crate_items = self.vm.get_crate_items(trait_impl.crate_id);
             for (child_name,child_item) in trait_impl.child_fn_items.iter() {
                 if child_name == member_name {
-                    return Some(ItemWithSubs{
-                        item: crate_items.get(*child_item),
-                        subs
-                    });
+                    let fn_item = crate_items.get(*child_item);
+                    let (ir,_) = fn_item.func_ir(&subs);
+
+                    return Some((ir,subs));
                 }
             }
             None
@@ -442,29 +493,24 @@ impl<'vm> Item<'vm> {
 
         let impl_list = impl_list.read().unwrap();
 
+        //println!("searching for {}",self.path.as_string());
         'search:
         for candidate in impl_list.iter() {
+            //println!("{} / {} / {}",self.path.as_string(),candidate.for_types,subs);
             if let Some(sub_map) = trait_match(subs,&candidate.for_types) {
+                //println!("ok?");
                 // first, the resulting SubMap must be translated into a proper SubList
-                let mut trait_subs = SubList{list:Vec::new()};
-                
-                for _ in 0..candidate.generics.lifetimes {
-                    trait_subs.list.push(Sub::Lifetime);
-                }
-                for _ in 0..candidate.generics.types {
-                    let index = trait_subs.list.len() as u32;
-                    trait_subs.list.push(Sub::Type(sub_map.get(index)));
-                }
-                for _ in 0..candidate.generics.consts {
-                    trait_subs.list.push(Sub::Const);
-                }
+                let mut trait_subs = SubList::from_summary(&candidate.generics, self.vm);
+                sub_map.apply_to(SubSide::Rhs, &mut trait_subs);
+                sub_map.assert_empty(SubSide::Lhs);
 
+                //println!("maybe candidate? {}",candidate.for_types);
                 if candidate.bounds.len() > 0 {
-                    //println!("?? {}",candidate.for_types);
+                    //println!("?? {}",candidate.bounds.len());
                     for bound in &candidate.bounds {
                         let types_to_check = bound.subs.sub(&trait_subs);
                         let res = bound.item.trait_has_impl(&types_to_check);
-                        //println!("- {} has {}? {}",types_to_check,bound.item.path.as_string(),res);
+                        //println!("{} ====== {} has {}? {}",candidate.for_types,types_to_check,bound.item.path.as_string(),res);
 
                         if !res {
                             // failed, try next candidate
@@ -472,6 +518,8 @@ impl<'vm> Item<'vm> {
                         }
                     }
                 }
+
+                assert!(trait_subs.is_concrete());
 
                 return Some(callback(candidate,trait_subs));
             }
@@ -481,13 +529,20 @@ impl<'vm> Item<'vm> {
     }
 }
 
+#[derive(PartialEq,Debug)]
+enum SubSide {
+    Lhs,
+    Rhs
+}
+
 #[derive(Default)]
 struct SubMap<'vm> {
-    map: Vec<(u32,Type<'vm>)>
+    map: Vec<((SubSide,u32),Type<'vm>)>
 }
 
 impl<'vm> SubMap<'vm> {
-    fn set(&mut self, key: u32, val: Type<'vm>) -> bool {
+    fn set(&mut self, side: SubSide, n: u32, val: Type<'vm>) -> bool {
+        let key = (side,n);
         for (ek,ev) in &self.map {
             if *ek == key {
                 assert!(*ev == val);
@@ -498,35 +553,50 @@ impl<'vm> SubMap<'vm> {
         true
     }
 
-    fn get(&self, key: u32) -> Type<'vm> {
-        for (ek,ev) in &self.map {
-            if *ek == key {
-                return *ev;
+    fn apply_to(&self, target_side: SubSide, target_subs: &mut SubList<'vm>) {
+        for ((side,n),val) in &self.map {
+            if *side == target_side {
+                target_subs.list[*n as usize] = Sub::Type(*val);
             }
         }
-        panic!("failed to resolve substitution");
     }
+
+    fn assert_empty(&self, target_side: SubSide) {
+        for ((side,_),_) in &self.map {
+            if *side == target_side {
+                panic!("SubMap::assert_empty failed");
+            }
+        }
+    }
+    /*fn get(&self, side: SubSide, n: u32) -> Option<Type<'vm>> {
+        let key = (side,n);
+        for (ek,ev) in &self.map {
+            if *ek == key {
+                return Some(*ev);
+            }
+        }
+        println!("warning! failed to resolve substitution: {:?} / {:?}",self.map,key);
+        None
+    }*/
 }
 
 /// Compares a list of concrete types to a candidate type.
-fn trait_match<'vm>(in_subs: &SubList<'vm>, trait_subs: &SubList<'vm>) -> Option<SubMap<'vm>> {
-
-    assert!(in_subs.is_concrete());
+fn trait_match<'vm>(lhs: &SubList<'vm>, rhs: &SubList<'vm>) -> Option<SubMap<'vm>> {
 
     let mut res_map = SubMap::default();
 
-    if subs_match(in_subs, trait_subs, &mut res_map) {
+    if subs_match(lhs, rhs, &mut res_map) {
         Some(res_map)
     } else {
         None
     }
 }
 
-fn subs_match<'vm>(in_subs: &SubList<'vm>, trait_subs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
-    for pair in in_subs.list.iter().zip(&trait_subs.list) {
+fn subs_match<'vm>(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
+    for pair in lhs.list.iter().zip(&rhs.list) {
         match pair {
-            (Sub::Type(in_ty),Sub::Type(trait_ty)) => {
-                if !type_match(*in_ty,*trait_ty,res_map) {
+            (Sub::Type(lhs_ty),Sub::Type(rhs_ty)) => {
+                if !type_match(*lhs_ty,*rhs_ty,res_map) {
                     return false;
                 }
             },
@@ -541,12 +611,12 @@ fn subs_match<'vm>(in_subs: &SubList<'vm>, trait_subs: &SubList<'vm>, res_map: &
 }
 
 /// Compares types loosely, allowing param types to match anything.
-fn type_match<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, res_map: &mut SubMap<'vm>) -> bool {
-    if in_ty == trait_ty {
+fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'vm>) -> bool {
+    if lhs_ty == rhs_ty {
         return true;
     }
 
-    match (in_ty.kind(),trait_ty.kind()) {
+    match (lhs_ty.kind(),rhs_ty.kind()) {
         (TypeKind::Adt(a),TypeKind::Adt(b)) => {
             (a.item == b.item) && subs_match(&a.subs, &b.subs,res_map)
         },
@@ -556,14 +626,36 @@ fn type_match<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, res_map: &mut SubMap<'
         (TypeKind::Ref(in_ref,in_mut),TypeKind::Ref(trait_ref,trait_mut)) => {
             (in_mut == trait_mut) && type_match(*in_ref, *trait_ref,res_map)
         }
+        (TypeKind::Slice(in_elem),TypeKind::Slice(trait_elem)) => {
+            type_match(*in_elem, *trait_elem,res_map)
+        }
+        (TypeKind::Tuple(lhs_children),TypeKind::Tuple(rhs_children)) => {
+            if lhs_children.len() != rhs_children.len() {
+                false
+            } else {
+                for (lhs_child,rhs_child) in lhs_children.iter().zip(rhs_children) {
+                    if !type_match(*lhs_child, *rhs_child, res_map) {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
 
+        (TypeKind::Param(lhs_param),TypeKind::Param(rhs_param)) => {
+            panic!("fixme? this looks annoying");
+        }
         (_,TypeKind::Param(param_num)) => {
-            res_map.set(*param_num,in_ty)
+            res_map.set(SubSide::Rhs,*param_num,lhs_ty)
+        }
+        (TypeKind::Param(param_num),_) => {
+            res_map.set(SubSide::Lhs,*param_num,rhs_ty)
         }
 
         (TypeKind::Adt(..),_) | (_,TypeKind::Adt(..)) |
         (TypeKind::Ptr(..),_) | (_,TypeKind::Ptr(..)) |
         (TypeKind::Ref(..),_) | (_,TypeKind::Ref(..)) |
+        (TypeKind::Slice(..),_) | (_,TypeKind::Slice(..)) |
 
         (TypeKind::Bool,_) | (_,TypeKind::Bool) |
         (TypeKind::Char,_) | (_,TypeKind::Char) |
@@ -571,7 +663,7 @@ fn type_match<'vm>(in_ty: Type<'vm>, trait_ty: Type<'vm>, res_map: &mut SubMap<'
         (TypeKind::Int(..),_) | (_,TypeKind::Int(..)) |
         (TypeKind::Float(..),_) | (_,TypeKind::Float(..)) => false,
         _ => {
-            panic!("match types {} == {}",in_ty,trait_ty)
+            panic!("match types {} == {}",lhs_ty,rhs_ty)
         }
     }
 }

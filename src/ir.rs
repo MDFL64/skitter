@@ -7,13 +7,14 @@ use rustc_middle::thir;
 use rustc_middle::thir::Thir;
 use rustc_hir::def_id::LocalDefId;
 
+use crate::items::FunctionSig;
 use crate::rustc_worker::RustCContext;
 use crate::types::{Type, TypeKind};
 
 pub struct IRFunction<'vm> {
+    pub sig: FunctionSig<'vm>,
     pub root_expr: ExprId,
     pub params: Vec<Pattern<'vm>>,
-    pub return_ty: Type<'vm>,
     exprs: Vec<Expr<'vm>>,
     stmts: Vec<Stmt<'vm>>,
     blocks: Vec<Block>,
@@ -235,18 +236,16 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
             builder.pattern(param.pat.as_ref().unwrap())
         }).collect();
 
-        let return_ty = match thir.body_type {
+        let sig = match thir.body_type {
             thir::BodyTy::Fn(sig) => {
-                sig.output()
+                FunctionSig::from_rustc(&sig, &builder.ctx)
             }
             _ => panic!("const not supported")
         };
 
-        let return_ty = builder.ctx.type_from_rustc(return_ty);
-
         IRFunction{
+            sig,
             params,
-            return_ty,
             root_expr,
             exprs,
             stmts,

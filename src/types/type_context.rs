@@ -109,7 +109,7 @@ impl<'vm> TypeContext<'vm> {
                         TypeKind::AssociatedType(item_with_subs)
                     }
                     AliasKind::Opaque => {
-                        panic!("todo opaque type {:?} / {:?}",alias_kind,alias_ty);
+                        TypeKind::Opaque
                     }
                 }
             }
@@ -121,6 +121,9 @@ impl<'vm> TypeContext<'vm> {
             }
             TyKind::FnPtr(_) => {
                 TypeKind::FunctionPointer
+            }
+            TyKind::Closure(_,_) => {
+                TypeKind::Closure
             }
 
             TyKind::Param(param) => {
