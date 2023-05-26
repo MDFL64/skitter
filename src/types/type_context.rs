@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::{Mutex}};
 use rustc_middle::ty::{Ty, TyKind, IntTy, UintTy, FloatTy, GenericArg, GenericArgKind, ImplSubject, AliasKind};
 use rustc_hir::def_id::DefId;
 
-use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, path_from_rustc}};
+use crate::{vm::VM, rustc_worker::RustCContext, types::Sub, items::{ItemPath, path_from_rustc, FunctionIRSource}};
 
 use colosseum::sync::Arena;
 
@@ -169,9 +169,13 @@ impl<'vm> TypeContext<'vm> {
                 match subject {
                     ImplSubject::Inherent(ty) => {
                         let ty = self.type_from_rustc(ty, ctx);
-                        if let Some((crate_id,item_id)) = ty.find_impl_member(ident.as_str()) {
+                        if let Some((crate_id,ir_source)) = ty.find_impl_member(ident.as_str()) {
                             let crate_items = ctx.vm.get_crate_items(crate_id);
-                            crate_items.get(item_id)
+                            if let FunctionIRSource::Item(item_id) = ir_source {
+                                crate_items.get(item_id)
+                            } else {
+                                panic!("can't convert raw IR to item, this is a bug");
+                            }
                         } else {
                             panic!("couldn't find type impl {}::{}",ty,ident);
                         }

@@ -1,4 +1,6 @@
-use crate::{items::{TraitImpl, GenericCounts, CrateId}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE, ir::BinaryOp};
+use std::sync::Arc;
+
+use crate::{items::{TraitImpl, GenericCounts, CrateId, FunctionIRSource}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE, ir::{BinaryOp, glue_ir_for_fn_trait}};
 
 #[derive(Copy,Clone)]
 pub enum BuiltinTrait {
@@ -47,6 +49,8 @@ impl BuiltinTrait {
                 }
             }
             BuiltinTrait::FnOnce => {
+                assert!(subs.is_concrete());
+
                 assert!(subs.list.len() == 2);
                 let for_ty = subs.list[0].assert_ty();
                 let args_ty = subs.list[1].assert_ty();
@@ -59,9 +63,12 @@ impl BuiltinTrait {
                         for in_ty in sig.inputs.iter() {
                             assert!(in_ty.is_concrete());
                         }
+                        assert!(sig.output.is_concrete());
                         assert!(&sig.inputs == args);
 
                         let mut res = dummy();
+                        let call_ir = glue_ir_for_fn_trait(for_ty, args_ty, sig.output);
+                        res.0.child_fn_items.push(("call_once".to_owned(),FunctionIRSource::Injected(Arc::new(call_ir))));
                         //res.0.child_fn_items.push(("call_once".to_owned(),))
                         return Some(res);
                     }

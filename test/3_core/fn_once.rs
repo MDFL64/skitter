@@ -39,5 +39,5 @@ pub fn main() {
     call_it(Callable);
     call_it(CallableIdent);
     call_it(function);
-    //call_it(identity);
+    call_it(identity);
 }

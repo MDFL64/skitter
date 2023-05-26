@@ -9,7 +9,7 @@ use rustc_hir::def_id::LocalDefId;
 
 use crate::items::FunctionSig;
 use crate::rustc_worker::RustCContext;
-use crate::types::{Type, TypeKind};
+use crate::types::{Type, TypeKind, SubList};
 
 pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
@@ -612,5 +612,81 @@ impl<'vm> IRFunction<'vm> {
 
     pub fn arm(&self, id: ArmId) -> &MatchArm<'vm> {
         &self.arms[id.0 as usize]
+    }
+}
+
+// ONLY WORKS FOR CALL_ONCE, other traits expect a ref
+pub fn glue_ir_for_fn_trait<'vm>(func_ty: Type<'vm>, args_ty: Type<'vm>, res_ty: Type<'vm>) -> IRFunction<'vm> {
+    assert!(func_ty.is_concrete());
+    assert!(args_ty.is_concrete());
+
+    let sig = FunctionSig{
+        inputs: vec!(func_ty,args_ty),
+        output: res_ty
+    };
+
+    let params = sig.inputs.iter().enumerate().map(|(i,ty)| {
+        Pattern{
+            kind: PatternKind::LocalBinding{
+                local_id: i as u32,
+                mode: BindingMode::Value,
+                sub_pattern: None
+            },
+            ty: *ty
+        }
+    }).collect();
+
+    
+    let TypeKind::Tuple(inner_arg_tys) = args_ty.kind() else {
+        panic!("fn trait args must be a tuple");
+    };
+    
+    // build the actual ir
+    let mut exprs = Vec::new();
+
+    let func_expr = ExprId(0);
+    exprs.push(Expr{
+        kind: ExprKind::LiteralVoid,
+        ty: func_ty
+    });
+
+    let tuple_expr = ExprId(1);
+    exprs.push(Expr{
+        kind: ExprKind::VarRef(1),
+        ty: args_ty
+    });
+
+    let mut call_args = Vec::new();
+    for (i,arg_ty) in inner_arg_tys.iter().enumerate() {
+        call_args.push(ExprId(2 + i as u32));
+        exprs.push(Expr{
+            kind: ExprKind::Field{
+                lhs: tuple_expr,
+                variant: 0,
+                field: i as u32
+            },
+            ty: *arg_ty
+        });
+    }
+
+    let root_expr = ExprId(exprs.len() as u32);
+    exprs.push(Expr{
+        kind: ExprKind::Call{
+            func_ty,
+            func_expr,
+            args: call_args
+        },
+        ty: res_ty
+    });
+
+    IRFunction{
+        sig,
+        params,
+        exprs,
+        root_expr,
+
+        arms: vec!(),
+        blocks: vec!(),
+        stmts: vec!()
     }
 }

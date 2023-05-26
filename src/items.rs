@@ -253,10 +253,16 @@ pub struct TraitImpl<'vm> {
     pub for_types: SubList<'vm>,
     //impl_params: Vec<Sub<'vm>>,
     pub crate_id: CrateId,
-    pub child_fn_items: Vec<(String,ItemId)>,
+    pub child_fn_items: Vec<(String,FunctionIRSource<'vm>)>,
     pub child_tys: Vec<(String,Type<'vm>)>,
     pub bounds: Vec<ItemWithSubs<'vm>>,
     pub generics: GenericCounts
+}
+
+#[derive(Clone)]
+pub enum FunctionIRSource<'vm> {
+    Item(ItemId),
+    Injected(Arc<IRFunction<'vm>>)
 }
 
 #[derive(Default,Debug)]
@@ -458,12 +464,18 @@ impl<'vm> Item<'vm> {
 
         self.find_trait_impl(subs,|trait_impl,subs| {
             let crate_items = self.vm.get_crate_items(trait_impl.crate_id);
-            for (child_name,child_item) in trait_impl.child_fn_items.iter() {
+            for (child_name,child_source) in trait_impl.child_fn_items.iter() {
                 if child_name == member_name {
-                    let fn_item = crate_items.get(*child_item);
-                    let (ir,_) = fn_item.func_ir(&subs);
-
-                    return Some((ir,subs));
+                    match child_source {
+                        FunctionIRSource::Item(fn_item_id) => {
+                            let fn_item = crate_items.get(*fn_item_id);
+                            let (ir,_) = fn_item.func_ir(&subs);
+                            return Some((ir,subs))
+                        }
+                        FunctionIRSource::Injected(ir) => {
+                            return Some((ir.clone(),subs))
+                        }
+                    }
                 }
             }
             None

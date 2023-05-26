@@ -10,15 +10,13 @@ pub use type_context::TypeContext;
 pub use types::*;
 pub use subs::*;
 
-use crate::{items::{CrateId, ItemId}, vm::VM};
+use crate::{items::{CrateId, FunctionIRSource}, vm::VM};
 
 #[derive(Copy,Clone)]
 pub struct Type<'vm>(&'vm InternedType<'vm>,&'vm VM<'vm>);
 
-#[derive(Debug)]
 struct InternedType<'vm> {
     kind: TypeKind<'vm>,
     layout: OnceLock<layout::Layout>,
-    impl_table: RwLock<AHashMap<String,(CrateId,ItemId)>>
+    impl_table: RwLock<AHashMap<String,(CrateId,FunctionIRSource<'vm>)>>
 }
-

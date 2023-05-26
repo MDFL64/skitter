@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig}, builtins::BuiltinTrait};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig, FunctionIRSource}, builtins::BuiltinTrait};
 
 /////////////////////////
 
@@ -62,11 +62,11 @@ impl<T,F> WorkerCommandDyn for WorkerCommand<T,F> where
     }
 }
 
-#[derive(Debug)]
-struct ImplItem<'tcx> {
+//#[derive(Debug)]
+struct ImplItem<'tcx,'vm> {
     did: LocalDefId,
     subject: rustc_middle::ty::ImplSubject<'tcx>,
-    children_fn: Vec<(String,ItemId)>,
+    children_fn: Vec<(String,FunctionIRSource<'vm>)>,
     children_ty: Vec<(String,LocalDefId)>,
 }
 
@@ -250,7 +250,7 @@ impl<'vm> RustCWorker<'vm> {
                                         rustc_middle::ty::ImplSubject::Inherent(x) => format!("{:?}",x),
                                     };
                                     
-                                    let mut impl_list_fn: Vec<(String,ItemId)> = Vec::new();
+                                    let mut impl_list_fn: Vec<(String,FunctionIRSource)> = Vec::new();
                                     let mut impl_list_ty: Vec<(String,LocalDefId)> = Vec::new();
 
                                     for item in impl_info.items {
@@ -262,7 +262,7 @@ impl<'vm> RustCWorker<'vm> {
 
                                                 let kind = ItemKind::new_function();
                                                 let item_id = items.add_item(vm,kind,item_path,local_id);
-                                                impl_list_fn.push((item.ident.as_str().to_owned(),item_id));
+                                                impl_list_fn.push((item.ident.as_str().to_owned(),FunctionIRSource::Item(item_id)));
                                             }
                                             AssocItemKind::Type => {
                                                 impl_list_ty.push((item.ident.as_str().to_owned(),local_id));

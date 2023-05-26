@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::items::{Item, CrateId, ItemId};
+use crate::items::{Item, CrateId, ItemId, FunctionIRSource};
 
 use super::{layout::Layout, Type, subs::{Sub, SubList}};
 
@@ -238,7 +238,7 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,ItemId)>, child_tys: Vec<(String,Type<'vm>)>) {
+    pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,FunctionIRSource<'vm>)>, child_tys: Vec<(String,Type<'vm>)>) {
         if self.kind().is_dummy() {
             //println!("skip impl {:?}",self.kind());
             return;
@@ -251,9 +251,9 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId,ItemId)> {
+    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId,FunctionIRSource<'vm>)> {
         let impl_table = self.0.impl_table.read().unwrap();
-        impl_table.get(name).copied()
+        impl_table.get(name).cloned()
     }
 
     pub fn get_adt_discriminator_ty(&self) -> Option<Type<'vm>> {
