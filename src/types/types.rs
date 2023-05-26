@@ -32,6 +32,7 @@ pub enum TypeKind<'vm> {
     Closure,
 
     Param(u32),
+    Unknown
     //Error
 }
 
@@ -234,6 +235,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Slice(child) => {
                 child.is_concrete()
             }
+            TypeKind::Param(_) | TypeKind::Unknown => false,
             _ => panic!("is concrete? {}",self)
         }
     }

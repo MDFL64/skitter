@@ -255,7 +255,7 @@ pub struct TraitImpl<'vm> {
     pub crate_id: CrateId,
     pub child_fn_items: Vec<(String,FunctionIRSource<'vm>)>,
     pub child_tys: Vec<(String,Type<'vm>)>,
-    pub bounds: Vec<ItemWithSubs<'vm>>,
+    pub bounds: Vec<BoundKind<'vm>>,
     pub generics: GenericCounts
 }
 
@@ -263,6 +263,13 @@ pub struct TraitImpl<'vm> {
 pub enum FunctionIRSource<'vm> {
     Item(ItemId),
     Injected(Arc<IRFunction<'vm>>)
+}
+
+pub enum BoundKind<'vm> {
+    /// Is the trait item implemented for the given subs?
+    Trait(ItemWithSubs<'vm>),
+    /// Are the associated type and the second type equal? Can update params in the impl.
+    Projection(ItemWithSubs<'vm>,Type<'vm>)
 }
 
 #[derive(Default,Debug)]
@@ -448,10 +455,10 @@ impl<'vm> Item<'vm> {
         let crate_items = self.vm.get_crate_items(self.crate_id);
         let trait_item = crate_items.get(parent_trait.trait_id);
 
-        trait_item.find_trait_impl(subs,|trait_impl,subs| {
+        trait_item.find_trait_impl(subs,&mut None,|trait_impl,subs| {
             for (child_name,child_ty) in trait_impl.child_tys.iter() {
                 if *child_name == parent_trait.ident {
-                    return *child_ty;
+                    return child_ty.sub(&subs);
                 }
             }
             panic!("failed to find associated type")
@@ -461,8 +468,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn find_trait_fn(&self, subs: &SubList<'vm>, member_name: &str) -> Option<(Arc<IRFunction<'vm>>,SubList<'vm>)> {
-
-        self.find_trait_impl(subs,|trait_impl,subs| {
+        self.find_trait_impl(subs,&mut None,|trait_impl,subs| {
             let crate_items = self.vm.get_crate_items(trait_impl.crate_id);
             for (child_name,child_source) in trait_impl.child_fn_items.iter() {
                 if child_name == member_name {
@@ -484,60 +490,91 @@ impl<'vm> Item<'vm> {
         })
     }
 
-    pub fn trait_has_impl(&self, subs: &SubList<'vm>) -> bool {
-        self.find_trait_impl(subs,|_,_| {
+    pub fn trait_has_impl(&self, for_tys: &SubList<'vm>, update_tys: &mut Option<&mut SubList<'vm>>) -> bool {
+        self.find_trait_impl(for_tys,update_tys,|_,_| {
             ()
         }).is_some()
     }
 
-    pub fn find_trait_impl<T>(&self, subs: &SubList<'vm>, callback: impl FnOnce(&TraitImpl<'vm>,SubList<'vm>)->T) -> Option<T> {
+    /// Find a trait implementation for a given list of types.
+    pub fn find_trait_impl<T>(
+        &self,
+        for_tys: &SubList<'vm>,
+        update_tys: &mut Option<&mut SubList<'vm>>,
+        callback: impl FnOnce(&TraitImpl<'vm>,SubList<'vm>)->T
+    ) -> Option<T> {
 
         let ItemKind::Trait{impl_list,builtin} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         if let Some(builtin) = builtin.get() {
-            let builtin_res = builtin.find(subs);
-            if let Some((a,b)) = builtin_res {
-                return Some(callback(&a,b));
+            let builtin_res = builtin.find_candidate(for_tys,self.vm);
+            if let Some(candidate) = builtin_res {
+                if let Some(trait_subs) = self.check_trait_impl(for_tys,&candidate,update_tys) {
+                    return Some(callback(&candidate,trait_subs));
+                }
             }
         }
 
         let impl_list = impl_list.read().unwrap();
 
-        //println!("searching for {}",self.path.as_string());
-        'search:
         for candidate in impl_list.iter() {
-            //println!("{} / {} / {}",self.path.as_string(),candidate.for_types,subs);
-            if let Some(sub_map) = trait_match(subs,&candidate.for_types) {
-                //println!("ok?");
-                // first, the resulting SubMap must be translated into a proper SubList
-                let mut trait_subs = SubList::from_summary(&candidate.generics, self.vm);
-                sub_map.apply_to(SubSide::Rhs, &mut trait_subs);
-                sub_map.assert_empty(SubSide::Lhs);
-
-                //println!("maybe candidate? {}",candidate.for_types);
-                if candidate.bounds.len() > 0 {
-                    //println!("?? {}",candidate.bounds.len());
-                    for bound in &candidate.bounds {
-                        let types_to_check = bound.subs.sub(&trait_subs);
-                        let res = bound.item.trait_has_impl(&types_to_check);
-                        //println!("{} ====== {} has {}? {}",candidate.for_types,types_to_check,bound.item.path.as_string(),res);
-
-                        if !res {
-                            // failed, try next candidate
-                            continue 'search;
-                        }
-                    }
-                }
-
-                assert!(trait_subs.is_concrete());
-
+            if let Some(trait_subs) = self.check_trait_impl(for_tys,candidate,update_tys) {
                 return Some(callback(candidate,trait_subs));
             }
         }
         
         None
+    }
+
+    /// Builds a sub list for the impl, and checks it against the impl bounds.
+    fn check_trait_impl(&self, for_tys: &SubList<'vm>, candidate: &TraitImpl<'vm>, update_tys: &mut Option<&mut SubList<'vm>>) -> Option<SubList<'vm>> {
+
+        if let Some(sub_map) = trait_match(for_tys,&candidate.for_types) {
+            let mut trait_subs = SubList::from_summary(&candidate.generics, self.vm);
+            sub_map.apply_to(SubSide::Rhs, &mut trait_subs);
+            
+            if candidate.bounds.len() > 0 {
+                for bound in &candidate.bounds {
+
+                    match bound {
+                        BoundKind::Trait(trait_bound) => {
+                            let types_to_check = trait_bound.subs.sub(&trait_subs);
+                            let res = trait_bound.item.trait_has_impl(&types_to_check,&mut Some(&mut trait_subs));
+                
+                            if !res {
+                                return None;
+                            }
+                        }
+                        BoundKind::Projection(assoc_ty,eq_ty) => {
+                            let types_to_check = assoc_ty.subs.sub(&trait_subs);
+
+                            let resolved_assoc_ty = assoc_ty.item.resolve_associated_ty(&types_to_check);
+
+                            let mut res_map = Default::default();
+
+                            if !type_match(resolved_assoc_ty, *eq_ty, &mut res_map) {
+                                panic!("unmatched {} = {}",resolved_assoc_ty,eq_ty);
+                            }
+                            res_map.assert_empty(SubSide::Lhs);
+                            res_map.apply_to(SubSide::Rhs, &mut trait_subs);
+                        }
+                    }
+                }
+            }
+        
+            // Is this needed?
+            assert!(trait_subs.is_concrete());
+            sub_map.assert_empty(SubSide::Lhs);
+
+            if let Some(update_tys) = update_tys {
+                sub_map.apply_to(SubSide::Lhs, update_tys);
+            }
+            Some(trait_subs)
+        } else {
+            None
+        }
     }
 }
 
@@ -576,6 +613,9 @@ impl<'vm> SubMap<'vm> {
     fn assert_empty(&self, target_side: SubSide) {
         for ((side,_),_) in &self.map {
             if *side == target_side {
+                for entry in &self.map {
+                    println!(" - {:?}",entry);
+                }
                 panic!("SubMap::assert_empty failed");
             }
         }
@@ -624,7 +664,7 @@ fn subs_match<'vm>(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<
 
 /// Compares types loosely, allowing param types to match anything.
 fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'vm>) -> bool {
-    if lhs_ty == rhs_ty {
+    if lhs_ty.is_concrete() && lhs_ty == rhs_ty {
         return true;
     }
 

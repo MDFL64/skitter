@@ -34,7 +34,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     pub fn compile(vm: &'vm vm::VM<'vm>, ir: &'f IRFunction<'vm>, subs: &'f SubList<'vm>, path: &str) -> Vec<Instr<'vm>> {
 
         if vm.is_verbose {
-            println!("compiling {:?} for {:?}",path,subs);
+            println!("compiling {:?} for {}",path,subs);
         }
 
         let mut compiler = HirCompiler {
@@ -119,6 +119,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     fn lower_expr(&mut self, id: ExprId, dst_slot: Option<Slot>) -> Slot {
         let expr = self.in_func.expr(id);
         let expr_ty = self.expr_ty(id);
+        //println!("lower {:?} :: {}",expr.kind,expr.ty);
 
         match &expr.kind {
             ExprKind::Dummy(value,scope_id) => {
@@ -763,7 +764,9 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
     }
 
     fn apply_subs(&self, ty: Type<'vm>) -> Type<'vm> {
-        ty.sub(self.in_func_subs)
+        let res = ty.sub(self.in_func_subs);
+        //println!("sub {} with {} => {}",ty,self.in_func_subs,res);
+        res
     }
 
     fn expr_ty(&self, id: ExprId) -> Type<'vm> {

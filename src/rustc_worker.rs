@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig, FunctionIRSource}, builtins::BuiltinTrait};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig, FunctionIRSource, BoundKind}, builtins::BuiltinTrait};
 
 /////////////////////////
 
@@ -333,16 +333,23 @@ impl<'vm> RustCWorker<'vm> {
                                 ImplSubject::Trait(trait_ref) => {
                                     let trait_did = trait_ref.def_id;
 
-                                    let mut bounds = Vec::new();
+                                    let mut bounds: Vec<BoundKind> = Vec::new();
                                     let predicates = tcx.predicates_of(impl_item.did);
                                     for (p,_) in predicates.predicates {
                                         let p = p.kind().skip_binder();
                                         if let rustc_middle::ty::PredicateKind::Clause(p) = p {
                                             if let rustc_middle::ty::Clause::Trait(p) = p {
                                                 if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
-                                                    let bound = vm.types.def_from_rustc(p.trait_ref.def_id,p.trait_ref.substs,&ctx);
-                                                    bounds.push(bound);
+                                                    let trait_bound = vm.types.def_from_rustc(p.trait_ref.def_id,p.trait_ref.substs,&ctx);
+                                                    bounds.push(BoundKind::Trait(trait_bound));
                                                 }
+                                            } else if let rustc_middle::ty::Clause::Projection(p) = p {
+                                                let assoc_ty = vm.types.def_from_rustc(p.projection_ty.def_id,p.projection_ty.substs,&ctx);
+                                                if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
+                                                    let eq_ty = vm.types.type_from_rustc(ty, &ctx);
+                                                    bounds.push(BoundKind::Projection(assoc_ty,eq_ty));
+                                                }
+                                                // TODO CONSTS
                                             }
                                         }
                                     }
@@ -401,6 +408,16 @@ impl<'vm> RustCWorker<'vm> {
                                 let lang_trait = lang_items.fn_once_trait().unwrap();
                                 let lang_trait = items.find_by_did(lang_trait).unwrap();
                                 lang_trait.trait_set_builtin(BuiltinTrait::FnOnce);
+                            }
+                            {
+                                let lang_trait = lang_items.fn_mut_trait().unwrap();
+                                let lang_trait = items.find_by_did(lang_trait).unwrap();
+                                lang_trait.trait_set_builtin(BuiltinTrait::FnMut);
+                            }
+                            {
+                                let lang_trait = lang_items.fn_trait().unwrap();
+                                let lang_trait = items.find_by_did(lang_trait).unwrap();
+                                lang_trait.trait_set_builtin(BuiltinTrait::Fn);
                             }
                         }
 

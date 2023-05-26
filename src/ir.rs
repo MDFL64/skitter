@@ -616,12 +616,12 @@ impl<'vm> IRFunction<'vm> {
 }
 
 // ONLY WORKS FOR CALL_ONCE, other traits expect a ref
-pub fn glue_ir_for_fn_trait<'vm>(func_ty: Type<'vm>, args_ty: Type<'vm>, res_ty: Type<'vm>) -> IRFunction<'vm> {
+pub fn glue_ir_for_fn_trait<'vm>(func_ty: Type<'vm>, self_ty: Type<'vm>, args_ty: Type<'vm>, res_ty: Type<'vm>) -> IRFunction<'vm> {
     assert!(func_ty.is_concrete());
     assert!(args_ty.is_concrete());
 
     let sig = FunctionSig{
-        inputs: vec!(func_ty,args_ty),
+        inputs: vec!(self_ty,args_ty),
         output: res_ty
     };
 

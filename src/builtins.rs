@@ -1,79 +1,99 @@
 use std::sync::Arc;
 
-use crate::{items::{TraitImpl, GenericCounts, CrateId, FunctionIRSource}, types::{SubList, Sub, TypeKind, Type}, vm::{Function, VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE, ir::{BinaryOp, glue_ir_for_fn_trait}};
+use crate::{items::{TraitImpl, GenericCounts, CrateId, FunctionIRSource}, types::{SubList, Sub, TypeKind, Type, Mutability}, vm::{VM, instr::{Instr, Slot}}, bytecode_compiler::CompilerStack, bytecode_select, abi::POINTER_SIZE, ir::{BinaryOp, glue_ir_for_fn_trait}};
 
 #[derive(Copy,Clone)]
 pub enum BuiltinTrait {
     Sized,
     DiscriminantKind,
-    FnOnce
+    FnOnce,
+    FnMut,
+    Fn
+}
+
+fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {
+    TraitImpl{
+        bounds: Default::default(),
+        child_fn_items: Default::default(),
+        child_tys: Default::default(),
+        crate_id: CrateId::new(0),
+        for_types,
+        generics: GenericCounts{ lifetimes: 0, types: 0, consts: 0 }
+    }
 }
 
 impl BuiltinTrait {
-    pub fn find<'vm>(&self, subs: &SubList<'vm>) -> Option<(TraitImpl<'vm>,SubList<'vm>)> {
-        let dummy = || {
-            let trait_impl = TraitImpl{
-                bounds: Default::default(),
-                child_fn_items: Default::default(),
-                child_tys: Default::default(),
-                crate_id: CrateId::new(0),
-                for_types: subs.clone(),
-                generics: GenericCounts{ lifetimes: 0, types: 0, consts: 0 }
-            };
-            (trait_impl,SubList{list:vec!()})
-        };
-    
+    pub fn find_candidate<'vm>(&self, query_subs: &SubList<'vm>, vm: &'vm VM<'vm>) -> Option<TraitImpl<'vm>> {
+
         match self {
             BuiltinTrait::Sized => {
-                assert!(subs.list.len() == 1);
-                let Sub::Type(ty) = subs.list[0] else {
-                    panic!("bad lookup for core::marker::Sized");
-                };
-                if ty.is_sized() {
-                    Some(dummy())
+                assert!(query_subs.list.len() == 1);
+                let ty = query_subs.list[0].assert_ty();
+                if ty.is_concrete() && ty.is_sized() {
+                    Some(trait_impl(query_subs.clone()))
                 } else {
                     None
                 }
             }
             BuiltinTrait::DiscriminantKind => {
                 // todo this should handle things like Option<Box<T>>
-                assert!(subs.list.len() == 1);
-                if let Some(discrim_ty) = subs.list[0].assert_ty().get_adt_discriminator_ty() {
-                    let mut res = dummy();
-    
-                    res.0.child_tys.push(("Discriminant".to_owned(),discrim_ty));
-    
-                    Some(res)
-                } else {
-                    None
+                assert!(query_subs.list.len() == 1);
+                let ty = query_subs.list[0].assert_ty();
+                if ty.is_concrete() {
+                    if let Some(discrim_ty) = ty.get_adt_discriminator_ty() {
+                        let mut res = trait_impl(query_subs.clone());
+        
+                        res.child_tys.push(("Discriminant".to_owned(),discrim_ty));
+        
+                        return Some(res);
+                    }
                 }
+                 None
             }
-            BuiltinTrait::FnOnce => {
-                assert!(subs.is_concrete());
+            BuiltinTrait::FnOnce | BuiltinTrait::FnMut | BuiltinTrait::Fn => {
+                let func_ty = query_subs.list[0].assert_ty();
 
-                assert!(subs.list.len() == 2);
-                let for_ty = subs.list[0].assert_ty();
-                let args_ty = subs.list[1].assert_ty();
+                if let TypeKind::FunctionDef(fun) = func_ty.kind() {
+                    let sig = fun.item.func_sig(&fun.subs);
 
-                if let TypeKind::Tuple(args) = args_ty.kind() {
-                    if let TypeKind::FunctionDef(fun) = for_ty.kind() {
-                        let sig = fun.item.func_sig(&fun.subs);
-
-                        // todo how to handle generics?
+                    // todo how to handle generics?
+                    // make sure the sig is concrete. will see if this poses issues down the line
+                    {
                         for in_ty in sig.inputs.iter() {
                             assert!(in_ty.is_concrete());
                         }
                         assert!(sig.output.is_concrete());
-                        assert!(&sig.inputs == args);
-
-                        let mut res = dummy();
-                        let call_ir = glue_ir_for_fn_trait(for_ty, args_ty, sig.output);
-                        res.0.child_fn_items.push(("call_once".to_owned(),FunctionIRSource::Injected(Arc::new(call_ir))));
-                        //res.0.child_fn_items.push(("call_once".to_owned(),))
-                        return Some(res);
                     }
-                } else {
-                    println!("warning, Fn with non-tuple args");
+
+                    let fn_args_ty = vm.ty_tuple(sig.inputs);
+                    let for_tys = SubList{list: vec!(
+                        Sub::Type(func_ty),
+                        Sub::Type(fn_args_ty)
+                    )};
+
+                    // BAD:?
+                    let mut res = trait_impl(for_tys);
+                    match self {
+                        BuiltinTrait::FnOnce => {
+                            let call_ir = glue_ir_for_fn_trait(func_ty,func_ty, fn_args_ty, sig.output);
+                            res.child_fn_items.push(("call_once".to_owned(),FunctionIRSource::Injected(Arc::new(call_ir))));
+
+                            res.child_tys.push(("Output".to_owned(),sig.output));
+                        }
+                        BuiltinTrait::FnMut => {
+                            let ref_ty = func_ty.ref_to(Mutability::Mut);
+                            let call_ir = glue_ir_for_fn_trait(func_ty,ref_ty, fn_args_ty, sig.output);
+                            res.child_fn_items.push(("call_mut".to_owned(),FunctionIRSource::Injected(Arc::new(call_ir))));
+                        }
+                        BuiltinTrait::Fn => {
+                            let ref_ty = func_ty.ref_to(Mutability::Const);
+                            let call_ir = glue_ir_for_fn_trait(func_ty,ref_ty, fn_args_ty, sig.output);
+                            res.child_fn_items.push(("call".to_owned(),FunctionIRSource::Injected(Arc::new(call_ir))));
+                        }
+                        _ => panic!()
+                    }
+
+                    return Some(res);
                 }
                 None
             }

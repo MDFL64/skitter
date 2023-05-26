@@ -154,8 +154,16 @@ impl<'vm> VM<'vm> {
         self.types.intern(TypeKind::Bool,self)
     }
 
-    pub fn ty_param(&'vm self, n: u32) -> Type<'vm> {
+    /*pub fn ty_param(&'vm self, n: u32) -> Type<'vm> {
         self.types.intern(TypeKind::Param(n),self)
+    }*/
+
+    pub fn ty_unknown(&'vm self) -> Type<'vm> {
+        self.types.intern(TypeKind::Unknown,self)
+    }
+
+    pub fn ty_tuple(&'vm self, children: Vec<Type<'vm>>) -> Type<'vm> {
+        self.types.intern(TypeKind::Tuple(children),self)
     }
 }
 

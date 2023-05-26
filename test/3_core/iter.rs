@@ -1,7 +1,7 @@
 mod _builtin;
 
 pub fn main() {
-    for i in 1..=10000 {
+    for i in 1..=100 {
         _builtin::print_int(i);
     }
     /*let array: &[u8] = &[4,2,7,100,3,4];
