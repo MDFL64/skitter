@@ -1,22 +1,26 @@
 use std::fmt::Display;
 
-use crate::items::{Item, CrateId, ItemId, FunctionIRSource};
+use crate::items::{CrateId, FunctionIRSource, Item};
 
-use super::{layout::Layout, Type, subs::{Sub, SubList}};
+use super::{
+    layout::Layout,
+    subs::{Sub, SubList},
+    Type,
+};
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum TypeKind<'vm> {
-    Int(IntWidth,IntSign),
+    Int(IntWidth, IntSign),
     Float(FloatWidth),
     Char,
     Bool,
     Never,
 
-    Ref(Type<'vm>,Mutability),
-    Ptr(Type<'vm>,Mutability),
+    Ref(Type<'vm>, Mutability),
+    Ptr(Type<'vm>, Mutability),
 
     Tuple(Vec<Type<'vm>>),
-    Array(Type<'vm>,ArraySize),
+    Array(Type<'vm>, ArraySize),
     Slice(Type<'vm>),
     StringSlice,
 
@@ -32,57 +36,56 @@ pub enum TypeKind<'vm> {
     Closure,
 
     Param(u32),
-    Unknown
-    //Error
+    Unknown, //Error
 }
 
 impl<'vm> TypeKind<'vm> {
     pub fn is_dummy(&self) -> bool {
         match self {
             TypeKind::Dynamic => true,
-            _ => false
+            _ => false,
         }
     }
 }
 
-#[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum IntSign {
     Signed,
-    Unsigned
+    Unsigned,
 }
 
-#[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum IntWidth {
     I8,
     I16,
     I32,
     I64,
     I128,
-    ISize
+    ISize,
 }
 
-#[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum FloatWidth {
     F32,
-    F64
+    F64,
 }
 
-#[derive(Debug,Copy,Clone,Hash,PartialEq,Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum Mutability {
     Mut,
-    Const
+    Const,
 }
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ItemWithSubs<'vm> {
     pub item: &'vm Item<'vm>,
-    pub subs: SubList<'vm>
+    pub subs: SubList<'vm>,
 }
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone,Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ArraySize {
     Static(u32),
-    ConstParam(u32)
+    ConstParam(u32),
 }
 
 impl ArraySize {
@@ -101,15 +104,15 @@ impl<'vm> Type<'vm> {
     }
 
     pub fn layout(&self) -> &'vm Layout {
-        self.0.layout.get_or_init(|| {
-            super::layout::Layout::from(*self)
-        })
+        self.0
+            .layout
+            .get_or_init(|| super::layout::Layout::from(*self))
     }
 
     pub fn sign(&self) -> IntSign {
         match self.kind() {
-            TypeKind::Int(_,sign) => *sign,
-            _ => IntSign::Unsigned
+            TypeKind::Int(_, sign) => *sign,
+            _ => IntSign::Unsigned,
         }
     }
 
@@ -123,9 +126,8 @@ impl<'vm> Type<'vm> {
     /// which is a non-terminating loop for self-referencing types.
     pub fn is_sized(&self) -> bool {
         match self.kind() {
-            TypeKind::Slice(_) |
-            TypeKind::StringSlice => false,
-            _ => true
+            TypeKind::Slice(_) | TypeKind::StringSlice => false,
+            _ => true,
         }
     }
 
@@ -145,41 +147,38 @@ impl<'vm> Type<'vm> {
                     panic!("bad sub");
                 }
             }
-            TypeKind::Ref(ref_ty,mutability) => {
+            TypeKind::Ref(ref_ty, mutability) => {
                 let ref_ty = ref_ty.sub(subs);
-                vm.types.intern(TypeKind::Ref(ref_ty,*mutability),vm)
+                vm.types.intern(TypeKind::Ref(ref_ty, *mutability), vm)
             }
-            TypeKind::Ptr(ref_ty,mutability) => {
+            TypeKind::Ptr(ref_ty, mutability) => {
                 let ref_ty = ref_ty.sub(subs);
-                vm.types.intern(TypeKind::Ptr(ref_ty,*mutability),vm)
+                vm.types.intern(TypeKind::Ptr(ref_ty, *mutability), vm)
             }
             TypeKind::Tuple(fields) => {
                 // fast path, will become redundant if above optimization is implemented
                 if fields.len() == 0 {
                     return *self;
                 }
-                let new_fields = fields.iter().map(|field| {
-                    field.sub(subs)
-                }).collect();
+                let new_fields = fields.iter().map(|field| field.sub(subs)).collect();
                 vm.types.intern(TypeKind::Tuple(new_fields), vm)
             }
-            TypeKind::Array(child_ty,size) => {
+            TypeKind::Array(child_ty, size) => {
                 // todo subs for const size
                 size.assert_static();
-                vm.types.intern(TypeKind::Array(child_ty.sub(subs),*size), vm)
+                vm.types
+                    .intern(TypeKind::Array(child_ty.sub(subs), *size), vm)
             }
-            TypeKind::Slice(child_ty) => {
-                vm.types.intern(TypeKind::Slice(child_ty.sub(subs)), vm)
-            }
+            TypeKind::Slice(child_ty) => vm.types.intern(TypeKind::Slice(child_ty.sub(subs)), vm),
             TypeKind::Adt(adt) => {
                 // fast path, will become redundant if above optimization is implemented
                 if adt.subs.list.len() == 0 {
                     return *self;
                 }
                 let new_subs = adt.subs.sub(subs);
-                let new_ty = TypeKind::Adt(ItemWithSubs{
+                let new_ty = TypeKind::Adt(ItemWithSubs {
                     item: adt.item,
-                    subs: new_subs
+                    subs: new_subs,
                 });
                 vm.types.intern(new_ty, vm)
             }
@@ -189,9 +188,9 @@ impl<'vm> Type<'vm> {
                     return *self;
                 }
                 let new_subs = func.subs.sub(subs);
-                let new_ty = TypeKind::FunctionDef(ItemWithSubs{
+                let new_ty = TypeKind::FunctionDef(ItemWithSubs {
                     item: func.item,
-                    subs: new_subs
+                    subs: new_subs,
                 });
                 vm.types.intern(new_ty, vm)
             }
@@ -203,57 +202,49 @@ impl<'vm> Type<'vm> {
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
             // These types never accept subs.
-            TypeKind::Never |
-            TypeKind::Int(..) |
-            TypeKind::Float(_) |
-            TypeKind::Bool |
-            TypeKind::StringSlice |
-            TypeKind::Char => *self,
-            _ => panic!("todo sub {:?} with {:?}",self,subs)
+            TypeKind::Never
+            | TypeKind::Int(..)
+            | TypeKind::Float(_)
+            | TypeKind::Bool
+            | TypeKind::StringSlice
+            | TypeKind::Char => *self,
+            _ => panic!("todo sub {:?} with {:?}", self, subs),
         }
     }
 
     pub fn is_concrete(&self) -> bool {
         match self.kind() {
             // primitive types
-            TypeKind::Int(..) |
-            TypeKind::Float(..) |
-            TypeKind::Bool |
-            TypeKind::Char => true,
-            TypeKind::Tuple(children) => {
-                children.iter().all(|child| child.is_concrete())
-            }
-            TypeKind::Adt(adt) => {
-                adt.subs.is_concrete()
-            }
-            TypeKind::FunctionDef(fun) => {
-                fun.subs.is_concrete()
-            }
-            TypeKind::Ref(child,_) => {
-                child.is_concrete()
-            }
-            TypeKind::Slice(child) => {
-                child.is_concrete()
-            }
+            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char => true,
+            TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
+            TypeKind::Adt(adt) => adt.subs.is_concrete(),
+            TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
+            TypeKind::Ref(child, _) => child.is_concrete(),
+            TypeKind::Slice(child) => child.is_concrete(),
             TypeKind::Param(_) | TypeKind::Unknown => false,
-            _ => panic!("is concrete? {}",self)
+            _ => panic!("is concrete? {}", self),
         }
     }
 
-    pub fn add_impl(&self, crate_id: CrateId, child_fn_items: Vec<(String,FunctionIRSource<'vm>)>, child_tys: Vec<(String,Type<'vm>)>) {
+    pub fn add_impl(
+        &self,
+        crate_id: CrateId,
+        child_fn_items: Vec<(String, FunctionIRSource<'vm>)>,
+        child_tys: Vec<(String, Type<'vm>)>,
+    ) {
         if self.kind().is_dummy() {
             //println!("skip impl {:?}",self.kind());
             return;
         }
 
         let mut impl_table = self.0.impl_table.write().unwrap();
-        for (name,item_id) in child_fn_items {
-            let old = impl_table.insert(name,(crate_id,item_id));
+        for (name, item_id) in child_fn_items {
+            let old = impl_table.insert(name, (crate_id, item_id));
             assert!(old.is_none());
         }
     }
 
-    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId,FunctionIRSource<'vm>)> {
+    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId, FunctionIRSource<'vm>)> {
         let impl_table = self.0.impl_table.read().unwrap();
         impl_table.get(name).cloned()
     }
@@ -268,10 +259,8 @@ impl<'vm> Type<'vm> {
 
     pub fn func_item(&self) -> Option<ItemWithSubs<'vm>> {
         match self.kind() {
-            TypeKind::FunctionDef(item) => {
-                Some(item.clone())
-            }
-            _ => None
+            TypeKind::FunctionDef(item) => Some(item.clone()),
+            _ => None,
         }
     }
 }
@@ -302,57 +291,50 @@ impl<'vm> Display for Type<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind() {
             TypeKind::Adt(item_with_subs) | TypeKind::FunctionDef(item_with_subs) => {
-                write!(f,"{}",item_with_subs.item.path.as_string())?;
+                write!(f, "{}", item_with_subs.item.path.as_string())?;
                 if item_with_subs.subs.list.len() > 0 {
-                    write!(f,"{}",item_with_subs.subs)?;
+                    write!(f, "{}", item_with_subs.subs)?;
                 }
                 Ok(())
             }
             TypeKind::Tuple(children) => {
-                write!(f,"(")?;
-                for (i,ty) in children.iter().enumerate() {
+                write!(f, "(")?;
+                for (i, ty) in children.iter().enumerate() {
                     if i > 0 {
-                        write!(f,",")?;
+                        write!(f, ",")?;
                     }
-                    write!(f,"{}",ty)?;
+                    write!(f, "{}", ty)?;
                 }
-                write!(f,")")
-
+                write!(f, ")")
             }
-            TypeKind::Int(width,sign) => {
-                match (width,sign) {
-                    (IntWidth::I8,IntSign::Signed) => write!(f,"i8"),
-                    (IntWidth::I16,IntSign::Signed) => write!(f,"i16"),
-                    (IntWidth::I32,IntSign::Signed) => write!(f,"i32"),
-                    (IntWidth::I64,IntSign::Signed) => write!(f,"i64"),
-                    (IntWidth::I128,IntSign::Signed) => write!(f,"i128"),
-                    (IntWidth::ISize,IntSign::Signed) => write!(f,"isize"),
+            TypeKind::Int(width, sign) => match (width, sign) {
+                (IntWidth::I8, IntSign::Signed) => write!(f, "i8"),
+                (IntWidth::I16, IntSign::Signed) => write!(f, "i16"),
+                (IntWidth::I32, IntSign::Signed) => write!(f, "i32"),
+                (IntWidth::I64, IntSign::Signed) => write!(f, "i64"),
+                (IntWidth::I128, IntSign::Signed) => write!(f, "i128"),
+                (IntWidth::ISize, IntSign::Signed) => write!(f, "isize"),
 
-                    (IntWidth::I8,IntSign::Unsigned) => write!(f,"u8"),
-                    (IntWidth::I16,IntSign::Unsigned) => write!(f,"u16"),
-                    (IntWidth::I32,IntSign::Unsigned) => write!(f,"u32"),
-                    (IntWidth::I64,IntSign::Unsigned) => write!(f,"u64"),
-                    (IntWidth::I128,IntSign::Unsigned) => write!(f,"u128"),
-                    (IntWidth::ISize,IntSign::Unsigned) => write!(f,"usize"),
-                }
-            }
+                (IntWidth::I8, IntSign::Unsigned) => write!(f, "u8"),
+                (IntWidth::I16, IntSign::Unsigned) => write!(f, "u16"),
+                (IntWidth::I32, IntSign::Unsigned) => write!(f, "u32"),
+                (IntWidth::I64, IntSign::Unsigned) => write!(f, "u64"),
+                (IntWidth::I128, IntSign::Unsigned) => write!(f, "u128"),
+                (IntWidth::ISize, IntSign::Unsigned) => write!(f, "usize"),
+            },
             TypeKind::StringSlice => {
-                write!(f,"str")
+                write!(f, "str")
             }
-            TypeKind::Ref(ty,mutability) => {
-                match mutability {
-                    Mutability::Const => write!(f,"&{}",ty),
-                    Mutability::Mut => write!(f,"&mut {}",ty),
-                }
-            }
-            TypeKind::Ptr(ty,mutability) => {
-                match mutability {
-                    Mutability::Const => write!(f,"*const {}",ty),
-                    Mutability::Mut => write!(f,"*mut {}",ty),
-                }
-            }
+            TypeKind::Ref(ty, mutability) => match mutability {
+                Mutability::Const => write!(f, "&{}", ty),
+                Mutability::Mut => write!(f, "&mut {}", ty),
+            },
+            TypeKind::Ptr(ty, mutability) => match mutability {
+                Mutability::Const => write!(f, "*const {}", ty),
+                Mutability::Mut => write!(f, "*mut {}", ty),
+            },
             _ => {
-                write!(f,"{:?}",self)
+                write!(f, "{:?}", self)
             }
         }
     }

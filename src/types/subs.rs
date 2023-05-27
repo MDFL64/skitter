@@ -4,18 +4,18 @@ use crate::{items::GenericCounts, vm::VM};
 
 use super::Type;
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum Sub<'vm> {
     Type(Type<'vm>),
     Lifetime,
-    Const
+    Const,
 }
 
 impl<'vm> Sub<'vm> {
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
         match self {
             Sub::Type(ty) => Sub::Type(ty.sub(subs)),
-            _ => self.clone()
+            _ => self.clone(),
         }
     }
 
@@ -23,14 +23,14 @@ impl<'vm> Sub<'vm> {
         match self {
             Sub::Type(ty) => ty.is_concrete(),
             Sub::Lifetime => true,
-            Sub::Const => todo!()
+            Sub::Const => todo!(),
         }
     }
 
     pub fn assert_ty(&self) -> Type<'vm> {
         match self {
             Sub::Type(ty) => *ty,
-            _ => panic!("not a type")
+            _ => panic!("not a type"),
         }
     }
 }
@@ -39,16 +39,16 @@ impl<'vm> Sub<'vm> {
 impl<'vm> Display for Sub<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Sub::Type(ty) => write!(f,"{}",ty),
-            Sub::Lifetime => write!(f,"'_"),
-            Sub::Const => write!(f,"<const>")
+            Sub::Type(ty) => write!(f, "{}", ty),
+            Sub::Lifetime => write!(f, "'_"),
+            Sub::Const => write!(f, "<const>"),
         }
     }
 }
 
-#[derive(Debug,Hash,PartialEq,Eq,Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct SubList<'vm> {
-    pub list: Vec<Sub<'vm>>
+    pub list: Vec<Sub<'vm>>,
 }
 
 impl<'vm> SubList<'vm> {
@@ -68,14 +68,12 @@ impl<'vm> SubList<'vm> {
             list.push(Sub::Const);
         }
 
-        SubList{list}
+        SubList { list }
     }
 
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
-        let new_subs: Vec<_> = self.list.iter().map(|field| {
-            field.sub(subs)
-        }).collect();
-        SubList{ list: new_subs }
+        let new_subs: Vec<_> = self.list.iter().map(|field| field.sub(subs)).collect();
+        SubList { list: new_subs }
     }
 
     pub fn is_concrete(&self) -> bool {
@@ -85,13 +83,13 @@ impl<'vm> SubList<'vm> {
 
 impl<'vm> Display for SubList<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"<")?;
-        for (i,sub) in self.list.iter().enumerate() {
-            if i>0 {
-                write!(f,",")?;
+        write!(f, "<")?;
+        for (i, sub) in self.list.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
             }
-            write!(f,"{}",sub)?;
+            write!(f, "{}", sub)?;
         }
-        write!(f,">")
+        write!(f, ">")
     }
 }
