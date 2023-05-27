@@ -1,6 +1,6 @@
 use std::{sync::{Mutex, Arc, OnceLock, RwLock}, collections::HashMap, hash::Hash, borrow::Cow};
 
-use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait}, rustc_worker::RustCContext};
+use crate::{vm::{VM, Function}, ir::IRFunction, types::{Sub, Type, TypeKind, ItemWithSubs, SubList}, builtins::{BuiltinTrait}, rustc_worker::RustCContext, bytecode_compiler};
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
@@ -59,7 +59,9 @@ impl<'vm> CrateItems<'vm> {
         // add to path map
         if path.0 != NameSpace::DebugOnly {
             let old = self.map_path_to_item.insert(path, item_id);
-            assert!(old.is_none());
+            if old.is_some() {
+                panic!("duplicate path {:?}",did);
+            }
         }
 
         item_id
@@ -193,6 +195,7 @@ pub enum ItemKind<'vm> {
         parent_trait: Option<TraitInfo>,
         extern_name: Option<String>
     },
+    Constant(ItemConstant<'vm>),
     Adt{
         info: OnceLock<AdtInfo<'vm>>
     },
@@ -203,6 +206,17 @@ pub enum ItemKind<'vm> {
     AssociatedType{
         parent_trait: TraitInfo
     }
+}
+
+/// Constants operate very similarly to functions, but are evaluated
+/// greedily when encountered in IR and converted directly to values.
+/// 
+/// TODO: Associated constants need monomorphized.
+#[derive(Default)]
+struct ItemConstant<'vm> {
+    ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
+    value: Mutex<Option<&'vm [u8]>>,
+    parent_trait: Option<TraitInfo>,
 }
 
 #[derive(Debug)]
@@ -272,6 +286,12 @@ pub enum BoundKind<'vm> {
     Projection(ItemWithSubs<'vm>,Type<'vm>)
 }
 
+#[derive(PartialEq)]
+enum IRContainerKind {
+    Function,
+    Constant
+}
+
 #[derive(Default,Debug)]
 pub struct GenericCounts {
     pub lifetimes: u32,
@@ -310,6 +330,10 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
+    pub fn new_const() -> Self {
+        Self::Constant(Default::default())
+    }
+
     pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
         Self::AssociatedType{
             parent_trait: TraitInfo{
@@ -334,13 +358,6 @@ impl<'vm> ItemKind<'vm> {
 }
 
 impl<'vm> Item<'vm> {
-    pub fn is_func(&self) -> bool {
-        if let ItemKind::Function{..} = &self.kind {
-            true
-        } else {
-            false
-        }
-    }
 
     /// Get a monomorphic VM function from a function item.
     pub fn func_mono(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
@@ -365,25 +382,33 @@ impl<'vm> Item<'vm> {
         extern_name
     }
 
-    pub fn func_sig<'a>(&self, subs: &'a SubList<'vm>) -> FunctionSig<'vm> {
-        let (ir,new_subs) = self.func_ir(subs);
+    pub fn func_sig(&self, subs: &SubList<'vm>) -> FunctionSig<'vm> {
+        let (ir,new_subs) = self.ir(subs);
 
         ir.sig.sub(&new_subs)
     }
 
-    /// Get the IR for a function. Subs are used to find specialized IR for trait methods.
-    pub fn func_ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
+    /// Get the IR for a function OR a constant. Subs are used to find specialized IR for trait items.
+    pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>,Cow<'a,SubList<'vm>>) {
         
-        let ItemKind::Function{ir,parent_trait,..} = &self.kind else {
-            panic!("item kind mismatch");
+        let (ir,parent_trait,kind) = match &self.kind {
+            ItemKind::Function{ ir, parent_trait, .. } => {
+                (ir,parent_trait,IRContainerKind::Function)
+            },
+            ItemKind::Constant(ItemConstant{ ir, parent_trait, .. }) => {
+                (ir,parent_trait,IRContainerKind::Constant)
+            }
+            _ => panic!("item kind mismatch")
         };
 
-        if let Some(trait_info) = parent_trait {
-            let crate_items = self.vm.get_crate_items(self.crate_id);
-            let trait_item = crate_items.get(trait_info.trait_id);
-            let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
-            if let Some((ir,new_subs)) = resolved_func {
-                return (ir,Cow::Owned(new_subs));
+        if kind == IRContainerKind::Function {
+            if let Some(trait_info) = parent_trait {
+                let crate_items = self.vm.get_crate_items(self.crate_id);
+                let trait_item = crate_items.get(trait_info.trait_id);
+                let resolved_func = trait_item.find_trait_fn(subs,&trait_info.ident);
+                if let Some((ir,new_subs)) = resolved_func {
+                    return (ir,Cow::Owned(new_subs));
+                }
             }
         }
 
@@ -405,13 +430,31 @@ impl<'vm> Item<'vm> {
 
     pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
 
-        let ItemKind::Function{ir,..} = &self.kind else {
-            panic!("item kind mismatch");
+        let ir = match &self.kind {
+            ItemKind::Function{ ir, parent_trait, .. } => {
+                ir
+            },
+            ItemKind::Constant(ItemConstant{ ir, parent_trait, .. }) => {
+                ir
+            }
+            _ => panic!("item kind mismatch")
         };
 
         let mut dest = ir.lock().unwrap();
 
         *dest = Some(Arc::new(new_ir));
+    }
+
+    pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
+        assert!(subs.list.len() == 0);
+        let (ir,new_subs) = self.ir(subs);
+        let bc = bytecode_compiler::HirCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
+        let const_thread = self.vm.make_thread();
+        const_thread.run_bytecode(&bc, 0);
+        let ty = ir.sig.output; // todo sub?
+
+        let const_bytes = const_thread.copy_result(ty.layout().assert_size() as usize);
+        self.vm.alloc_constant(const_bytes)
     }
 
     pub fn get_adt_info(&self) -> &AdtInfo<'vm> {
@@ -475,7 +518,7 @@ impl<'vm> Item<'vm> {
                     match child_source {
                         FunctionIRSource::Item(fn_item_id) => {
                             let fn_item = crate_items.get(*fn_item_id);
-                            let (ir,_) = fn_item.func_ir(&subs);
+                            let (ir,_) = fn_item.ir(&subs);
                             return Some((ir,subs))
                         }
                         FunctionIRSource::Injected(ir) => {
@@ -733,6 +776,9 @@ pub fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> ItemPath {
         match elem.data {
             DefPathData::ValueNs(sym) |
             DefPathData::TypeNs(sym) => {
+                if sym.as_str() == "_" {
+                    is_debug = true;
+                }
                 result.push_str("::");
                 result.push_str(sym.as_str());
             }

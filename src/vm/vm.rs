@@ -22,8 +22,6 @@ use std::sync::atomic::AtomicPtr;
 use super::instr::Instr;
 
 pub struct VM<'vm> {
-    stack: Vec<u128>,
-    //functions: Mutex<HashMap<(DefId,SubstsRef<'tcx>),Arc<Function<'tcx>>>>,
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
     workers: RwLock<Vec<RustCWorker<'vm>>>,
@@ -31,14 +29,54 @@ pub struct VM<'vm> {
     arena_items: Arena<CrateItems<'vm>>,
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>,
-    arena_strings: Arena<String>,
+    arena_constants: Arena<Vec<u8>>,
+}
+
+pub struct VMThread<'vm> {
+    vm: &'vm VM<'vm>,
+    stack: Vec<u128>,
+}
+
+impl<'vm> VMThread<'vm> {
+    pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
+
+        let native = func.get_native();
+        if let Some(native) = native {
+            unsafe {
+                let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
+                native(stack);
+            }
+            return;
+        }
+
+        // fetch bytecode
+        let bc = func.bytecode();
+        self.run_bytecode(bc, stack_offset);
+    }
+
+    pub fn run_bytecode(&self, bc: &[Instr<'vm>], stack_offset: u32) {
+        unsafe {
+            let mut pc = 0;
+            let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
+    
+            loop {
+                let instr = &bc[pc];
+                include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
+                pc += 1;
+            }
+        }
+    }
+
+    pub fn copy_result(&self, size: usize) -> Vec<u8> {
+        let ptr = self.stack.as_ptr() as *mut u8;
+        let slice = unsafe { std::slice::from_raw_parts(ptr,size) };
+        slice.to_vec()
+    }
 }
 
 impl<'vm> VM<'vm> {
     pub fn new() -> Self {
         Self {
-            // 64k stack - TODO move out of this struct, this is not safe
-            stack: vec!(0;4096),
             //functions: Default::default(),
             types: TypeContext::new(),
             is_verbose: false,
@@ -47,7 +85,15 @@ impl<'vm> VM<'vm> {
             arena_items: Arena::new(),
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
-            arena_strings: Arena::new()
+            arena_constants: Arena::new()
+        }
+    }
+
+    pub fn make_thread(&'vm self) -> VMThread<'vm> {
+        VMThread {
+            vm: self,
+            // 64k stack
+            stack: vec!(0;4096),
         }
     }
 
@@ -115,35 +161,8 @@ impl<'vm> VM<'vm> {
         self.arena_bytecode.alloc(bc)
     }
 
-    pub fn alloc_string(&'vm self, str: String) -> &'vm str {
-        self.arena_strings.alloc(str)
-    }
-
-    pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
-
-        let native = func.get_native();
-        if let Some(native) = native {
-            unsafe {
-                let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
-                native(stack);
-            }
-            return;
-        }
-
-        // fetch bytecode
-        let bc = func.bytecode();
-
-        // run bytecode
-        unsafe {            
-            let mut pc = 0;
-            let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
-    
-            loop {
-                let instr = &bc[pc];
-                include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
-                pc += 1;
-            }
-        }
+    pub fn alloc_constant(&'vm self, str: Vec<u8>) -> &'vm [u8] {
+        self.arena_constants.alloc(str)
     }
 
     pub fn ty_usize(&'vm self) -> Type<'vm> {
@@ -218,7 +237,7 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let (ir,new_subs) = self.item.func_ir(&self.subs);
+            let (ir,new_subs) = self.item.ir(&self.subs);
             let path = self.item.path.as_string();
 
             let bc = HirCompiler::compile(self.item.vm, &ir, &new_subs, path);

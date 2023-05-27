@@ -9,7 +9,7 @@ use rustc_hir::def_id::LocalDefId;
 
 use crate::items::FunctionSig;
 use crate::rustc_worker::RustCContext;
-use crate::types::{Type, TypeKind, SubList};
+use crate::types::{Type, TypeKind, SubList, ItemWithSubs};
 
 pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
@@ -85,7 +85,7 @@ pub enum ExprKind<'vm> {
     /// Zero-sized type literals
     LiteralVoid,
     /// Literal used for strings. Can't lower to a pointer at this stage because it would break serialization.
-    LiteralString(&'vm str),
+    LiteralBytes(&'vm [u8]),
 
     Unary(UnaryOp,ExprId),
     Binary(BinaryOp,ExprId,ExprId),
@@ -103,6 +103,8 @@ pub enum ExprKind<'vm> {
     Tuple(Vec<ExprId>),
     Adt{variant: u32, fields: Vec<(u32,ExprId)> },
     Array(Vec<ExprId>),
+
+    NamedConst(ItemWithSubs<'vm>),
 
     Ref(ExprId),
     DeRef(ExprId),
@@ -240,7 +242,10 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
             thir::BodyTy::Fn(sig) => {
                 FunctionSig::from_rustc(&sig, &builder.ctx)
             }
-            _ => panic!("const not supported")
+            thir::BodyTy::Const(ty) => {
+                let output = builder.ctx.type_from_rustc(ty);
+                FunctionSig{inputs:vec!(),output}
+            }
         };
 
         IRFunction{
@@ -362,7 +367,8 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                         ExprKind::LiteralValue(c as i128)
                     }
                     LitKind::Str(sym,_) => {
-                        ExprKind::LiteralString(self.ctx.vm.alloc_string(sym.as_str().to_owned()))
+                        let bytes = sym.as_str().as_bytes().to_owned();
+                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
                     }
                     _ => panic!("lit other {:?}",lit.node)
                 }
@@ -495,6 +501,10 @@ impl<'vm,'tcx,'a> IRFunctionBuilder<'vm,'tcx> {
                     init: self.expr_id(expr)
                 }
             }
+            thir::ExprKind::NamedConst{def_id,substs,..} => {
+                let item_ref = self.ctx.vm.types.def_from_rustc(def_id, substs, &self.ctx);
+                ExprKind::NamedConst(item_ref)
+            }
 
             _ => panic!("convert {:?}",old.kind)
         };
@@ -615,7 +625,7 @@ impl<'vm> IRFunction<'vm> {
     }
 }
 
-// ONLY WORKS FOR CALL_ONCE, other traits expect a ref
+// used to generate glue code for Fn* traits on regular functions
 pub fn glue_ir_for_fn_trait<'vm>(func_ty: Type<'vm>, self_ty: Type<'vm>, args_ty: Type<'vm>, res_ty: Type<'vm>) -> IRFunction<'vm> {
     assert!(func_ty.is_concrete());
     assert!(args_ty.is_concrete());

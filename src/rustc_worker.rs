@@ -6,7 +6,7 @@ use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::AssocItemKind;
 use rustc_hir::def_id::LocalDefId;
 
-use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionSig, FunctionIRSource, BoundKind}, builtins::BuiltinTrait};
+use crate::{ir::{IRFunctionBuilder}, vm::{VM}, types::{Type, IntWidth, IntSign, TypeKind}, items::{CrateId, CrateItems, ItemKind, ItemPath, ItemId, ExternCrate, AdtInfo, TraitImpl, GenericCounts, path_from_rustc, FunctionIRSource, BoundKind}, builtins::BuiltinTrait};
 
 /////////////////////////
 
@@ -156,11 +156,35 @@ impl<'vm> RustCWorker<'vm> {
                                 HirItemKind::OpaqueTy(_) |
                                 HirItemKind::TraitAlias(..) => (),
                                 // simple items
-                                HirItemKind::Const(..) => {
-                                    // todo?
+                                HirItemKind::Const(ty,body_id) => {
+                                    let local_id = item.owner_id.def_id;
+                                    let item_path = path_from_rustc(&hir.def_path(local_id));
+
+                                    let kind = ItemKind::new_const();
+
+                                    items.add_item(vm,kind,item_path,local_id);
                                 }
                                 HirItemKind::Static(..) => {
                                     // todo?
+                                }
+                                HirItemKind::Fn(..) => {
+                                    let local_id = item.owner_id.def_id;
+                                    let item_path = path_from_rustc(&hir.def_path(local_id));
+
+                                    let kind = ItemKind::new_function();
+
+                                    items.add_item(vm,kind,item_path,local_id);
+                                }
+                                HirItemKind::Struct(..) |
+                                HirItemKind::Enum(..) |
+                                HirItemKind::Union(..) => {
+                                    let local_id = item.owner_id.def_id;
+                                    let item_path = path_from_rustc(&hir.def_path(local_id));
+
+                                    let kind = ItemKind::new_adt();
+
+                                    let item_id = items.add_item(vm,kind,item_path,local_id);
+                                    adt_items.push(item_id);
                                 }
                                 HirItemKind::ForeignMod{abi,items: mod_items} => {
                                     //let local_id = item.owner_id.def_id;
@@ -189,28 +213,7 @@ impl<'vm> RustCWorker<'vm> {
                                             _ => panic!("todo foreign item {:?}",item_path)
                                         }
                                     }
-
                                 }
-                                HirItemKind::Fn(..) => {
-                                    let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id));
-
-                                    let kind = ItemKind::new_function();
-
-                                    items.add_item(vm,kind,item_path,local_id);
-                                }
-                                HirItemKind::Struct(..) |
-                                HirItemKind::Enum(..) |
-                                HirItemKind::Union(..) => {
-                                    let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id));
-
-                                    let kind = ItemKind::new_adt();
-
-                                    let item_id = items.add_item(vm,kind,item_path,local_id);
-                                    adt_items.push(item_id);
-                                }
-                                // todo impls
                                 HirItemKind::Trait(_is_auto,_safety,_generics,_bounds,child_items) => {
                                     // trait item
                                     let trait_item = {

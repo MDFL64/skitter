@@ -98,7 +98,8 @@ fn main() {
 
         let main_fn = main_item.func_mono(&SubList{list:Vec::new()});
 
-        vm.call(&main_fn,0);
+        let thread = vm.make_thread();
+        thread.call(&main_fn,0);
 
         process::exit(0)
     });

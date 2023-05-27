@@ -132,6 +132,7 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                 self.lower_block(*block, dst_slot)
             }
             // PLACES:
+            ExprKind::NamedConst(_) |
             ExprKind::VarRef{..} |
             ExprKind::Field{..} |
             ExprKind::Index{..} => {
@@ -173,13 +174,13 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     Slot::DUMMY
                 })
             }
-            ExprKind::LiteralString(string) => {
+            ExprKind::LiteralBytes(bytes) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| {
                     self.stack.alloc(expr_ty)
                 });
 
-                let ptr = string.as_ptr() as usize;
-                let len = string.len();
+                let ptr = bytes.as_ptr() as usize;
+                let len = bytes.len();
 
                 let ptr_size = POINTER_SIZE.bytes();
 
@@ -747,6 +748,18 @@ impl<'vm,'f> HirCompiler<'vm,'f> {
                     _ => panic!("cannot index {:?}",lhs_kind)
                 }
                 Place::Ptr(index_slot,0)
+            }
+            ExprKind::NamedConst(const_ref) => {
+                let ty = self.expr_ty(id);
+                let ptr_ty = ty.ref_to(Mutability::Const);
+                let ptr_size = ptr_ty.layout().assert_size();
+                
+                let const_ptr = const_ref.item.const_value(&const_ref.subs).as_ptr() as usize;
+                
+                let ptr_slot = self.stack.alloc(ty);
+                self.out_bc.push(bytecode_select::literal(const_ptr as i128, ptr_size, ptr_slot));
+
+                Place::Ptr(ptr_slot, 0)
             }
             // (todo) All other expressions without special handling:
             ExprKind::Block{..} |
