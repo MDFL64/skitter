@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, time::{Duration, Instant}};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 pub fn test(dir_name: &str) -> ! {
     use colored::Colorize;
@@ -17,8 +20,8 @@ pub fn test(dir_name: &str) -> ! {
             Err(msg) => format!("{}", format!("FAIL: {}", msg).red()),
             Ok(res) => {
                 count_success += 1;
-                
-                let percent = format!("{:.1}%", res.fraction*100.0);
+
+                let percent = format!("{:.1}%", res.fraction * 100.0);
 
                 let speedup_str = if res.fraction < 0.1 {
                     percent.green()
@@ -30,13 +33,19 @@ pub fn test(dir_name: &str) -> ! {
 
                 time_skitter_total += res.time_skitter;
 
-                format!("{} {} ({:?} / {:?})", "GOOD:".green(), speedup_str, res.time_skitter, res.time_rustc)
+                format!(
+                    "{} {} ({:?} / {:?})",
+                    "GOOD:".green(),
+                    speedup_str,
+                    res.time_skitter,
+                    res.time_rustc
+                )
             }
         };
 
         println!("{:40} {}", file.file.to_str().unwrap(), res_str);
     }
-    
+
     println!("=> {} / {} tests passed", count_success, count_total);
     println!("=> skitter took {:?} total", time_skitter_total);
 
@@ -46,7 +55,7 @@ pub fn test(dir_name: &str) -> ! {
 #[derive(Ord, Eq, PartialEq, PartialOrd)]
 struct TestInfo {
     file: PathBuf,
-    args: Vec<String>
+    args: Vec<String>,
 }
 
 fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
@@ -54,16 +63,19 @@ fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
 
     let args: Vec<String> = if let Result::Ok(data) = std::fs::read(dir_path.join("_args")) {
         let arg_data = std::str::from_utf8(&data).expect("bad args");
-        arg_data.split(' ').filter_map(|a| {
-            let a = a.trim();
-            if a.len() == 0 {
-                None
-            } else {
-                Some(a.to_owned())
-            }
-        }).collect()
+        arg_data
+            .split(' ')
+            .filter_map(|a| {
+                let a = a.trim();
+                if a.len() == 0 {
+                    None
+                } else {
+                    Some(a.to_owned())
+                }
+            })
+            .collect()
     } else {
-        vec!()
+        vec![]
     };
 
     let read_dir = std::fs::read_dir(dir_name).expect("failed to read test directory");
@@ -82,9 +94,9 @@ fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
                     } else if file_ty.is_file() {
                         if file_name.ends_with(".rs") {
                             let file = dir_path.join(file_name);
-                            files.push(TestInfo{
+                            files.push(TestInfo {
                                 file,
-                                args: args.clone()
+                                args: args.clone(),
                             });
                         }
                     }
@@ -165,7 +177,7 @@ fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String>
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
                 if let Some(code) = cmd_res.status.code() {
-                    return Err(format!("skitter failed ({})",code));
+                    return Err(format!("skitter failed ({})", code));
                 } else {
                     return fail();
                 }

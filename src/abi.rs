@@ -1,14 +1,12 @@
-
-
 pub const POINTER_SIZE: PointerSize = match std::mem::size_of::<usize>() {
     4 => PointerSize::I32,
     8 => PointerSize::I64,
-    _ => panic!("bad pointer size")
+    _ => panic!("bad pointer size"),
 };
 
 pub enum PointerSize {
     I32,
-    I64
+    I64,
 }
 
 impl PointerSize {

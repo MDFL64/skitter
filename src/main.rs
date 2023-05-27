@@ -1,35 +1,35 @@
 #![feature(rustc_private)]
 #![feature(drain_filter)]
 
+extern crate rustc_abi;
+extern crate rustc_ast;
 extern crate rustc_ast_pretty;
 extern crate rustc_driver;
 extern crate rustc_error_codes;
 extern crate rustc_errors;
+extern crate rustc_feature;
 extern crate rustc_hash;
 extern crate rustc_hir;
 extern crate rustc_interface;
+extern crate rustc_metadata;
+extern crate rustc_middle;
+extern crate rustc_mir_dataflow;
 extern crate rustc_session;
 extern crate rustc_span;
-extern crate rustc_middle;
-extern crate rustc_feature;
-extern crate rustc_mir_dataflow;
-extern crate rustc_ast;
-extern crate rustc_abi;
-extern crate rustc_metadata;
 extern crate rustc_target;
 
 mod vm;
 
+mod abi;
+mod builtins;
 mod bytecode_compiler;
 mod bytecode_select;
 mod cli;
-mod test;
-mod abi;
 mod ir;
-mod types;
 mod items;
 mod rustc_worker;
-mod builtins;
+mod test;
+mod types;
 
 use std::process;
 
@@ -37,7 +37,10 @@ use clap::Parser;
 use types::SubList;
 use vm::VM;
 
-use crate::{items::{ItemPath, ExternCrate}, rustc_worker::RustCWorkerConfig};
+use crate::{
+    items::{ExternCrate, ItemPath},
+    rustc_worker::RustCWorkerConfig,
+};
 
 // seems neutral or slower than the system allocator (wsl), todo more tests
 //use mimalloc::MiMalloc;
@@ -45,7 +48,6 @@ use crate::{items::{ItemPath, ExternCrate}, rustc_worker::RustCWorkerConfig};
 //static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-
     set_panic_handler();
 
     let args = cli::CliArgs::parse();
@@ -56,37 +58,42 @@ fn main() {
 
     let mut vm = VM::new();
     vm.is_verbose = args.verbose;
-    
+
     std::thread::scope(|scope| {
-        
         let mut extern_crates = Vec::new();
 
         if args.core {
             let sysroot = get_sysroot();
-            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs",sysroot);
+            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
 
             // make sure core root exists
             assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_worker(RustCWorkerConfig{
-                source_root: &core_root,
-                extern_crates: vec!(),
-                is_core: true
-            },scope);
+            let core_crate = vm.add_worker(
+                RustCWorkerConfig {
+                    source_root: &core_root,
+                    extern_crates: vec![],
+                    is_core: true,
+                },
+                scope,
+            );
 
             vm.wait_for_setup(core_crate);
-            extern_crates.push(ExternCrate{
+            extern_crates.push(ExternCrate {
                 id: core_crate,
-                name: "core".to_owned()
+                name: "core".to_owned(),
             });
         }
 
-        let main_crate = vm.add_worker(RustCWorkerConfig{
-            source_root: &args.file_name,
-            extern_crates,
-            is_core: false
-        },scope);
-        
+        let main_crate = vm.add_worker(
+            RustCWorkerConfig {
+                source_root: &args.file_name,
+                extern_crates,
+                is_core: false,
+            },
+            scope,
+        );
+
         vm.wait_for_setup(main_crate);
 
         let main_path = ItemPath::main();
@@ -96,10 +103,10 @@ fn main() {
             .find_by_path(&main_path)
             .expect("no main found");
 
-        let main_fn = main_item.func_mono(&SubList{list:Vec::new()});
+        let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
 
         let thread = vm.make_thread();
-        thread.call(&main_fn,0);
+        thread.call(&main_fn, 0);
 
         process::exit(0)
     });

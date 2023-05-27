@@ -214,7 +214,12 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.wrapping_shr(b as _)",
         source,
     );
-    write_unary(&format!("{}_PopCount", big), unsigned, "x.count_ones()", source);
+    write_unary(
+        &format!("{}_PopCount", big),
+        unsigned,
+        "x.count_ones()",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {
@@ -345,16 +350,16 @@ fn write_exec_match() {
     //write_bulk_move_ss("MovSS4N", "u32", &mut source);
     //write_bulk_move_ps("MovPS4N", "u32", &mut source);
 
-    write_bulk_move_ss("MovSS1N","u8",&mut source);
-    write_bulk_move_ss("MovSS2N","u16",&mut source);
-    write_bulk_move_ss("MovSS4N","u32",&mut source);
-    write_bulk_move_ss("MovSS8N","u64",&mut source);
-    write_bulk_move_ss("MovSS16N","u128",&mut source);
+    write_bulk_move_ss("MovSS1N", "u8", &mut source);
+    write_bulk_move_ss("MovSS2N", "u16", &mut source);
+    write_bulk_move_ss("MovSS4N", "u32", &mut source);
+    write_bulk_move_ss("MovSS8N", "u64", &mut source);
+    write_bulk_move_ss("MovSS16N", "u128", &mut source);
 
     write_bulk_move_sp("MovSP4N", "u32", &mut source);
     write_bulk_move_sp("MovSP8N", "u64", &mut source);
 
-    write_bulk_move_ps("MovPS4N","u32",&mut source);
+    write_bulk_move_ps("MovPS4N", "u32", &mut source);
 
     source.push_str(
         r#"

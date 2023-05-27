@@ -1,6 +1,6 @@
 use super::vm::Function;
 
-#[derive(Debug,Clone,Copy,PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slot(u32);
 
 impl Slot {
@@ -291,12 +291,23 @@ pub enum Instr<'vm> {
     PointerOffset3(Slot, Slot, u32),
     PointerOffset2(Slot, Slot, u32),
     // name the fields since these are less straightforward
-    SlotAddrOffset{out: Slot, arg: Slot, offset: Slot},
-    IndexCalc{arg_out: Slot, elem_size: u32, elem_count: u32},
-    IndexCalcDyn{arg_out: Slot, elem_size: u32, elem_count: Slot},
+    SlotAddrOffset {
+        out: Slot,
+        arg: Slot,
+        offset: Slot,
+    },
+    IndexCalc {
+        arg_out: Slot,
+        elem_size: u32,
+        elem_count: u32,
+    },
+    IndexCalcDyn {
+        arg_out: Slot,
+        elem_size: u32,
+        elem_count: Slot,
+    },
 
     //OffsetPtr(Slot, Slot, i32),
-
     Jump(i32),
     JumpF(i32, Slot),
     JumpT(i32, Slot),
@@ -308,7 +319,12 @@ pub enum Instr<'vm> {
     Debug(Box<String>),
 
     // RUST INTRINSICS
-    WriteBytes{size: u16, dst: Slot, val: Slot, count: Slot},
+    WriteBytes {
+        size: u16,
+        dst: Slot,
+        val: Slot,
+        count: Slot,
+    },
 
     I8_PopCount(Slot, Slot),
     I16_PopCount(Slot, Slot),
@@ -328,268 +344,266 @@ impl<'vm> Instr<'vm> {
 
     fn get_result(&mut self) -> Option<&mut Slot> {
         match self {
-            Instr::I8_Const(x, _) |
-            Instr::I8_Neg(x, _) |
-            Instr::I8_Not(x, _) |
-            Instr::I8_Eq(x, _, _) |
-            Instr::I8_NotEq(x, _, _) |
-            Instr::I8_Add(x, _, _) |
-            Instr::I8_Sub(x, _, _) |
-            Instr::I8_Mul(x, _, _) |
-            Instr::I8_Or(x, _, _) |
-            Instr::I8_And(x, _, _) |
-            Instr::I8_Xor(x, _, _) |
-            Instr::I8_ShiftL(x, _, _) |
-            Instr::I8_S_Lt(x, _, _) |
-            Instr::I8_S_LtEq(x, _, _) |
-            Instr::I8_S_Div(x, _, _) |
-            Instr::I8_S_Rem(x, _, _) |
-            Instr::I8_S_ShiftR(x, _, _) |
-            Instr::I8_U_Lt(x, _, _) |
-            Instr::I8_U_LtEq(x, _, _) |
-            Instr::I8_U_Div(x, _, _) |
-            Instr::I8_U_Rem(x, _, _) |
-            Instr::I8_U_ShiftR(x, _, _) => Some(x),
+            Instr::I8_Const(x, _)
+            | Instr::I8_Neg(x, _)
+            | Instr::I8_Not(x, _)
+            | Instr::I8_Eq(x, _, _)
+            | Instr::I8_NotEq(x, _, _)
+            | Instr::I8_Add(x, _, _)
+            | Instr::I8_Sub(x, _, _)
+            | Instr::I8_Mul(x, _, _)
+            | Instr::I8_Or(x, _, _)
+            | Instr::I8_And(x, _, _)
+            | Instr::I8_Xor(x, _, _)
+            | Instr::I8_ShiftL(x, _, _)
+            | Instr::I8_S_Lt(x, _, _)
+            | Instr::I8_S_LtEq(x, _, _)
+            | Instr::I8_S_Div(x, _, _)
+            | Instr::I8_S_Rem(x, _, _)
+            | Instr::I8_S_ShiftR(x, _, _)
+            | Instr::I8_U_Lt(x, _, _)
+            | Instr::I8_U_LtEq(x, _, _)
+            | Instr::I8_U_Div(x, _, _)
+            | Instr::I8_U_Rem(x, _, _)
+            | Instr::I8_U_ShiftR(x, _, _) => Some(x),
 
-            Instr::I16_Const(x, _) |
-            Instr::I16_Neg(x, _) |
-            Instr::I16_Not(x, _) |
-            Instr::I16_Eq(x, _, _) |
-            Instr::I16_NotEq(x, _, _) |
-            Instr::I16_Add(x, _, _) |
-            Instr::I16_Sub(x, _, _) |
-            Instr::I16_Mul(x, _, _) |
-            Instr::I16_Or(x, _, _) |
-            Instr::I16_And(x, _, _) |
-            Instr::I16_Xor(x, _, _) |
-            Instr::I16_ShiftL(x, _, _) |
-            Instr::I16_S_Lt(x, _, _) |
-            Instr::I16_S_LtEq(x, _, _) |
-            Instr::I16_S_Div(x, _, _) |
-            Instr::I16_S_Rem(x, _, _) |
-            Instr::I16_S_ShiftR(x, _, _) |
-            Instr::I16_U_Lt(x, _, _) |
-            Instr::I16_U_LtEq(x, _, _) |
-            Instr::I16_U_Div(x, _, _) |
-            Instr::I16_U_Rem(x, _, _) |
-            Instr::I16_U_ShiftR(x, _, _) => Some(x),
+            Instr::I16_Const(x, _)
+            | Instr::I16_Neg(x, _)
+            | Instr::I16_Not(x, _)
+            | Instr::I16_Eq(x, _, _)
+            | Instr::I16_NotEq(x, _, _)
+            | Instr::I16_Add(x, _, _)
+            | Instr::I16_Sub(x, _, _)
+            | Instr::I16_Mul(x, _, _)
+            | Instr::I16_Or(x, _, _)
+            | Instr::I16_And(x, _, _)
+            | Instr::I16_Xor(x, _, _)
+            | Instr::I16_ShiftL(x, _, _)
+            | Instr::I16_S_Lt(x, _, _)
+            | Instr::I16_S_LtEq(x, _, _)
+            | Instr::I16_S_Div(x, _, _)
+            | Instr::I16_S_Rem(x, _, _)
+            | Instr::I16_S_ShiftR(x, _, _)
+            | Instr::I16_U_Lt(x, _, _)
+            | Instr::I16_U_LtEq(x, _, _)
+            | Instr::I16_U_Div(x, _, _)
+            | Instr::I16_U_Rem(x, _, _)
+            | Instr::I16_U_ShiftR(x, _, _) => Some(x),
 
-            Instr::I32_Const(x, _) |
-            Instr::I32_Neg(x, _) |
-            Instr::I32_Not(x, _) |
-            Instr::I32_Eq(x, _, _) |
-            Instr::I32_NotEq(x, _, _) |
-            Instr::I32_Add(x, _, _) |
-            Instr::I32_Sub(x, _, _) |
-            Instr::I32_Mul(x, _, _) |
-            Instr::I32_Or(x, _, _) |
-            Instr::I32_And(x, _, _) |
-            Instr::I32_Xor(x, _, _) |
-            Instr::I32_ShiftL(x, _, _) |
-            Instr::I32_S_Lt(x, _, _) |
-            Instr::I32_S_LtEq(x, _, _) |
-            Instr::I32_S_Div(x, _, _) |
-            Instr::I32_S_Rem(x, _, _) |
-            Instr::I32_S_ShiftR(x, _, _) |
-            Instr::I32_U_Lt(x, _, _) |
-            Instr::I32_U_LtEq(x, _, _) |
-            Instr::I32_U_Div(x, _, _) |
-            Instr::I32_U_Rem(x, _, _) |
-            Instr::I32_U_ShiftR(x, _, _) => Some(x),
+            Instr::I32_Const(x, _)
+            | Instr::I32_Neg(x, _)
+            | Instr::I32_Not(x, _)
+            | Instr::I32_Eq(x, _, _)
+            | Instr::I32_NotEq(x, _, _)
+            | Instr::I32_Add(x, _, _)
+            | Instr::I32_Sub(x, _, _)
+            | Instr::I32_Mul(x, _, _)
+            | Instr::I32_Or(x, _, _)
+            | Instr::I32_And(x, _, _)
+            | Instr::I32_Xor(x, _, _)
+            | Instr::I32_ShiftL(x, _, _)
+            | Instr::I32_S_Lt(x, _, _)
+            | Instr::I32_S_LtEq(x, _, _)
+            | Instr::I32_S_Div(x, _, _)
+            | Instr::I32_S_Rem(x, _, _)
+            | Instr::I32_S_ShiftR(x, _, _)
+            | Instr::I32_U_Lt(x, _, _)
+            | Instr::I32_U_LtEq(x, _, _)
+            | Instr::I32_U_Div(x, _, _)
+            | Instr::I32_U_Rem(x, _, _)
+            | Instr::I32_U_ShiftR(x, _, _) => Some(x),
 
-            Instr::I64_Const(x, _) |
-            Instr::I64_Neg(x, _) |
-            Instr::I64_Not(x, _) |
-            Instr::I64_Eq(x, _, _) |
-            Instr::I64_NotEq(x, _, _) |
-            Instr::I64_Add(x, _, _) |
-            Instr::I64_Sub(x, _, _) |
-            Instr::I64_Mul(x, _, _) |
-            Instr::I64_Or(x, _, _) |
-            Instr::I64_And(x, _, _) |
-            Instr::I64_Xor(x, _, _) |
-            Instr::I64_ShiftL(x, _, _) |
-            Instr::I64_S_Lt(x, _, _) |
-            Instr::I64_S_LtEq(x, _, _) |
-            Instr::I64_S_Div(x, _, _) |
-            Instr::I64_S_Rem(x, _, _) |
-            Instr::I64_S_ShiftR(x, _, _) |
-            Instr::I64_U_Lt(x, _, _) |
-            Instr::I64_U_LtEq(x, _, _) |
-            Instr::I64_U_Div(x, _, _) |
-            Instr::I64_U_Rem(x, _, _) |
-            Instr::I64_U_ShiftR(x, _, _) => Some(x),
+            Instr::I64_Const(x, _)
+            | Instr::I64_Neg(x, _)
+            | Instr::I64_Not(x, _)
+            | Instr::I64_Eq(x, _, _)
+            | Instr::I64_NotEq(x, _, _)
+            | Instr::I64_Add(x, _, _)
+            | Instr::I64_Sub(x, _, _)
+            | Instr::I64_Mul(x, _, _)
+            | Instr::I64_Or(x, _, _)
+            | Instr::I64_And(x, _, _)
+            | Instr::I64_Xor(x, _, _)
+            | Instr::I64_ShiftL(x, _, _)
+            | Instr::I64_S_Lt(x, _, _)
+            | Instr::I64_S_LtEq(x, _, _)
+            | Instr::I64_S_Div(x, _, _)
+            | Instr::I64_S_Rem(x, _, _)
+            | Instr::I64_S_ShiftR(x, _, _)
+            | Instr::I64_U_Lt(x, _, _)
+            | Instr::I64_U_LtEq(x, _, _)
+            | Instr::I64_U_Div(x, _, _)
+            | Instr::I64_U_Rem(x, _, _)
+            | Instr::I64_U_ShiftR(x, _, _) => Some(x),
 
-            Instr::I128_Const(x, _) |
-            Instr::I128_Neg(x, _) |
-            Instr::I128_Not(x, _) |
-            Instr::I128_Eq(x, _, _) |
-            Instr::I128_NotEq(x, _, _) |
-            Instr::I128_Add(x, _, _) |
-            Instr::I128_Sub(x, _, _) |
-            Instr::I128_Mul(x, _, _) |
-            Instr::I128_Or(x, _, _) |
-            Instr::I128_And(x, _, _) |
-            Instr::I128_Xor(x, _, _) |
-            Instr::I128_ShiftL(x, _, _) |
-            Instr::I128_S_Lt(x, _, _) |
-            Instr::I128_S_LtEq(x, _, _) |
-            Instr::I128_S_Div(x, _, _) |
-            Instr::I128_S_Rem(x, _, _) |
-            Instr::I128_S_ShiftR(x, _, _) |
-            Instr::I128_U_Lt(x, _, _) |
-            Instr::I128_U_LtEq(x, _, _) |
-            Instr::I128_U_Div(x, _, _) |
-            Instr::I128_U_Rem(x, _, _) |
-            Instr::I128_U_ShiftR(x, _, _) => Some(x),
+            Instr::I128_Const(x, _)
+            | Instr::I128_Neg(x, _)
+            | Instr::I128_Not(x, _)
+            | Instr::I128_Eq(x, _, _)
+            | Instr::I128_NotEq(x, _, _)
+            | Instr::I128_Add(x, _, _)
+            | Instr::I128_Sub(x, _, _)
+            | Instr::I128_Mul(x, _, _)
+            | Instr::I128_Or(x, _, _)
+            | Instr::I128_And(x, _, _)
+            | Instr::I128_Xor(x, _, _)
+            | Instr::I128_ShiftL(x, _, _)
+            | Instr::I128_S_Lt(x, _, _)
+            | Instr::I128_S_LtEq(x, _, _)
+            | Instr::I128_S_Div(x, _, _)
+            | Instr::I128_S_Rem(x, _, _)
+            | Instr::I128_S_ShiftR(x, _, _)
+            | Instr::I128_U_Lt(x, _, _)
+            | Instr::I128_U_LtEq(x, _, _)
+            | Instr::I128_U_Div(x, _, _)
+            | Instr::I128_U_Rem(x, _, _)
+            | Instr::I128_U_ShiftR(x, _, _) => Some(x),
 
             Instr::Bool_Not(x, _) => Some(x),
 
-            Instr::F32_Neg(x, _) |
-            Instr::F32_Eq(x, _, _) |
-            Instr::F32_NotEq(x, _, _) |
-            Instr::F32_Add(x, _, _) |
-            Instr::F32_Sub(x, _, _) |
-            Instr::F32_Mul(x, _, _) |
-            Instr::F32_Div(x, _, _) |
-            Instr::F32_Rem(x, _, _) |
-            Instr::F32_Lt(x, _, _) |
-            Instr::F32_LtEq(x, _, _) |
-            Instr::F32_Gt(x, _, _) |
-            Instr::F32_GtEq(x, _, _) => Some(x),
+            Instr::F32_Neg(x, _)
+            | Instr::F32_Eq(x, _, _)
+            | Instr::F32_NotEq(x, _, _)
+            | Instr::F32_Add(x, _, _)
+            | Instr::F32_Sub(x, _, _)
+            | Instr::F32_Mul(x, _, _)
+            | Instr::F32_Div(x, _, _)
+            | Instr::F32_Rem(x, _, _)
+            | Instr::F32_Lt(x, _, _)
+            | Instr::F32_LtEq(x, _, _)
+            | Instr::F32_Gt(x, _, _)
+            | Instr::F32_GtEq(x, _, _) => Some(x),
 
-            Instr::F64_Neg(x, _) |
-            Instr::F64_Eq(x, _, _) |
-            Instr::F64_NotEq(x, _, _) |
-            Instr::F64_Add(x, _, _) |
-            Instr::F64_Sub(x, _, _) |
-            Instr::F64_Mul(x, _, _) |
-            Instr::F64_Div(x, _, _) |
-            Instr::F64_Rem(x, _, _) |
-            Instr::F64_Lt(x, _, _) |
-            Instr::F64_LtEq(x, _, _) |
-            Instr::F64_Gt(x, _, _) |
-            Instr::F64_GtEq(x, _, _) => Some(x),
+            Instr::F64_Neg(x, _)
+            | Instr::F64_Eq(x, _, _)
+            | Instr::F64_NotEq(x, _, _)
+            | Instr::F64_Add(x, _, _)
+            | Instr::F64_Sub(x, _, _)
+            | Instr::F64_Mul(x, _, _)
+            | Instr::F64_Div(x, _, _)
+            | Instr::F64_Rem(x, _, _)
+            | Instr::F64_Lt(x, _, _)
+            | Instr::F64_LtEq(x, _, _)
+            | Instr::F64_Gt(x, _, _)
+            | Instr::F64_GtEq(x, _, _) => Some(x),
 
-            Instr::I16_S_Widen_8(x, _) |
-            Instr::I16_U_Widen_8(x, _) |
-            Instr::I32_S_Widen_16(x, _) |
-            Instr::I32_U_Widen_16(x, _) |
-            Instr::I32_S_Widen_8(x, _) |
-            Instr::I32_U_Widen_8(x, _) |
-            Instr::I64_S_Widen_32(x, _) |
-            Instr::I64_U_Widen_32(x, _) |
-            Instr::I64_S_Widen_16(x, _) |
-            Instr::I64_U_Widen_16(x, _) |
-            Instr::I64_S_Widen_8(x, _) |
-            Instr::I64_U_Widen_8(x, _) |
-            Instr::I128_S_Widen_64(x, _) |
-            Instr::I128_U_Widen_64(x, _) |
-            Instr::I128_S_Widen_32(x, _) |
-            Instr::I128_U_Widen_32(x, _) |
-            Instr::I128_S_Widen_16(x, _) |
-            Instr::I128_U_Widen_16(x, _) |
-            Instr::I128_S_Widen_8(x, _) |
-            Instr::I128_U_Widen_8(x, _) |
-            Instr::F32_From_F64(x, _) |
-            Instr::F32_From_I8_S(x, _) |
-            Instr::F32_From_I16_S(x, _) |
-            Instr::F32_From_I32_S(x, _) |
-            Instr::F32_From_I64_S(x, _) |
-            Instr::F32_From_I128_S(x, _) |
-            Instr::F32_From_I8_U(x, _) |
-            Instr::F32_From_I16_U(x, _) |
-            Instr::F32_From_I32_U(x, _) |
-            Instr::F32_From_I64_U(x, _) |
-            Instr::F32_From_I128_U(x, _) |
-            Instr::F32_Into_I8_S(x, _) |
-            Instr::F32_Into_I16_S(x, _) |
-            Instr::F32_Into_I32_S(x, _) |
-            Instr::F32_Into_I64_S(x, _) |
-            Instr::F32_Into_I128_S(x, _) |
-            Instr::F32_Into_I8_U(x, _) |
-            Instr::F32_Into_I16_U(x, _) |
-            Instr::F32_Into_I32_U(x, _) |
-            Instr::F32_Into_I64_U(x, _) |
-            Instr::F32_Into_I128_U(x, _) |
-            Instr::F64_From_F32(x, _) |
-            Instr::F64_From_I8_S(x, _) |
-            Instr::F64_From_I16_S(x, _) |
-            Instr::F64_From_I32_S(x, _) |
-            Instr::F64_From_I64_S(x, _) |
-            Instr::F64_From_I128_S(x, _) |
-            Instr::F64_From_I8_U(x, _) |
-            Instr::F64_From_I16_U(x, _) |
-            Instr::F64_From_I32_U(x, _) |
-            Instr::F64_From_I64_U(x, _) |
-            Instr::F64_From_I128_U(x, _) |
-            Instr::F64_Into_I8_S(x, _) |
-            Instr::F64_Into_I16_S(x, _) |
-            Instr::F64_Into_I32_S(x, _) |
-            Instr::F64_Into_I64_S(x, _) |
-            Instr::F64_Into_I128_S(x, _) |
-            Instr::F64_Into_I8_U(x, _) |
-            Instr::F64_Into_I16_U(x, _) |
-            Instr::F64_Into_I32_U(x, _) |
-            Instr::F64_Into_I64_U(x, _) |
-            Instr::F64_Into_I128_U(x, _) => Some(x),
+            Instr::I16_S_Widen_8(x, _)
+            | Instr::I16_U_Widen_8(x, _)
+            | Instr::I32_S_Widen_16(x, _)
+            | Instr::I32_U_Widen_16(x, _)
+            | Instr::I32_S_Widen_8(x, _)
+            | Instr::I32_U_Widen_8(x, _)
+            | Instr::I64_S_Widen_32(x, _)
+            | Instr::I64_U_Widen_32(x, _)
+            | Instr::I64_S_Widen_16(x, _)
+            | Instr::I64_U_Widen_16(x, _)
+            | Instr::I64_S_Widen_8(x, _)
+            | Instr::I64_U_Widen_8(x, _)
+            | Instr::I128_S_Widen_64(x, _)
+            | Instr::I128_U_Widen_64(x, _)
+            | Instr::I128_S_Widen_32(x, _)
+            | Instr::I128_U_Widen_32(x, _)
+            | Instr::I128_S_Widen_16(x, _)
+            | Instr::I128_U_Widen_16(x, _)
+            | Instr::I128_S_Widen_8(x, _)
+            | Instr::I128_U_Widen_8(x, _)
+            | Instr::F32_From_F64(x, _)
+            | Instr::F32_From_I8_S(x, _)
+            | Instr::F32_From_I16_S(x, _)
+            | Instr::F32_From_I32_S(x, _)
+            | Instr::F32_From_I64_S(x, _)
+            | Instr::F32_From_I128_S(x, _)
+            | Instr::F32_From_I8_U(x, _)
+            | Instr::F32_From_I16_U(x, _)
+            | Instr::F32_From_I32_U(x, _)
+            | Instr::F32_From_I64_U(x, _)
+            | Instr::F32_From_I128_U(x, _)
+            | Instr::F32_Into_I8_S(x, _)
+            | Instr::F32_Into_I16_S(x, _)
+            | Instr::F32_Into_I32_S(x, _)
+            | Instr::F32_Into_I64_S(x, _)
+            | Instr::F32_Into_I128_S(x, _)
+            | Instr::F32_Into_I8_U(x, _)
+            | Instr::F32_Into_I16_U(x, _)
+            | Instr::F32_Into_I32_U(x, _)
+            | Instr::F32_Into_I64_U(x, _)
+            | Instr::F32_Into_I128_U(x, _)
+            | Instr::F64_From_F32(x, _)
+            | Instr::F64_From_I8_S(x, _)
+            | Instr::F64_From_I16_S(x, _)
+            | Instr::F64_From_I32_S(x, _)
+            | Instr::F64_From_I64_S(x, _)
+            | Instr::F64_From_I128_S(x, _)
+            | Instr::F64_From_I8_U(x, _)
+            | Instr::F64_From_I16_U(x, _)
+            | Instr::F64_From_I32_U(x, _)
+            | Instr::F64_From_I64_U(x, _)
+            | Instr::F64_From_I128_U(x, _)
+            | Instr::F64_Into_I8_S(x, _)
+            | Instr::F64_Into_I16_S(x, _)
+            | Instr::F64_Into_I32_S(x, _)
+            | Instr::F64_Into_I64_S(x, _)
+            | Instr::F64_Into_I128_S(x, _)
+            | Instr::F64_Into_I8_U(x, _)
+            | Instr::F64_Into_I16_U(x, _)
+            | Instr::F64_Into_I32_U(x, _)
+            | Instr::F64_Into_I64_U(x, _)
+            | Instr::F64_Into_I128_U(x, _) => Some(x),
 
-            Instr::MovSS1(x,_) |
-            Instr::MovSS2(x,_) |
-            Instr::MovSS4(x,_) |
-            Instr::MovSS8(x,_) |
-            Instr::MovSS16(x,_) |
-            Instr::MovSS1N(x,_,_) |
-            Instr::MovSS2N(x,_,_) |
-            Instr::MovSS4N(x,_,_) |
-            Instr::MovSS8N(x,_,_) |
-            Instr::MovSS16N(x,_,_) |
+            Instr::MovSS1(x, _)
+            | Instr::MovSS2(x, _)
+            | Instr::MovSS4(x, _)
+            | Instr::MovSS8(x, _)
+            | Instr::MovSS16(x, _)
+            | Instr::MovSS1N(x, _, _)
+            | Instr::MovSS2N(x, _, _)
+            | Instr::MovSS4N(x, _, _)
+            | Instr::MovSS8N(x, _, _)
+            | Instr::MovSS16N(x, _, _)
+            | Instr::MovSP1(x, _, _)
+            | Instr::MovSP2(x, _, _)
+            | Instr::MovSP4(x, _, _)
+            | Instr::MovSP8(x, _, _)
+            | Instr::MovSP16(x, _, _)
+            | Instr::MovSP1N(x, _, _, _)
+            | Instr::MovSP2N(x, _, _, _)
+            | Instr::MovSP4N(x, _, _, _)
+            | Instr::MovSP8N(x, _, _, _)
+            | Instr::MovSP16N(x, _, _, _) => Some(x),
 
-            Instr::MovSP1(x,_,_) |
-            Instr::MovSP2(x,_,_) |
-            Instr::MovSP4(x,_,_) |
-            Instr::MovSP8(x,_,_) |
-            Instr::MovSP16(x,_,_) |
-            Instr::MovSP1N(x,_,_,_) |
-            Instr::MovSP2N(x,_,_,_) |
-            Instr::MovSP4N(x,_,_,_) |
-            Instr::MovSP8N(x,_,_,_) |
-            Instr::MovSP16N(x,_,_,_) => Some(x),
+            Instr::MovPS1(x, _, _)
+            | Instr::MovPS2(x, _, _)
+            | Instr::MovPS4(x, _, _)
+            | Instr::MovPS8(x, _, _)
+            | Instr::MovPS16(x, _, _)
+            | Instr::MovPS1N(x, _, _, _)
+            | Instr::MovPS2N(x, _, _, _)
+            | Instr::MovPS4N(x, _, _, _)
+            | Instr::MovPS8N(x, _, _, _)
+            | Instr::MovPS16N(x, _, _, _) => Some(x),
 
-            Instr::MovPS1(x,_,_) |
-            Instr::MovPS2(x,_,_) |
-            Instr::MovPS4(x,_,_) |
-            Instr::MovPS8(x,_,_) |
-            Instr::MovPS16(x,_,_) |
-            Instr::MovPS1N(x,_,_,_) |
-            Instr::MovPS2N(x,_,_,_) |
-            Instr::MovPS4N(x,_,_,_) |
-            Instr::MovPS8N(x,_,_,_) |
-            Instr::MovPS16N(x,_,_,_) => Some(x),
+            Instr::SlotAddr(x, _) => Some(x),
+            Instr::SlotAddrOffset { out, .. } => Some(out),
+            Instr::PointerOffset3(x, _, _) => Some(x),
+            Instr::PointerOffset2(x, _, _) => Some(x),
 
-            Instr::SlotAddr(x,_) => Some(x),
-            Instr::SlotAddrOffset{out,..} => Some(out),
-            Instr::PointerOffset3(x,_,_) => Some(x),
-            Instr::PointerOffset2(x,_,_) => Some(x),
+            Instr::IndexCalc { .. } | Instr::IndexCalcDyn { .. } => None,
 
-            Instr::IndexCalc{..} |
-            Instr::IndexCalcDyn {..} => None,
+            Instr::Jump(_)
+            | Instr::JumpF(_, _)
+            | Instr::JumpT(_, _)
+            | Instr::Return
+            | Instr::Bad
+            | Instr::Debug(_)
+            | Instr::Call(_, _) => None,
 
-            Instr::Jump(_) |
-            Instr::JumpF(_, _) |
-            Instr::JumpT(_, _) |
-            Instr::Return |
-            Instr::Bad |
-            Instr::Debug(_) |
-            Instr::Call(_, _) => None,
+            Instr::I8_PopCount(x, _)
+            | Instr::I16_PopCount(x, _)
+            | Instr::I32_PopCount(x, _)
+            | Instr::I64_PopCount(x, _)
+            | Instr::I128_PopCount(x, _) => Some(x),
 
-            Instr::I8_PopCount(x,_) |
-            Instr::I16_PopCount(x,_) |
-            Instr::I32_PopCount(x,_) |
-            Instr::I64_PopCount(x,_) |
-            Instr::I128_PopCount(x,_) => Some(x),
-
-            Instr::WriteBytes{..} => None
+            Instr::WriteBytes { .. } => None,
         }
     }
 }

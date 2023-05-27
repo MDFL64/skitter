@@ -21,5 +21,5 @@ pub struct CliArgs {
 
     /// Load core sources (SLOW, TEMPORARY FEATURE)
     #[clap(long)]
-    pub core: bool
+    pub core: bool,
 }

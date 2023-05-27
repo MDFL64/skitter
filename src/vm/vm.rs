@@ -1,8 +1,6 @@
 use colosseum::sync::Arena;
 
-use std::sync::RwLock;
-use std::sync::atomic::Ordering;
-use crate::bytecode_compiler::HirCompiler;
+use crate::bytecode_compiler::BytecodeCompiler;
 use crate::items::CrateId;
 use crate::items::CrateItems;
 use crate::items::Item;
@@ -16,6 +14,8 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
+use std::sync::atomic::Ordering;
+use std::sync::RwLock;
 
 use std::sync::atomic::AtomicPtr;
 
@@ -39,7 +39,6 @@ pub struct VMThread<'vm> {
 
 impl<'vm> VMThread<'vm> {
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
-
         let native = func.get_native();
         if let Some(native) = native {
             unsafe {
@@ -58,7 +57,7 @@ impl<'vm> VMThread<'vm> {
         unsafe {
             let mut pc = 0;
             let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
-    
+
             loop {
                 let instr = &bc[pc];
                 include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
@@ -69,7 +68,7 @@ impl<'vm> VMThread<'vm> {
 
     pub fn copy_result(&self, size: usize) -> Vec<u8> {
         let ptr = self.stack.as_ptr() as *mut u8;
-        let slice = unsafe { std::slice::from_raw_parts(ptr,size) };
+        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
         slice.to_vec()
     }
 }
@@ -85,7 +84,7 @@ impl<'vm> VM<'vm> {
             arena_items: Arena::new(),
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
-            arena_constants: Arena::new()
+            arena_constants: Arena::new(),
         }
     }
 
@@ -93,29 +92,39 @@ impl<'vm> VM<'vm> {
         VMThread {
             vm: self,
             // 64k stack
-            stack: vec!(0;4096),
+            stack: vec![0; 4096],
         }
     }
 
-    pub fn add_worker<'s>(&'vm self, worker_config: RustCWorkerConfig, scope: &'s std::thread::Scope<'s,'vm>) -> CrateId {
+    pub fn add_worker<'s>(
+        &'vm self,
+        worker_config: RustCWorkerConfig,
+        scope: &'s std::thread::Scope<'s, 'vm>,
+    ) -> CrateId {
         let mut workers = self.workers.write().unwrap();
         let crate_id = CrateId::new(workers.len() as u32);
-        let worker = RustCWorker::new(worker_config,scope, self, crate_id);
+        let worker = RustCWorker::new(worker_config, scope, self, crate_id);
 
         workers.push(worker);
         crate_id
     }
 
-    pub fn set_crate_items(&'vm self, crate_id: CrateId, items: CrateItems<'vm>) -> &'vm CrateItems<'vm> {
+    pub fn set_crate_items(
+        &'vm self,
+        crate_id: CrateId,
+        items: CrateItems<'vm>,
+    ) -> &'vm CrateItems<'vm> {
         let mut workers = self.workers.write().unwrap();
         let items_ref = self.arena_items.alloc(items);
         workers[crate_id.index()].items = Some(items_ref);
         items_ref
-    } 
+    }
 
     pub fn get_crate_items(&'vm self, crate_id: CrateId) -> &'vm CrateItems<'vm> {
         let workers = self.workers.read().unwrap();
-        workers[crate_id.index()].items.expect("crate is missing items")
+        workers[crate_id.index()]
+            .items
+            .expect("crate is missing items")
     }
 
     pub fn wait_for_setup(&self, crate_id: CrateId) {
@@ -134,12 +143,16 @@ impl<'vm> VM<'vm> {
         worker.build_function_ir(item_id);
     }
 
-    pub fn alloc_function(&'vm self, item: &'vm Item<'vm>, subs: SubList<'vm>) -> &'vm Function<'vm> {
+    pub fn alloc_function(
+        &'vm self,
+        item: &'vm Item<'vm>,
+        subs: SubList<'vm>,
+    ) -> &'vm Function<'vm> {
         let func = Function {
             item,
             subs,
             native: Default::default(),
-            bytecode: Default::default()
+            bytecode: Default::default(),
         };
 
         let path = item.path.as_string();
@@ -150,7 +163,7 @@ impl<'vm> VM<'vm> {
                 "::_builtin::print_float" => func.set_native(builtin_print_float),
                 "::_builtin::print_bool" => func.set_native(builtin_print_bool),
                 "::_builtin::print_char" => func.set_native(builtin_print_char),
-                _ => panic!("unknown builtin {}",path)
+                _ => panic!("unknown builtin {}", path),
             }
         }
 
@@ -166,11 +179,12 @@ impl<'vm> VM<'vm> {
     }
 
     pub fn ty_usize(&'vm self) -> Type<'vm> {
-        self.types.intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned),self)
+        self.types
+            .intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned), self)
     }
 
     pub fn ty_bool(&'vm self) -> Type<'vm> {
-        self.types.intern(TypeKind::Bool,self)
+        self.types.intern(TypeKind::Bool, self)
     }
 
     /*pub fn ty_param(&'vm self, n: u32) -> Type<'vm> {
@@ -178,11 +192,11 @@ impl<'vm> VM<'vm> {
     }*/
 
     pub fn ty_unknown(&'vm self) -> Type<'vm> {
-        self.types.intern(TypeKind::Unknown,self)
+        self.types.intern(TypeKind::Unknown, self)
     }
 
     pub fn ty_tuple(&'vm self, children: Vec<Type<'vm>>) -> Type<'vm> {
-        self.types.intern(TypeKind::Tuple(children),self)
+        self.types.intern(TypeKind::Tuple(children), self)
     }
 }
 
@@ -199,11 +213,10 @@ pub struct Function<'vm> {
     item: &'vm Item<'vm>,
     subs: SubList<'vm>,
     native: AtomicPtr<std::ffi::c_void>,
-    bytecode: AtomicPtr<Vec<Instr<'vm>>>
+    bytecode: AtomicPtr<Vec<Instr<'vm>>>,
 }
 
 impl<'vm> Function<'vm> {
-
     pub fn get_native(&self) -> Option<unsafe fn(*mut u8)> {
         let raw = self.native.load(Ordering::Acquire);
         if raw.is_null() {
@@ -223,9 +236,9 @@ impl<'vm> Function<'vm> {
     }
 
     pub fn set_native(&self, native: unsafe fn(*mut u8)) {
-        self.native.store(unsafe { std::mem::transmute(native) }, Ordering::Release);
+        self.native
+            .store(unsafe { std::mem::transmute(native) }, Ordering::Release);
     }
-
 
     pub fn set_bytecode(&self, bc: &'vm Vec<Instr>) {
         self.bytecode.store(bc as *const _ as _, Ordering::Release);
@@ -237,10 +250,10 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let (ir,new_subs) = self.item.ir(&self.subs);
+            let (ir, new_subs) = self.item.ir(&self.subs);
             let path = self.item.path.as_string();
 
-            let bc = HirCompiler::compile(self.item.vm, &ir, &new_subs, path);
+            let bc = BytecodeCompiler::compile(self.item.vm, &ir, &new_subs, path);
             let bc_ref = self.item.vm.alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);
@@ -250,31 +263,36 @@ impl<'vm> Function<'vm> {
 
 impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"Function(\"{}{}\")",self.item.path.as_string(),self.subs)
+        write!(
+            f,
+            "Function(\"{}{}\")",
+            self.item.path.as_string(),
+            self.subs
+        )
     }
 }
 
 unsafe fn builtin_print_int(stack: *mut u8) {
-    let x: i128 = read_stack(stack,Slot::new(0));
-    println!("{}",x);
+    let x: i128 = read_stack(stack, Slot::new(0));
+    println!("{}", x);
 }
 
 unsafe fn builtin_print_uint(stack: *mut u8) {
-    let x: u128 = read_stack(stack,Slot::new(0));
-    println!("{}",x);
+    let x: u128 = read_stack(stack, Slot::new(0));
+    println!("{}", x);
 }
 
 unsafe fn builtin_print_float(stack: *mut u8) {
-    let x: f64 = read_stack(stack,Slot::new(0));
-    println!("{}",x);
+    let x: f64 = read_stack(stack, Slot::new(0));
+    println!("{}", x);
 }
 
 unsafe fn builtin_print_bool(stack: *mut u8) {
-    let x: bool = read_stack(stack,Slot::new(0));
-    println!("{}",x);
+    let x: bool = read_stack(stack, Slot::new(0));
+    println!("{}", x);
 }
 
 unsafe fn builtin_print_char(stack: *mut u8) {
-    let x: char = read_stack(stack,Slot::new(0));
-    println!("{}",x);
+    let x: char = read_stack(stack, Slot::new(0));
+    println!("{}", x);
 }
