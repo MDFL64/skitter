@@ -1,6 +1,6 @@
 [package]
 name = "skitter"
-description = "An experimental Rust interpreter. Not fit for any kind of serious use."
+description = "An experimental bytecode interpreter for the Rust programming language. Not fit for any kind of serious use."
 authors = ["Adam Coggeshall <adam@cogg.rocks>"]
 version = "0.0.0"
 edition = "2021"

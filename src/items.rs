@@ -460,8 +460,12 @@ impl<'vm> Item<'vm> {
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
         assert!(subs.list.len() == 0);
         let (ir, new_subs) = self.ir(subs);
-        let bc =
-            bytecode_compiler::BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
+        let bc = bytecode_compiler::BytecodeCompiler::compile(
+            self.vm,
+            &ir,
+            &new_subs,
+            self.path.as_string(),
+        );
         let const_thread = self.vm.make_thread();
         const_thread.run_bytecode(&bc, 0);
         let ty = ir.sig.output; // todo sub?
@@ -767,20 +771,16 @@ fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'v
         (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs_ty),
         (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs_ty),
 
-        (TypeKind::Bool,_) |
-        (_,TypeKind::Bool) |
-
-        (TypeKind::Char,_) |
-        (_,TypeKind::Char) |
-
-        (TypeKind::Never,_) |
-        (_,TypeKind::Never) |
-
-        (TypeKind::Int(..),_) |
-        (_,TypeKind::Int(..)) |
-        
-        (TypeKind::Float(..),_) |
-        (_,TypeKind::Float(..)) => false,
+        (TypeKind::Bool, _)
+        | (_, TypeKind::Bool)
+        | (TypeKind::Char, _)
+        | (_, TypeKind::Char)
+        | (TypeKind::Never, _)
+        | (_, TypeKind::Never)
+        | (TypeKind::Int(..), _)
+        | (_, TypeKind::Int(..))
+        | (TypeKind::Float(..), _)
+        | (_, TypeKind::Float(..)) => false,
         _ => {
             panic!("match types {} == {}", lhs_ty, rhs_ty)
         }
