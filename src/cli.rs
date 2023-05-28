@@ -22,4 +22,8 @@ pub struct CliArgs {
     /// Load core sources (SLOW, TEMPORARY FEATURE)
     #[clap(long)]
     pub core: bool,
+
+    /// Save core IR
+    #[clap(long)]
+    pub save_core: bool
 }

@@ -6,7 +6,7 @@ use rustc_middle::ty::{
 };
 
 use crate::{
-    items::{path_from_rustc, FunctionIRSource},
+    items::{path_from_rustc, AssocValue},
     rustc_worker::RustCContext,
     types::Sub,
     vm::VM,
@@ -155,7 +155,7 @@ impl<'vm> TypeContext<'vm> {
             item
         } else {
             let def_path = ctx.tcx.def_path(did);
-            let item_path = path_from_rustc(&def_path);
+            let item_path = path_from_rustc(&def_path,ctx.vm);
             if item_path.can_find() {
                 assert!(did.krate != rustc_hir::def_id::LOCAL_CRATE);
                 let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
@@ -172,15 +172,15 @@ impl<'vm> TypeContext<'vm> {
                 match subject {
                     ImplSubject::Inherent(ty) => {
                         let ty = self.type_from_rustc(ty, ctx);
-                        if let Some((crate_id, ir_source)) = ty.find_impl_member(ident.as_str()) {
+                        if let Some((crate_id, ir_source)) = ty.find_assoc_value(ident.as_str()) {
                             let crate_items = ctx.vm.get_crate_items(crate_id);
-                            if let FunctionIRSource::Item(item_id) = ir_source {
+                            if let AssocValue::Item(item_id) = ir_source {
                                 crate_items.get(item_id)
                             } else {
                                 panic!("can't convert raw IR to item, this is a bug");
                             }
                         } else {
-                            panic!("couldn't find type impl {}::{}", ty, ident);
+                            panic!("couldn't find inherent impl {}::{}", ty, ident);
                         }
                     }
                     ImplSubject::Trait(trait_ref) => {
@@ -206,7 +206,7 @@ impl<'vm> TypeContext<'vm> {
                 let intern_ref = self.arena.alloc(InternedType {
                     kind,
                     layout: Default::default(),
-                    impl_table: Default::default(),
+                    assoc_values: Default::default(),
                 });
                 Type(intern_ref, vm)
             })

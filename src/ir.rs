@@ -11,6 +11,7 @@ use crate::types::{ItemWithSubs, Type, TypeKind};
 
 pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
+    pub is_constant: bool,
     pub root_expr: ExprId,
     pub params: Vec<Pattern<'vm>>,
     exprs: Vec<Expr<'vm>>,
@@ -270,19 +271,20 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             .map(|param| builder.pattern(param.pat.as_ref().unwrap()))
             .collect();
 
-        let sig = match thir.body_type {
-            thir::BodyTy::Fn(sig) => FunctionSig::from_rustc(&sig, &builder.ctx),
+        let (sig,is_constant) = match thir.body_type {
+            thir::BodyTy::Fn(sig) => (FunctionSig::from_rustc(&sig, &builder.ctx),false),
             thir::BodyTy::Const(ty) => {
                 let output = builder.ctx.type_from_rustc(ty);
-                FunctionSig {
+                (FunctionSig {
                     inputs: vec![],
                     output,
-                }
+                },true)
             }
         };
 
         IRFunction {
             sig,
+            is_constant,
             params,
             root_expr,
             exprs,
@@ -723,6 +725,7 @@ pub fn glue_ir_for_fn_trait<'vm>(
 
     IRFunction {
         sig,
+        is_constant: false,
         params,
         exprs,
         root_expr,

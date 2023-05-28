@@ -27,18 +27,19 @@ mod bytecode_select;
 mod cli;
 mod ir;
 mod items;
+mod persist;
 mod rustc_worker;
 mod test;
 mod types;
 
-use std::process;
+use std::{process, time::Instant};
 
 use clap::Parser;
 use types::SubList;
 use vm::VM;
 
 use crate::{
-    items::{ExternCrate, ItemPath},
+    items::{ExternCrate, ItemPath, CrateItems},
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -62,6 +63,36 @@ fn main() {
     std::thread::scope(|scope| {
         let mut extern_crates = Vec::new();
 
+        if args.save_core {
+            let sysroot = get_sysroot();
+            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
+
+            // make sure core root exists
+            assert!(std::path::Path::new(&core_root).exists());
+
+            let core_crate = vm.add_worker(
+                RustCWorkerConfig {
+                    source_root: &core_root,
+                    extern_crates: vec![],
+                    is_core: true,
+                    save: true
+                },
+                scope,
+            );
+            vm.wait_for_setup(core_crate);
+            let core_items = vm.get_crate_items(core_crate);
+            core_items.save_items("core.bin");
+            println!("Saved core IR.");
+            {
+                println!("Loading...");
+                let t = Instant::now();
+                CrateItems::load_items("core.bin",&vm);
+                println!("{:?}",t.elapsed());
+            }
+
+            process::exit(0);
+        }
+
         if args.core {
             let sysroot = get_sysroot();
             let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
@@ -74,6 +105,7 @@ fn main() {
                     source_root: &core_root,
                     extern_crates: vec![],
                     is_core: true,
+                    save: false
                 },
                 scope,
             );
@@ -90,6 +122,7 @@ fn main() {
                 source_root: &args.file_name,
                 extern_crates,
                 is_core: false,
+                save: false
             },
             scope,
         );

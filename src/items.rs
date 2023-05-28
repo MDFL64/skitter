@@ -7,18 +7,18 @@ use std::{
 
 use crate::{
     builtins::BuiltinTrait,
-    bytecode_compiler,
+    bytecode_compiler::{self, BytecodeCompiler},
     ir::IRFunction,
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM},
+    vm::{Function, VM}, persist::{Persist, PersistWriteContext, PersistReadContext},
 };
 use ahash::AHashMap;
 
 pub struct CrateItems<'vm> {
     crate_id: CrateId,
     items: Vec<Item<'vm>>,
-    map_path_to_item: AHashMap<ItemPath, ItemId>,
+    map_path_to_item: AHashMap<ItemPath<'vm>, ItemId>,
     map_did_to_item: AHashMap<rustc_hir::def_id::LocalDefId, ItemId>,
 
     extern_crate_list: Vec<ExternCrate>,
@@ -42,6 +42,19 @@ impl<'vm> CrateItems<'vm> {
         }
     }
 
+    pub fn save_items(&self, file_name: &str) {
+        let mut write_ctx = PersistWriteContext::default();
+        self.items.persist_write(&mut write_ctx);
+        write_ctx.save(file_name);
+    }
+
+    pub fn load_items(file_name: &str, vm: &'vm VM<'vm>) {
+        let data: &'static [u8] = std::fs::read(file_name).expect("failed to read data").leak();
+        let mut read = PersistReadContext::new(&data,vm);
+
+        let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
+    }
+
     pub fn all(&self) -> impl Iterator<Item = &Item<'vm>> {
         self.items.iter()
     }
@@ -54,7 +67,7 @@ impl<'vm> CrateItems<'vm> {
         &mut self,
         vm: &'vm VM<'vm>,
         kind: ItemKind<'vm>,
-        path: ItemPath,
+        path: ItemPath<'vm>,
         did: rustc_hir::def_id::LocalDefId,
     ) -> ItemId {
         let item_id = ItemId(self.items.len() as u32);
@@ -63,7 +76,7 @@ impl<'vm> CrateItems<'vm> {
             vm,
             crate_id: self.crate_id,
             item_id,
-            did,
+            did: Some(did),
             path: path.clone(),
             kind,
         });
@@ -132,11 +145,11 @@ impl<'vm> CrateItems<'vm> {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug)]
-pub struct ItemPath(NameSpace, String);
+pub struct ItemPath<'vm>(NameSpace, &'vm str);
 
-impl ItemPath {
+impl<'vm> ItemPath<'vm> {
     pub fn main() -> Self {
-        Self(NameSpace::Value, "::main".to_owned())
+        Self(NameSpace::Value, "::main")
     }
     pub fn can_find(&self) -> bool {
         match self.0 {
@@ -144,11 +157,36 @@ impl ItemPath {
             _ => true,
         }
     }
-    pub fn new_debug(name: String) -> Self {
-        Self(NameSpace::DebugOnly, name)
+    pub fn new_debug(name: &str, vm: &'vm VM<'vm>) -> Self {
+        Self(NameSpace::DebugOnly, vm.alloc_path(name))
     }
     pub fn as_string(&self) -> &str {
         &self.1
+    }
+}
+
+impl<'vm> Persist<'vm> for ItemPath<'vm> {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+        match self.0 {
+            NameSpace::Type => write_ctx.write_byte('t' as u8),
+            NameSpace::Value => write_ctx.write_byte('v' as u8),
+            NameSpace::DebugOnly => write_ctx.write_byte('d' as u8),
+        }
+        self.1.persist_write(write_ctx);
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let ns = read_ctx.read_byte() as char;
+        let ns = match ns {
+            't' => NameSpace::Type,
+            'v' => NameSpace::Value,
+            'd' => NameSpace::DebugOnly,
+            _ => panic!()
+        };
+
+        let string = <&str>::persist_read(read_ctx);
+
+        Self(ns,string)
     }
 }
 
@@ -188,8 +226,8 @@ pub struct Item<'vm> {
     pub vm: &'vm VM<'vm>,
     crate_id: CrateId,
     item_id: ItemId,
-    pub did: rustc_hir::def_id::LocalDefId,
-    pub path: ItemPath,
+    pub did: Option<rustc_hir::def_id::LocalDefId>,
+    pub path: ItemPath<'vm>,
     kind: ItemKind<'vm>,
 }
 
@@ -214,6 +252,57 @@ impl<'vm> Hash for Item<'vm> {
     }
 }
 
+impl<'vm> Persist<'vm> for Item<'vm> {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+        self.path.persist_write(write_ctx);
+        match self.kind {
+            ItemKind::Function{ .. } => {
+                write_ctx.write_byte('f' as u8);
+                // todo parent trait and extern name
+            }
+            ItemKind::Constant{ .. } => {
+                write_ctx.write_byte('c' as u8);
+                // todo parent trait
+            }
+            ItemKind::AssociatedType{ .. } => {
+                write_ctx.write_byte('y' as u8);
+                // todo parent trait
+            }
+            ItemKind::Adt{ .. } => {
+                write_ctx.write_byte('a' as u8);
+                // todo info
+            }
+            ItemKind::Trait{ .. } => {
+                write_ctx.write_byte('t' as u8);
+                // todo builtin ONLY, handle impls separately
+            }
+        }
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let path = ItemPath::persist_read(read_ctx);
+
+        // todo actual kind
+        read_ctx.read_byte();
+
+        let kind = ItemKind::Function{
+            ir: Default::default(),
+            mono_instances: Default::default(),
+            parent_trait: Default::default(),
+            extern_name: Default::default()
+        };
+
+        Self {
+            vm: read_ctx.vm,
+            crate_id: CrateId(0),
+            item_id: ItemId(0),
+            path,
+            did: None,
+            kind
+        }
+    }
+}
+
 pub enum ItemKind<'vm> {
     Function {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
@@ -221,7 +310,13 @@ pub enum ItemKind<'vm> {
         parent_trait: Option<TraitInfo>,
         extern_name: Option<String>,
     },
-    Constant(ItemConstant<'vm>),
+    /// Constants operate very similarly to functions, but are evaluated
+    /// greedily when encountered in IR and converted directly to values.
+    Constant{
+        ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
+        mono_values: Mutex<HashMap<SubList<'vm>, &'vm [u8]>>,
+        parent_trait: Option<TraitInfo>,
+    },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
     },
@@ -232,17 +327,6 @@ pub enum ItemKind<'vm> {
     AssociatedType {
         parent_trait: TraitInfo,
     },
-}
-
-/// Constants operate very similarly to functions, but are evaluated
-/// greedily when encountered in IR and converted directly to values.
-///
-/// TODO: Associated constants need monomorphized.
-#[derive(Default)]
-struct ItemConstant<'vm> {
-    ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-    value: Mutex<Option<&'vm [u8]>>,
-    parent_trait: Option<TraitInfo>,
 }
 
 #[derive(Debug)]
@@ -289,16 +373,18 @@ pub struct TraitImpl<'vm> {
     pub for_types: SubList<'vm>,
     //impl_params: Vec<Sub<'vm>>,
     pub crate_id: CrateId,
-    pub child_fn_items: Vec<(String, FunctionIRSource<'vm>)>,
-    pub child_tys: Vec<(String, Type<'vm>)>,
+    pub assoc_values: AHashMap<String,AssocValue<'vm>>,
+    pub assoc_tys: AHashMap<String,Type<'vm>>,
     pub bounds: Vec<BoundKind<'vm>>,
     pub generics: GenericCounts,
 }
 
 #[derive(Clone)]
-pub enum FunctionIRSource<'vm> {
+pub enum AssocValue<'vm> {
+    /// An item. Can be either a function or a constant.
     Item(ItemId),
-    Injected(Arc<IRFunction<'vm>>),
+    /// Used to inject IR into builtin traits without building entire new items.
+    RawFunctionIR(Arc<IRFunction<'vm>>),
 }
 
 pub enum BoundKind<'vm> {
@@ -306,12 +392,6 @@ pub enum BoundKind<'vm> {
     Trait(ItemWithSubs<'vm>),
     /// Are the associated type and the second type equal? Can update params in the impl.
     Projection(ItemWithSubs<'vm>, Type<'vm>),
-}
-
-#[derive(PartialEq)]
-enum IRContainerKind {
-    Function,
-    Constant,
 }
 
 #[derive(Default, Debug)]
@@ -350,7 +430,11 @@ impl<'vm> ItemKind<'vm> {
     }
 
     pub fn new_const() -> Self {
-        Self::Constant(Default::default())
+        Self::Constant{
+            ir: Default::default(),
+            mono_values: Default::default(),
+            parent_trait: None,
+        }
     }
 
     pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
@@ -404,24 +488,23 @@ impl<'vm> Item<'vm> {
 
     /// Get the IR for a function OR a constant. Subs are used to find specialized IR for trait items.
     pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
-        let (ir, parent_trait, kind) = match &self.kind {
+        let (ir, parent_trait, is_constant) = match &self.kind {
             ItemKind::Function {
                 ir, parent_trait, ..
-            } => (ir, parent_trait, IRContainerKind::Function),
-            ItemKind::Constant(ItemConstant {
+            } => (ir, parent_trait, false),
+            ItemKind::Constant{
                 ir, parent_trait, ..
-            }) => (ir, parent_trait, IRContainerKind::Constant),
+            } => (ir, parent_trait, true),
             _ => panic!("item kind mismatch"),
         };
 
-        if kind == IRContainerKind::Function {
-            if let Some(trait_info) = parent_trait {
-                let crate_items = self.vm.get_crate_items(self.crate_id);
-                let trait_item = crate_items.get(trait_info.trait_id);
-                let resolved_func = trait_item.find_trait_fn(subs, &trait_info.ident);
-                if let Some((ir, new_subs)) = resolved_func {
-                    return (ir, Cow::Owned(new_subs));
-                }
+        if let Some(trait_info) = parent_trait {
+            let crate_items = self.vm.get_crate_items(self.crate_id);
+            let trait_item = crate_items.get(trait_info.trait_id);
+            let resolved_func = trait_item.find_trait_item_ir(subs, &trait_info.ident);
+            if let Some((ir, new_subs)) = resolved_func {
+                assert!(ir.is_constant == is_constant);
+                return (ir, Cow::Owned(new_subs));
             }
         }
 
@@ -429,6 +512,7 @@ impl<'vm> Item<'vm> {
             {
                 let ir = ir.lock().unwrap();
                 if let Some(ir) = ir.as_ref() {
+                    assert!(ir.is_constant == is_constant);
                     return (ir.clone(), Cow::Borrowed(subs));
                 }
             }
@@ -444,11 +528,11 @@ impl<'vm> Item<'vm> {
     pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
         let ir = match &self.kind {
             ItemKind::Function {
-                ir, parent_trait, ..
+                ir, ..
             } => ir,
-            ItemKind::Constant(ItemConstant {
-                ir, parent_trait, ..
-            }) => ir,
+            ItemKind::Constant{
+                ir, ..
+            } => ir,
             _ => panic!("item kind mismatch"),
         };
 
@@ -458,14 +542,15 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
-        assert!(subs.list.len() == 0);
         let (ir, new_subs) = self.ir(subs);
-        let bc = bytecode_compiler::BytecodeCompiler::compile(
+
+        let bc = BytecodeCompiler::compile(
             self.vm,
             &ir,
             &new_subs,
             self.path.as_string(),
         );
+
         let const_thread = self.vm.make_thread();
         const_thread.run_bytecode(&bc, 0);
         let ty = ir.sig.output; // todo sub?
@@ -516,38 +601,42 @@ impl<'vm> Item<'vm> {
 
         trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
-                for (child_name, child_ty) in trait_impl.child_tys.iter() {
-                    if *child_name == parent_trait.ident {
-                        return child_ty.sub(&subs);
-                    }
+
+                let ty = trait_impl.assoc_tys.get(&parent_trait.ident);
+
+                if let Some(ty) = ty {
+                    ty.sub(&subs)
+                } else {
+                    panic!("failed to find associated type")
                 }
-                panic!("failed to find associated type")
             })
             .unwrap_or_else(|| {
                 panic!("failed to find {} for {}", self.path.as_string(), subs);
             })
     }
 
-    pub fn find_trait_fn(
+    fn find_trait_item_ir(
         &self,
         subs: &SubList<'vm>,
         member_name: &str,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
         self.find_trait_impl(subs, &mut None, |trait_impl, subs| {
             let crate_items = self.vm.get_crate_items(trait_impl.crate_id);
-            for (child_name, child_source) in trait_impl.child_fn_items.iter() {
-                if child_name == member_name {
-                    match child_source {
-                        FunctionIRSource::Item(fn_item_id) => {
-                            let fn_item = crate_items.get(*fn_item_id);
-                            let (ir, _) = fn_item.ir(&subs);
-                            return Some((ir, subs));
-                        }
-                        FunctionIRSource::Injected(ir) => return Some((ir.clone(), subs)),
+
+            let ir_source = trait_impl.assoc_values.get(member_name);
+
+            if let Some(ir_source) = ir_source {
+                match ir_source {
+                    AssocValue::Item(fn_item_id) => {
+                        let fn_item = crate_items.get(*fn_item_id);
+                        let (ir, _) = fn_item.ir(&subs);
+                        return Some((ir, subs));
                     }
+                    AssocValue::RawFunctionIR(ir) => return Some((ir.clone(), subs)),
                 }
+            } else {
+                None
             }
-            None
         })
         .unwrap_or_else(|| {
             panic!("failed to find {} for {}", self.path.as_string(), subs);
@@ -638,11 +727,13 @@ impl<'vm> Item<'vm> {
 
             // Is this needed?
             assert!(trait_subs.is_concrete());
-            sub_map.assert_empty(SubSide::Lhs);
-
-            if let Some(update_tys) = update_tys {
+            
+            //sub_map.assert_empty(SubSide::Lhs);
+            // yucky. this does appear to be needed for some code (see iter test!)
+            // probably not a great way of doing things though
+            /*if let Some(update_tys) = update_tys {
                 sub_map.apply_to(SubSide::Lhs, update_tys);
-            }
+            }*/
             Some(trait_subs)
         } else {
             None
@@ -768,10 +859,17 @@ fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'v
         (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
             panic!("fixme? this looks annoying");
         }
+
         (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs_ty),
         (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs_ty),
 
-        (TypeKind::Bool, _)
+        (TypeKind::Adt(_),_)
+        | (_,TypeKind::Adt(_))
+        | (TypeKind::Ptr(..), _)
+        | (_, TypeKind::Ptr(..))
+        | (TypeKind::Ref(..), _)
+        | (_, TypeKind::Ref(..))
+        | (TypeKind::Bool, _)
         | (_, TypeKind::Bool)
         | (TypeKind::Char, _)
         | (_, TypeKind::Char)
@@ -788,7 +886,7 @@ fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'v
 }
 
 /// Get a path from rustc.
-pub fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> ItemPath {
+pub fn path_from_rustc<'vm>(in_path: &rustc_hir::definitions::DefPath, vm: &'vm VM<'vm>) -> ItemPath<'vm> {
     use rustc_hir::definitions::DefPathData;
 
     let mut result = String::new();
@@ -820,6 +918,8 @@ pub fn path_from_rustc(in_path: &rustc_hir::definitions::DefPath) -> ItemPath {
             ),
         }
     }
+
+    let result = vm.alloc_path(&result);
 
     if is_debug {
         ItemPath(NameSpace::DebugOnly, result)

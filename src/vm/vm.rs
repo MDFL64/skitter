@@ -1,3 +1,4 @@
+use ahash::AHashSet;
 use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
@@ -14,6 +15,7 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::sync::RwLock;
 
@@ -30,6 +32,9 @@ pub struct VM<'vm> {
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>,
     arena_constants: Arena<Vec<u8>>,
+    arena_paths: Arena<String>,
+
+    map_paths: Mutex<AHashSet<&'vm str>>
 }
 
 pub struct VMThread<'vm> {
@@ -85,6 +90,9 @@ impl<'vm> VM<'vm> {
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
             arena_constants: Arena::new(),
+            arena_paths: Arena::new(),
+
+            map_paths: Default::default()
         }
     }
 
@@ -176,6 +184,17 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_constant(&'vm self, str: Vec<u8>) -> &'vm [u8] {
         self.arena_constants.alloc(str)
+    }
+
+    pub fn alloc_path(&'vm self, path: &str) -> &'vm str {
+        let mut map_paths = self.map_paths.lock().unwrap();
+        if let Some(existing) = map_paths.get(path) {
+            existing
+        } else {
+            let res = self.arena_paths.alloc(path.to_owned());
+            map_paths.insert(res);
+            res
+        }
     }
 
     pub fn ty_usize(&'vm self) -> Type<'vm> {

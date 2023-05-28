@@ -5,7 +5,7 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     ir::{glue_ir_for_fn_trait, BinaryOp},
-    items::{CrateId, FunctionIRSource, GenericCounts, TraitImpl},
+    items::{CrateId, GenericCounts, TraitImpl, AssocValue},
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
@@ -16,6 +16,7 @@ use crate::{
 #[derive(Copy, Clone)]
 pub enum BuiltinTrait {
     Sized,
+    Tuple,
     DiscriminantKind,
     FnOnce,
     FnMut,
@@ -25,8 +26,8 @@ pub enum BuiltinTrait {
 fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {
     TraitImpl {
         bounds: Default::default(),
-        child_fn_items: Default::default(),
-        child_tys: Default::default(),
+        assoc_tys: Default::default(),
+        assoc_values: Default::default(),
         crate_id: CrateId::new(0),
         for_types,
         generics: GenericCounts {
@@ -53,6 +54,15 @@ impl BuiltinTrait {
                     None
                 }
             }
+            BuiltinTrait::Tuple => {
+                assert!(query_subs.list.len() == 1);
+                let ty = query_subs.list[0].assert_ty();
+                if let TypeKind::Tuple(_) = ty.kind() {
+                    Some(trait_impl(query_subs.clone()))
+                } else {
+                    None
+                }
+            }
             BuiltinTrait::DiscriminantKind => {
                 // todo this should handle things like Option<Box<T>>
                 assert!(query_subs.list.len() == 1);
@@ -61,7 +71,7 @@ impl BuiltinTrait {
                     if let Some(discrim_ty) = ty.get_adt_discriminator_ty() {
                         let mut res = trait_impl(query_subs.clone());
 
-                        res.child_tys.push(("Discriminant".to_owned(), discrim_ty));
+                        res.assoc_tys.insert("Discriminant".to_owned(), discrim_ty);
 
                         return Some(res);
                     }
@@ -94,30 +104,30 @@ impl BuiltinTrait {
                         BuiltinTrait::FnOnce => {
                             let call_ir =
                                 glue_ir_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
-                            res.child_fn_items.push((
+                            res.assoc_values.insert(
                                 "call_once".to_owned(),
-                                FunctionIRSource::Injected(Arc::new(call_ir)),
-                            ));
+                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                            );
 
-                            res.child_tys.push(("Output".to_owned(), sig.output));
+                            res.assoc_tys.insert("Output".to_owned(), sig.output);
                         }
                         BuiltinTrait::FnMut => {
                             let ref_ty = func_ty.ref_to(Mutability::Mut);
                             let call_ir =
                                 glue_ir_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
-                            res.child_fn_items.push((
+                            res.assoc_values.insert(
                                 "call_mut".to_owned(),
-                                FunctionIRSource::Injected(Arc::new(call_ir)),
-                            ));
+                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                            );
                         }
                         BuiltinTrait::Fn => {
                             let ref_ty = func_ty.ref_to(Mutability::Const);
                             let call_ir =
                                 glue_ir_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
-                            res.child_fn_items.push((
+                            res.assoc_values.insert(
                                 "call".to_owned(),
-                                FunctionIRSource::Injected(Arc::new(call_ir)),
-                            ));
+                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                            );
                         }
                         _ => panic!(),
                     }
@@ -410,6 +420,14 @@ pub fn compile_rust_intrinsic<'vm>(
             out_bc.push(bytecode_select::literal(0, 1, carry_slot));
             // signed: same signs on inputs, differ from output
             // unsigned: (a + b < a)
+        }
+        "wrapping_add" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
         }
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);

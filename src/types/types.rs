@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::items::{CrateId, FunctionIRSource, Item};
+use crate::items::{CrateId, Item, AssocValue};
 
 use super::{
     layout::Layout,
@@ -229,24 +229,23 @@ impl<'vm> Type<'vm> {
     pub fn add_impl(
         &self,
         crate_id: CrateId,
-        child_fn_items: Vec<(String, FunctionIRSource<'vm>)>,
-        child_tys: Vec<(String, Type<'vm>)>,
+        new_assoc_items: Vec<(String, AssocValue<'vm>)>
     ) {
+        // This is used to skip implementations on types which are not correctly implemented at the moment.
         if self.kind().is_dummy() {
-            //println!("skip impl {:?}",self.kind());
             return;
         }
 
-        let mut impl_table = self.0.impl_table.write().unwrap();
-        for (name, item_id) in child_fn_items {
-            let old = impl_table.insert(name, (crate_id, item_id));
+        let mut assoc_values = self.0.assoc_values.write().unwrap();
+        for (name, item_id) in new_assoc_items {
+            let old = assoc_values.insert(name, (crate_id, item_id));
             assert!(old.is_none());
         }
     }
 
-    pub fn find_impl_member(&self, name: &str) -> Option<(CrateId, FunctionIRSource<'vm>)> {
-        let impl_table = self.0.impl_table.read().unwrap();
-        impl_table.get(name).cloned()
+    pub fn find_assoc_value(&self, name: &str) -> Option<(CrateId, AssocValue<'vm>)> {
+        let assoc_values = self.0.assoc_values.read().unwrap();
+        assoc_values.get(name).cloned()
     }
 
     pub fn get_adt_discriminator_ty(&self) -> Option<Type<'vm>> {

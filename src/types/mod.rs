@@ -11,7 +11,7 @@ pub use type_context::TypeContext;
 pub use types::*;
 
 use crate::{
-    items::{CrateId, FunctionIRSource},
+    items::{CrateId, AssocValue},
     vm::VM,
 };
 
@@ -21,5 +21,5 @@ pub struct Type<'vm>(&'vm InternedType<'vm>, &'vm VM<'vm>);
 struct InternedType<'vm> {
     kind: TypeKind<'vm>,
     layout: OnceLock<layout::Layout>,
-    impl_table: RwLock<AHashMap<String, (CrateId, FunctionIRSource<'vm>)>>,
+    assoc_values: RwLock<AHashMap<String, (CrateId, AssocValue<'vm>)>>,
 }
