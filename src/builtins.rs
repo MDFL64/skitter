@@ -5,7 +5,7 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     ir::{glue_ir_for_fn_trait, BinaryOp},
-    items::{CrateId, GenericCounts, TraitImpl, AssocValue},
+    items::{AssocValue, CrateId, GenericCounts, TraitImpl},
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},

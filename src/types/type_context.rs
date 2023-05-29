@@ -155,7 +155,7 @@ impl<'vm> TypeContext<'vm> {
             item
         } else {
             let def_path = ctx.tcx.def_path(did);
-            let item_path = path_from_rustc(&def_path,ctx.vm);
+            let item_path = path_from_rustc(&def_path, ctx.vm);
             if item_path.can_find() {
                 assert!(did.krate != rustc_hir::def_id::LOCAL_CRATE);
                 let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);

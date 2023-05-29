@@ -11,7 +11,7 @@ pub use type_context::TypeContext;
 pub use types::*;
 
 use crate::{
-    items::{CrateId, AssocValue},
+    items::{AssocValue, CrateId},
     vm::VM,
 };
 

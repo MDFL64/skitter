@@ -15,8 +15,8 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use std::sync::atomic::AtomicPtr;
@@ -34,7 +34,7 @@ pub struct VM<'vm> {
     arena_constants: Arena<Vec<u8>>,
     arena_paths: Arena<String>,
 
-    map_paths: Mutex<AHashSet<&'vm str>>
+    map_paths: Mutex<AHashSet<&'vm str>>,
 }
 
 pub struct VMThread<'vm> {
@@ -92,7 +92,7 @@ impl<'vm> VM<'vm> {
             arena_constants: Arena::new(),
             arena_paths: Arena::new(),
 
-            map_paths: Default::default()
+            map_paths: Default::default(),
         }
     }
 

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::items::{CrateId, Item, AssocValue};
+use crate::items::{AssocValue, CrateId, Item};
 
 use super::{
     layout::Layout,
@@ -226,11 +226,7 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn add_impl(
-        &self,
-        crate_id: CrateId,
-        new_assoc_items: Vec<(String, AssocValue<'vm>)>
-    ) {
+    pub fn add_impl(&self, crate_id: CrateId, new_assoc_items: Vec<(String, AssocValue<'vm>)>) {
         // This is used to skip implementations on types which are not correctly implemented at the moment.
         if self.kind().is_dummy() {
             return;

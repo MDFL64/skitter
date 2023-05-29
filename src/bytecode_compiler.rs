@@ -7,8 +7,8 @@ use crate::ir::{
 };
 use crate::items::FunctionAbi;
 use crate::types::{Mutability, SubList, Type, TypeKind};
-use crate::vm::Function;
 use crate::vm::instr::Instr;
+use crate::vm::Function;
 use crate::vm::{self, instr::Slot};
 
 pub struct BytecodeCompiler<'vm, 'f> {
@@ -301,7 +301,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ty = self.apply_subs(*func_ty);
                 let func_ref = ty.func_item().expect("can't find function");
 
-                if let Some((FunctionAbi::RustIntrinsic,extern_name)) = func_ref.item.func_extern() {
+                if let Some((FunctionAbi::RustIntrinsic, extern_name)) = func_ref.item.func_extern()
+                {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     let arg_slots = args.iter().map(|arg| self.lower_expr(*arg, None)).collect();

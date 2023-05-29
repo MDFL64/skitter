@@ -14,8 +14,8 @@ use crate::{
     builtins::BuiltinTrait,
     ir::IRFunctionBuilder,
     items::{
-        path_from_rustc, AdtInfo, BoundKind, CrateId, CrateItems, ExternCrate,
-        GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, AssocValue, FunctionAbi,
+        path_from_rustc, AdtInfo, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
+        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
     vm::VM,
@@ -80,15 +80,15 @@ where
 struct ImplItem<'tcx, 'vm> {
     did: LocalDefId,
     subject: rustc_middle::ty::ImplSubject<'tcx>,
-    assoc_values: Vec<(String,AssocValue<'vm>)>,
-    assoc_tys: Vec<(String,LocalDefId)>,
+    assoc_values: Vec<(String, AssocValue<'vm>)>,
+    assoc_tys: Vec<(String, LocalDefId)>,
 }
 
 pub struct RustCWorkerConfig<'a> {
     pub source_root: &'a str,
     pub extern_crates: Vec<ExternCrate>,
     pub is_core: bool,
-    pub save: bool
+    pub save: bool,
 }
 
 impl<'vm> RustCWorker<'vm> {
@@ -179,7 +179,7 @@ impl<'vm> RustCWorker<'vm> {
                                 // simple items
                                 HirItemKind::Const(ty, body_id) => {
                                     let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
                                     let kind = ItemKind::new_const();
 
@@ -190,7 +190,7 @@ impl<'vm> RustCWorker<'vm> {
                                 }
                                 HirItemKind::Fn(..) => {
                                     let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
                                     let kind = ItemKind::new_function();
 
@@ -200,7 +200,7 @@ impl<'vm> RustCWorker<'vm> {
                                 | HirItemKind::Enum(..)
                                 | HirItemKind::Union(..) => {
                                     let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
                                     let kind = ItemKind::new_adt();
 
@@ -216,7 +216,8 @@ impl<'vm> RustCWorker<'vm> {
                                     for item in mod_items {
                                         // only statics and functions are permitted according to ref
                                         let local_id = item.id.owner_id.def_id;
-                                        let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                        let item_path =
+                                            path_from_rustc(&hir.def_path(local_id), vm);
 
                                         let item = hir.foreign_item(item.id);
 
@@ -228,7 +229,7 @@ impl<'vm> RustCWorker<'vm> {
                                                 {
                                                     let ident = item.ident.as_str().to_owned();
                                                     let abi = FunctionAbi::RustIntrinsic;
-                                                    ItemKind::new_function_extern(abi,ident)
+                                                    ItemKind::new_function_extern(abi, ident)
                                                 } else {
                                                     ItemKind::new_function()
                                                 };
@@ -252,7 +253,8 @@ impl<'vm> RustCWorker<'vm> {
                                     // trait item
                                     let trait_item = {
                                         let local_id = item.owner_id.def_id;
-                                        let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                        let item_path =
+                                            path_from_rustc(&hir.def_path(local_id), vm);
 
                                         let kind = ItemKind::new_trait();
 
@@ -263,7 +265,8 @@ impl<'vm> RustCWorker<'vm> {
 
                                     for item in child_items {
                                         let local_id = item.id.owner_id.def_id;
-                                        let item_path = path_from_rustc(&hir.def_path(local_id),vm);
+                                        let item_path =
+                                            path_from_rustc(&hir.def_path(local_id), vm);
 
                                         match item.kind {
                                             AssocItemKind::Fn { .. } => {
@@ -298,7 +301,8 @@ impl<'vm> RustCWorker<'vm> {
                                         }
                                     };
 
-                                    let mut assoc_values: Vec<(String,AssocValue<'vm>)> = Vec::new();
+                                    let mut assoc_values: Vec<(String, AssocValue<'vm>)> =
+                                        Vec::new();
                                     let mut assoc_tys: Vec<(String, LocalDefId)> = Vec::new();
 
                                     for item in impl_info.items {
@@ -307,32 +311,34 @@ impl<'vm> RustCWorker<'vm> {
                                         let item_name = item.ident.as_str().to_owned();
 
                                         match item.kind {
-                                            AssocItemKind::Fn{ .. } => {
-                                                let item_path = ItemPath::new_debug(&format!(
-                                                    "{}::{}",
-                                                    base_path, item.ident
-                                                ),vm);
+                                            AssocItemKind::Fn { .. } => {
+                                                let item_path = ItemPath::new_debug(
+                                                    &format!("{}::{}", base_path, item.ident),
+                                                    vm,
+                                                );
 
                                                 let kind = ItemKind::new_function();
                                                 let item_id =
                                                     items.add_item(vm, kind, item_path, local_id);
-                                                
-                                                assoc_values.push((item_name,AssocValue::Item(item_id)));
+
+                                                assoc_values
+                                                    .push((item_name, AssocValue::Item(item_id)));
                                             }
                                             AssocItemKind::Const => {
-                                                let item_path = ItemPath::new_debug(&format!(
-                                                    "{}::{}",
-                                                    base_path, item.ident
-                                                ),vm);
+                                                let item_path = ItemPath::new_debug(
+                                                    &format!("{}::{}", base_path, item.ident),
+                                                    vm,
+                                                );
 
                                                 let kind = ItemKind::new_const();
                                                 let item_id =
                                                     items.add_item(vm, kind, item_path, local_id);
-                                                
-                                                assoc_values.push((item_name,AssocValue::Item(item_id)));
+
+                                                assoc_values
+                                                    .push((item_name, AssocValue::Item(item_id)));
                                             }
                                             AssocItemKind::Type => {
-                                                assoc_tys.push((item_name,local_id));
+                                                assoc_tys.push((item_name, local_id));
                                             }
                                         }
                                     }
@@ -341,7 +347,7 @@ impl<'vm> RustCWorker<'vm> {
                                         did: impl_id,
                                         subject,
                                         assoc_values,
-                                        assoc_tys
+                                        assoc_tys,
                                     });
                                 }
                                 _ => panic!("can't handle item kind {:?}", item.kind),
@@ -399,7 +405,7 @@ impl<'vm> RustCWorker<'vm> {
                                     assert!(impl_item.assoc_tys.len() == 0);
                                 }
                                 ImplSubject::Trait(trait_ref) => {
-                                    let assoc_tys: AHashMap<_,_> = impl_item
+                                    let assoc_tys: AHashMap<_, _> = impl_item
                                         .assoc_tys
                                         .into_iter()
                                         .map(|(name, local_id)| {
@@ -460,9 +466,7 @@ impl<'vm> RustCWorker<'vm> {
                                             GenericParamDefKind::Lifetime => {
                                                 generics.lifetimes += 1
                                             }
-                                            GenericParamDefKind::Type { .. } => {
-                                                generics.types += 1
-                                            }
+                                            GenericParamDefKind::Type { .. } => generics.types += 1,
                                             GenericParamDefKind::Const { .. } => {
                                                 generics.consts += 1
                                             }
@@ -474,7 +478,8 @@ impl<'vm> RustCWorker<'vm> {
                                     {
                                         trait_item
                                     } else {
-                                        let trait_path = path_from_rustc(&tcx.def_path(trait_did),vm);
+                                        let trait_path =
+                                            path_from_rustc(&tcx.def_path(trait_did), vm);
                                         let trait_crate_id =
                                             ctx.items.find_crate_id(tcx, trait_did.krate);
                                         let trait_crate_items = vm.get_crate_items(trait_crate_id);

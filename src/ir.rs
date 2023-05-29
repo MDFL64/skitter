@@ -271,14 +271,17 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             .map(|param| builder.pattern(param.pat.as_ref().unwrap()))
             .collect();
 
-        let (sig,is_constant) = match thir.body_type {
-            thir::BodyTy::Fn(sig) => (FunctionSig::from_rustc(&sig, &builder.ctx),false),
+        let (sig, is_constant) = match thir.body_type {
+            thir::BodyTy::Fn(sig) => (FunctionSig::from_rustc(&sig, &builder.ctx), false),
             thir::BodyTy::Const(ty) => {
                 let output = builder.ctx.type_from_rustc(ty);
-                (FunctionSig {
-                    inputs: vec![],
-                    output,
-                },true)
+                (
+                    FunctionSig {
+                        inputs: vec![],
+                        output,
+                    },
+                    true,
+                )
             }
         };
 

@@ -39,7 +39,7 @@ use types::SubList;
 use vm::VM;
 
 use crate::{
-    items::{ExternCrate, ItemPath, CrateItems, CrateId},
+    items::{CrateId, CrateItems, ExternCrate, ItemPath},
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -75,7 +75,7 @@ fn main() {
                     source_root: &core_root,
                     extern_crates: vec![],
                     is_core: true,
-                    save: true
+                    save: true,
                 },
                 scope,
             );
@@ -86,8 +86,8 @@ fn main() {
             {
                 println!("Loading...");
                 let t = Instant::now();
-                CrateItems::load_items("core.bin",&vm,CrateId::new(7));
-                println!("{:?}",t.elapsed());
+                CrateItems::load_items("core.bin", &vm, CrateId::new(7));
+                println!("{:?}", t.elapsed());
             }
 
             process::exit(0);
@@ -105,7 +105,7 @@ fn main() {
                     source_root: &core_root,
                     extern_crates: vec![],
                     is_core: true,
-                    save: false
+                    save: false,
                 },
                 scope,
             );
@@ -122,7 +122,7 @@ fn main() {
                 source_root: &args.file_name,
                 extern_crates,
                 is_core: false,
-                save: false
+                save: false,
             },
             scope,
         );

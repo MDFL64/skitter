@@ -1,8 +1,8 @@
-use crate::{vm::VM, items::CrateId};
+use crate::{items::CrateId, vm::VM};
 
 #[derive(Default)]
 pub struct PersistWriteContext {
-    output: Vec<u8>
+    output: Vec<u8>,
 }
 
 impl PersistWriteContext {
@@ -25,18 +25,18 @@ pub struct PersistReadContext<'vm> {
     pub next_item_id: u32,
 
     index: usize,
-    data: &'vm [u8]
+    data: &'vm [u8],
 }
 
 impl<'vm> PersistReadContext<'vm> {
     pub fn new(data: &'vm [u8], vm: &'vm VM<'vm>, crate_id: CrateId) -> Self {
-        Self{
+        Self {
             vm,
             crate_id,
             next_item_id: 0,
 
             index: 0,
-            data
+            data,
         }
     }
 
@@ -70,27 +70,23 @@ macro_rules! persist_uint {
                     write_ctx.write_byte(252);
                     write_ctx.write_bytes(&(*self as u16).to_le_bytes());
                 } else {
-                    panic!("TOO FAT! {}",self);
+                    panic!("TOO FAT! {}", self);
                 }
             }
-        
+
             fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
                 let n = read_ctx.read_byte();
                 match n {
-                    255 |
-                    254 |
-                    253 => todo!(),
+                    255 | 254 | 253 => todo!(),
                     252 => {
                         let bs = read_ctx.read_bytes(2);
                         u16::from_le_bytes(bs.try_into().unwrap()) as _
-                    },
-                    _ => {
-                        n as _
                     }
+                    _ => n as _,
                 }
             }
         }
-    }
+    };
 }
 
 persist_uint!(usize);
@@ -111,7 +107,10 @@ impl<'vm> Persist<'vm> for &'vm str {
     }
 }
 
-impl<'vm,T> Persist<'vm> for Vec<T> where T: Persist<'vm> {
+impl<'vm, T> Persist<'vm> for Vec<T>
+where
+    T: Persist<'vm>,
+{
     fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
         self.len().persist_write(write_ctx);
         for item in self {
@@ -129,7 +128,10 @@ impl<'vm,T> Persist<'vm> for Vec<T> where T: Persist<'vm> {
     }
 }
 
-impl<'vm,T> Persist<'vm> for Option<T> where T: Persist<'vm> {
+impl<'vm, T> Persist<'vm> for Option<T>
+where
+    T: Persist<'vm>,
+{
     fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
         match self {
             Option::None => {
@@ -144,7 +146,7 @@ impl<'vm,T> Persist<'vm> for Option<T> where T: Persist<'vm> {
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let is_present = read_ctx.read_byte() != 0;
-        
+
         if is_present {
             Some(T::persist_read(read_ctx))
         } else {

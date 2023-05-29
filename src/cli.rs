@@ -25,5 +25,5 @@ pub struct CliArgs {
 
     /// Save core IR
     #[clap(long)]
-    pub save_core: bool
+    pub save_core: bool,
 }

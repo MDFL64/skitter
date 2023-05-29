@@ -9,9 +9,10 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::{self, BytecodeCompiler},
     ir::IRFunction,
+    persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM}, persist::{Persist, PersistWriteContext, PersistReadContext},
+    vm::{Function, VM},
 };
 use ahash::AHashMap;
 
@@ -49,8 +50,10 @@ impl<'vm> CrateItems<'vm> {
     }
 
     pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
-        let data: &'static [u8] = std::fs::read(file_name).expect("failed to read data").leak();
-        let mut read = PersistReadContext::new(&data,vm,crate_id);
+        let data: &'static [u8] = std::fs::read(file_name)
+            .expect("failed to read data")
+            .leak();
+        let mut read = PersistReadContext::new(&data, vm, crate_id);
 
         let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
 
@@ -189,12 +192,12 @@ impl<'vm> Persist<'vm> for ItemPath<'vm> {
             't' => NameSpace::Type,
             'v' => NameSpace::Value,
             'd' => NameSpace::DebugOnly,
-            _ => panic!()
+            _ => panic!(),
         };
 
         let string = <&str>::persist_read(read_ctx);
 
-        Self(ns,string)
+        Self(ns, string)
     }
 }
 
@@ -264,30 +267,34 @@ impl<'vm> Persist<'vm> for Item<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
         self.path.persist_write(write_ctx);
         match &self.kind {
-            ItemKind::Function{ virtual_info, extern_name, .. } => {
+            ItemKind::Function {
+                virtual_info,
+                extern_name,
+                ..
+            } => {
                 write_ctx.write_byte('f' as u8);
                 virtual_info.persist_write(write_ctx);
-                let extern_name: Option<&str> = extern_name.as_ref().map(|(abi,name)| {
+                let extern_name: Option<&str> = extern_name.as_ref().map(|(abi, name)| {
                     assert!(*abi == FunctionAbi::RustIntrinsic);
                     name.as_str()
                 });
                 extern_name.persist_write(write_ctx);
                 // todo IR
             }
-            ItemKind::Constant{ virtual_info, .. } => {
+            ItemKind::Constant { virtual_info, .. } => {
                 write_ctx.write_byte('c' as u8);
                 virtual_info.persist_write(write_ctx);
                 // todo IR
             }
-            ItemKind::AssociatedType{ virtual_info } => {
+            ItemKind::AssociatedType { virtual_info } => {
                 write_ctx.write_byte('y' as u8);
                 virtual_info.persist_write(write_ctx);
             }
-            ItemKind::Adt{ .. } => {
+            ItemKind::Adt { .. } => {
                 write_ctx.write_byte('a' as u8);
                 // todo info
             }
-            ItemKind::Trait{ .. } => {
+            ItemKind::Trait { .. } => {
                 write_ctx.write_byte('t' as u8);
                 // todo builtin ONLY, handle impls separately
             }
@@ -303,35 +310,30 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
                 let extern_name = Option::<&str>::persist_read(read_ctx);
-                let extern_name = extern_name.map(|name| {
-                    (FunctionAbi::RustIntrinsic,name.to_owned())
-                });
-                ItemKind::Function{
+                let extern_name =
+                    extern_name.map(|name| (FunctionAbi::RustIntrinsic, name.to_owned()));
+                ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
                     virtual_info,
-                    extern_name
+                    extern_name,
                 }
             }
             'c' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
-                ItemKind::Constant{
+                ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
-                    virtual_info
+                    virtual_info,
                 }
             }
             'y' => {
                 let virtual_info = VirtualInfo::persist_read(read_ctx);
                 ItemKind::AssociatedType { virtual_info }
             }
-            'a' => {
-                ItemKind::new_adt()
-            }
-            't' => {
-                ItemKind::new_trait()
-            }
-            _ => panic!()
+            'a' => ItemKind::new_adt(),
+            't' => ItemKind::new_trait(),
+            _ => panic!(),
         };
 
         let item_id = ItemId(read_ctx.next_item_id);
@@ -343,17 +345,17 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             item_id,
             path,
             did: None,
-            kind
+            kind,
         }
     }
 }
 
 #[derive(PartialEq)]
 pub enum FunctionAbi {
-    RustIntrinsic
+    RustIntrinsic,
 }
 
-/// 
+///
 /// `virtual_info` is attached to each item appearing in a trait declaration,
 /// and is used to resolve concrete implementations of those items.
 pub enum ItemKind<'vm> {
@@ -361,11 +363,11 @@ pub enum ItemKind<'vm> {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
-        extern_name: Option<(FunctionAbi,String)>,
+        extern_name: Option<(FunctionAbi, String)>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
-    Constant{
+    Constant {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_values: Mutex<HashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
@@ -432,10 +434,7 @@ impl<'vm> Persist<'vm> for VirtualInfo {
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let trait_id = ItemId(u32::persist_read(read_ctx));
         let ident = <&str>::persist_read(read_ctx).to_owned();
-        Self {
-            trait_id,
-            ident
-        }
+        Self { trait_id, ident }
     }
 }
 
@@ -443,8 +442,8 @@ pub struct TraitImpl<'vm> {
     pub for_types: SubList<'vm>,
     //impl_params: Vec<Sub<'vm>>,
     pub crate_id: CrateId,
-    pub assoc_values: AHashMap<String,AssocValue<'vm>>,
-    pub assoc_tys: AHashMap<String,Type<'vm>>,
+    pub assoc_values: AHashMap<String, AssocValue<'vm>>,
+    pub assoc_tys: AHashMap<String, Type<'vm>>,
     pub bounds: Vec<BoundKind<'vm>>,
     pub generics: GenericCounts,
 }
@@ -485,7 +484,7 @@ impl<'vm> ItemKind<'vm> {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            virtual_info: Some(VirtualInfo{ trait_id, ident }),
+            virtual_info: Some(VirtualInfo { trait_id, ident }),
             extern_name: None,
         }
     }
@@ -495,12 +494,12 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_instances: Default::default(),
             virtual_info: None,
-            extern_name: Some((abi,name)),
+            extern_name: Some((abi, name)),
         }
     }
 
     pub fn new_const() -> Self {
-        Self::Constant{
+        Self::Constant {
             ir: Default::default(),
             mono_values: Default::default(),
             virtual_info: None,
@@ -542,7 +541,7 @@ impl<'vm> Item<'vm> {
         result_func
     }
 
-    pub fn func_extern(&self) -> &Option<(FunctionAbi,String)> {
+    pub fn func_extern(&self) -> &Option<(FunctionAbi, String)> {
         let ItemKind::Function{extern_name,..} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -562,7 +561,7 @@ impl<'vm> Item<'vm> {
             ItemKind::Function {
                 ir, virtual_info, ..
             } => (ir, virtual_info, false),
-            ItemKind::Constant{
+            ItemKind::Constant {
                 ir, virtual_info, ..
             } => (ir, virtual_info, true),
             _ => panic!("item kind mismatch"),
@@ -597,12 +596,8 @@ impl<'vm> Item<'vm> {
 
     pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
         let ir = match &self.kind {
-            ItemKind::Function {
-                ir, ..
-            } => ir,
-            ItemKind::Constant{
-                ir, ..
-            } => ir,
+            ItemKind::Function { ir, .. } => ir,
+            ItemKind::Constant { ir, .. } => ir,
             _ => panic!("item kind mismatch"),
         };
 
@@ -614,12 +609,7 @@ impl<'vm> Item<'vm> {
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
         let (ir, new_subs) = self.ir(subs);
 
-        let bc = BytecodeCompiler::compile(
-            self.vm,
-            &ir,
-            &new_subs,
-            self.path.as_string(),
-        );
+        let bc = BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
 
         let const_thread = self.vm.make_thread();
         const_thread.run_bytecode(&bc, 0);
@@ -671,7 +661,6 @@ impl<'vm> Item<'vm> {
 
         trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
-
                 let ty = trait_impl.assoc_tys.get(&virtual_info.ident);
 
                 if let Some(ty) = ty {
@@ -797,7 +786,7 @@ impl<'vm> Item<'vm> {
 
             // Is this needed?
             assert!(trait_subs.is_concrete());
-            
+
             //sub_map.assert_empty(SubSide::Lhs);
             // yucky. this does appear to be needed for some code (see iter test!)
             // probably not a great way of doing things though
@@ -933,8 +922,8 @@ fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'v
         (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs_ty),
         (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs_ty),
 
-        (TypeKind::Adt(_),_)
-        | (_,TypeKind::Adt(_))
+        (TypeKind::Adt(_), _)
+        | (_, TypeKind::Adt(_))
         | (TypeKind::Ptr(..), _)
         | (_, TypeKind::Ptr(..))
         | (TypeKind::Ref(..), _)
@@ -956,7 +945,10 @@ fn type_match<'vm>(lhs_ty: Type<'vm>, rhs_ty: Type<'vm>, res_map: &mut SubMap<'v
 }
 
 /// Get a path from rustc.
-pub fn path_from_rustc<'vm>(in_path: &rustc_hir::definitions::DefPath, vm: &'vm VM<'vm>) -> ItemPath<'vm> {
+pub fn path_from_rustc<'vm>(
+    in_path: &rustc_hir::definitions::DefPath,
+    vm: &'vm VM<'vm>,
+) -> ItemPath<'vm> {
     use rustc_hir::definitions::DefPathData;
 
     let mut result = String::new();
