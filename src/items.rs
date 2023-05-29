@@ -48,11 +48,19 @@ impl<'vm> CrateItems<'vm> {
         write_ctx.save(file_name);
     }
 
-    pub fn load_items(file_name: &str, vm: &'vm VM<'vm>) {
+    pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
         let data: &'static [u8] = std::fs::read(file_name).expect("failed to read data").leak();
-        let mut read = PersistReadContext::new(&data,vm);
+        let mut read = PersistReadContext::new(&data,vm,crate_id);
 
         let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
+
+        let mut map_path_to_item = AHashMap::<ItemPath<'vm>, ItemId>::new();
+        for item in items.iter() {
+            if item.path.can_find() {
+                let old = map_path_to_item.insert(item.path.clone(), item.item_id);
+                assert!(old.is_none());
+            }
+        }
     }
 
     pub fn all(&self) -> impl Iterator<Item = &Item<'vm>> {
@@ -255,18 +263,25 @@ impl<'vm> Hash for Item<'vm> {
 impl<'vm> Persist<'vm> for Item<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
         self.path.persist_write(write_ctx);
-        match self.kind {
-            ItemKind::Function{ .. } => {
+        match &self.kind {
+            ItemKind::Function{ virtual_info, extern_name, .. } => {
                 write_ctx.write_byte('f' as u8);
-                // todo parent trait and extern name
+                virtual_info.persist_write(write_ctx);
+                let extern_name: Option<&str> = extern_name.as_ref().map(|(abi,name)| {
+                    assert!(*abi == FunctionAbi::RustIntrinsic);
+                    name.as_str()
+                });
+                extern_name.persist_write(write_ctx);
+                // todo IR
             }
-            ItemKind::Constant{ .. } => {
+            ItemKind::Constant{ virtual_info, .. } => {
                 write_ctx.write_byte('c' as u8);
-                // todo parent trait
+                virtual_info.persist_write(write_ctx);
+                // todo IR
             }
-            ItemKind::AssociatedType{ .. } => {
+            ItemKind::AssociatedType{ virtual_info } => {
                 write_ctx.write_byte('y' as u8);
-                // todo parent trait
+                virtual_info.persist_write(write_ctx);
             }
             ItemKind::Adt{ .. } => {
                 write_ctx.write_byte('a' as u8);
@@ -283,19 +298,49 @@ impl<'vm> Persist<'vm> for Item<'vm> {
         let path = ItemPath::persist_read(read_ctx);
 
         // todo actual kind
-        read_ctx.read_byte();
-
-        let kind = ItemKind::Function{
-            ir: Default::default(),
-            mono_instances: Default::default(),
-            parent_trait: Default::default(),
-            extern_name: Default::default()
+        let kind_c = read_ctx.read_byte() as char;
+        let kind = match kind_c {
+            'f' => {
+                let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
+                let extern_name = Option::<&str>::persist_read(read_ctx);
+                let extern_name = extern_name.map(|name| {
+                    (FunctionAbi::RustIntrinsic,name.to_owned())
+                });
+                ItemKind::Function{
+                    ir: Default::default(),
+                    mono_instances: Default::default(),
+                    virtual_info,
+                    extern_name
+                }
+            }
+            'c' => {
+                let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
+                ItemKind::Constant{
+                    ir: Default::default(),
+                    mono_values: Default::default(),
+                    virtual_info
+                }
+            }
+            'y' => {
+                let virtual_info = VirtualInfo::persist_read(read_ctx);
+                ItemKind::AssociatedType { virtual_info }
+            }
+            'a' => {
+                ItemKind::new_adt()
+            }
+            't' => {
+                ItemKind::new_trait()
+            }
+            _ => panic!()
         };
+
+        let item_id = ItemId(read_ctx.next_item_id);
+        read_ctx.next_item_id += 1;
 
         Self {
             vm: read_ctx.vm,
-            crate_id: CrateId(0),
-            item_id: ItemId(0),
+            crate_id: read_ctx.crate_id,
+            item_id,
             path,
             did: None,
             kind
@@ -303,19 +348,30 @@ impl<'vm> Persist<'vm> for Item<'vm> {
     }
 }
 
+#[derive(PartialEq)]
+pub enum FunctionAbi {
+    RustIntrinsic
+}
+
+/// 
+/// `virtual_info` is attached to each item appearing in a trait declaration,
+/// and is used to resolve concrete implementations of those items.
 pub enum ItemKind<'vm> {
     Function {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<HashMap<SubList<'vm>, &'vm Function<'vm>>>,
-        parent_trait: Option<TraitInfo>,
-        extern_name: Option<String>,
+        virtual_info: Option<VirtualInfo>,
+        extern_name: Option<(FunctionAbi,String)>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
     Constant{
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_values: Mutex<HashMap<SubList<'vm>, &'vm [u8]>>,
-        parent_trait: Option<TraitInfo>,
+        virtual_info: Option<VirtualInfo>,
+    },
+    AssociatedType {
+        virtual_info: VirtualInfo,
     },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
@@ -323,9 +379,6 @@ pub enum ItemKind<'vm> {
     Trait {
         impl_list: RwLock<Vec<TraitImpl<'vm>>>,
         builtin: OnceLock<BuiltinTrait>,
-    },
-    AssociatedType {
-        parent_trait: TraitInfo,
     },
 }
 
@@ -364,9 +417,26 @@ pub struct AdtInfo<'vm> {
 }
 
 /// Always refers to a trait item in the same crate.
-pub struct TraitInfo {
+pub struct VirtualInfo {
     pub trait_id: ItemId,
     pub ident: String,
+}
+
+impl<'vm> Persist<'vm> for VirtualInfo {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+        self.trait_id.index().persist_write(write_ctx);
+        let ident: &str = self.ident.as_ref();
+        ident.persist_write(write_ctx);
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let trait_id = ItemId(u32::persist_read(read_ctx));
+        let ident = <&str>::persist_read(read_ctx).to_owned();
+        Self {
+            trait_id,
+            ident
+        }
+    }
 }
 
 pub struct TraitImpl<'vm> {
@@ -406,26 +476,26 @@ impl<'vm> ItemKind<'vm> {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            parent_trait: None,
+            virtual_info: None,
             extern_name: None,
         }
     }
 
-    pub fn new_function_with_trait(trait_id: ItemId, ident: String) -> Self {
+    pub fn new_function_virtual(trait_id: ItemId, ident: String) -> Self {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            parent_trait: Some(TraitInfo { trait_id, ident }),
+            virtual_info: Some(VirtualInfo{ trait_id, ident }),
             extern_name: None,
         }
     }
 
-    pub fn new_function_extern(name: String) -> Self {
+    pub fn new_function_extern(abi: FunctionAbi, name: String) -> Self {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            parent_trait: None,
-            extern_name: Some(name),
+            virtual_info: None,
+            extern_name: Some((abi,name)),
         }
     }
 
@@ -433,13 +503,13 @@ impl<'vm> ItemKind<'vm> {
         Self::Constant{
             ir: Default::default(),
             mono_values: Default::default(),
-            parent_trait: None,
+            virtual_info: None,
         }
     }
 
     pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
         Self::AssociatedType {
-            parent_trait: TraitInfo { trait_id, ident },
+            virtual_info: VirtualInfo { trait_id, ident },
         }
     }
 
@@ -472,7 +542,7 @@ impl<'vm> Item<'vm> {
         result_func
     }
 
-    pub fn func_get_extern(&self) -> &Option<String> {
+    pub fn func_extern(&self) -> &Option<(FunctionAbi,String)> {
         let ItemKind::Function{extern_name,..} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -488,20 +558,20 @@ impl<'vm> Item<'vm> {
 
     /// Get the IR for a function OR a constant. Subs are used to find specialized IR for trait items.
     pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
-        let (ir, parent_trait, is_constant) = match &self.kind {
+        let (ir, virtual_info, is_constant) = match &self.kind {
             ItemKind::Function {
-                ir, parent_trait, ..
-            } => (ir, parent_trait, false),
+                ir, virtual_info, ..
+            } => (ir, virtual_info, false),
             ItemKind::Constant{
-                ir, parent_trait, ..
-            } => (ir, parent_trait, true),
+                ir, virtual_info, ..
+            } => (ir, virtual_info, true),
             _ => panic!("item kind mismatch"),
         };
 
-        if let Some(trait_info) = parent_trait {
+        if let Some(virtual_info) = virtual_info {
             let crate_items = self.vm.get_crate_items(self.crate_id);
-            let trait_item = crate_items.get(trait_info.trait_id);
-            let resolved_func = trait_item.find_trait_item_ir(subs, &trait_info.ident);
+            let trait_item = crate_items.get(virtual_info.trait_id);
+            let resolved_func = trait_item.find_trait_item_ir(subs, &virtual_info.ident);
             if let Some((ir, new_subs)) = resolved_func {
                 assert!(ir.is_constant == is_constant);
                 return (ir, Cow::Owned(new_subs));
@@ -592,17 +662,17 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn resolve_associated_ty(&self, subs: &SubList<'vm>) -> Type<'vm> {
-        let ItemKind::AssociatedType{parent_trait} = &self.kind else {
+        let ItemKind::AssociatedType{virtual_info} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let crate_items = self.vm.get_crate_items(self.crate_id);
-        let trait_item = crate_items.get(parent_trait.trait_id);
+        let trait_item = crate_items.get(virtual_info.trait_id);
 
         trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
 
-                let ty = trait_impl.assoc_tys.get(&parent_trait.ident);
+                let ty = trait_impl.assoc_tys.get(&virtual_info.ident);
 
                 if let Some(ty) = ty {
                     ty.sub(&subs)

@@ -1,4 +1,4 @@
-use crate::vm::VM;
+use crate::{vm::VM, items::CrateId};
 
 #[derive(Default)]
 pub struct PersistWriteContext {
@@ -21,14 +21,20 @@ impl PersistWriteContext {
 
 pub struct PersistReadContext<'vm> {
     pub vm: &'vm VM<'vm>,
+    pub crate_id: CrateId,
+    pub next_item_id: u32,
+
     index: usize,
     data: &'vm [u8]
 }
 
 impl<'vm> PersistReadContext<'vm> {
-    pub fn new(data: &'vm [u8], vm: &'vm VM<'vm>) -> Self {
+    pub fn new(data: &'vm [u8], vm: &'vm VM<'vm>, crate_id: CrateId) -> Self {
         Self{
             vm,
+            crate_id,
+            next_item_id: 0,
+
             index: 0,
             data
         }
@@ -54,35 +60,41 @@ pub trait Persist<'vm> {
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self;
 }
 
-// THIS SCHEME ONLY WORKS FOR UNSIGNED INTS!
-impl<'vm> Persist<'vm> for usize {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
-        if *self < 252 {
-            write_ctx.write_byte(*self as u8);
-        } else if *self < 65536 {
-            write_ctx.write_byte(252);
-            write_ctx.write_bytes(&(*self as u16).to_le_bytes());
-        } else {
-            panic!("TOO FAT! {}",self);
-        }
-    }
-
-    fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
-        let n = read_ctx.read_byte();
-        match n {
-            255 |
-            254 |
-            253 => todo!(),
-            252 => {
-                let bs = read_ctx.read_bytes(2);
-                u16::from_le_bytes(bs.try_into().unwrap()) as _
-            },
-            _ => {
-                n as _
+macro_rules! persist_uint {
+    ($ty:ty) => {
+        impl<'vm> Persist<'vm> for $ty {
+            fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+                if *self < 252 {
+                    write_ctx.write_byte(*self as u8);
+                } else if *self < 65536 {
+                    write_ctx.write_byte(252);
+                    write_ctx.write_bytes(&(*self as u16).to_le_bytes());
+                } else {
+                    panic!("TOO FAT! {}",self);
+                }
+            }
+        
+            fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
+                let n = read_ctx.read_byte();
+                match n {
+                    255 |
+                    254 |
+                    253 => todo!(),
+                    252 => {
+                        let bs = read_ctx.read_bytes(2);
+                        u16::from_le_bytes(bs.try_into().unwrap()) as _
+                    },
+                    _ => {
+                        n as _
+                    }
+                }
             }
         }
     }
 }
+
+persist_uint!(usize);
+persist_uint!(u32);
 
 impl<'vm> Persist<'vm> for &'vm str {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
@@ -114,5 +126,29 @@ impl<'vm,T> Persist<'vm> for Vec<T> where T: Persist<'vm> {
             result.push(T::persist_read(read_ctx));
         }
         result
+    }
+}
+
+impl<'vm,T> Persist<'vm> for Option<T> where T: Persist<'vm> {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+        match self {
+            Option::None => {
+                write_ctx.write_byte(0);
+            }
+            Option::Some(val) => {
+                write_ctx.write_byte(1);
+                val.persist_write(write_ctx);
+            }
+        }
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let is_present = read_ctx.read_byte() != 0;
+        
+        if is_present {
+            Some(T::persist_read(read_ctx))
+        } else {
+            None
+        }
     }
 }

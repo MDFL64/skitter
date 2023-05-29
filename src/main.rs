@@ -39,7 +39,7 @@ use types::SubList;
 use vm::VM;
 
 use crate::{
-    items::{ExternCrate, ItemPath, CrateItems},
+    items::{ExternCrate, ItemPath, CrateItems, CrateId},
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -86,7 +86,7 @@ fn main() {
             {
                 println!("Loading...");
                 let t = Instant::now();
-                CrateItems::load_items("core.bin",&vm);
+                CrateItems::load_items("core.bin",&vm,CrateId::new(7));
                 println!("{:?}",t.elapsed());
             }
 

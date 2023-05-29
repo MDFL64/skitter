@@ -15,7 +15,7 @@ use crate::{
     ir::IRFunctionBuilder,
     items::{
         path_from_rustc, AdtInfo, BoundKind, CrateId, CrateItems, ExternCrate,
-        GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, AssocValue,
+        GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, AssocValue, FunctionAbi,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
     vm::VM,
@@ -226,9 +226,9 @@ impl<'vm> RustCWorker<'vm> {
                                                 let kind = if abi
                                                     == rustc_target::spec::abi::Abi::RustIntrinsic
                                                 {
-                                                    ItemKind::new_function_extern(
-                                                        item.ident.as_str().to_owned(),
-                                                    )
+                                                    let ident = item.ident.as_str().to_owned();
+                                                    let abi = FunctionAbi::RustIntrinsic;
+                                                    ItemKind::new_function_extern(abi,ident)
                                                 } else {
                                                     ItemKind::new_function()
                                                 };
@@ -267,7 +267,7 @@ impl<'vm> RustCWorker<'vm> {
 
                                         match item.kind {
                                             AssocItemKind::Fn { .. } => {
-                                                let kind = ItemKind::new_function_with_trait(
+                                                let kind = ItemKind::new_function_virtual(
                                                     trait_item,
                                                     item.ident.as_str().to_owned(),
                                                 );
