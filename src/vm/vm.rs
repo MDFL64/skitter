@@ -26,7 +26,7 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
-    workers: RwLock<Vec<RustCWorker<'vm>>>,
+    crates: RwLock<Vec<Crate<'vm>>>,
 
     arena_items: Arena<CrateItems<'vm>>,
     arena_functions: Arena<Function<'vm>>,
@@ -35,6 +35,11 @@ pub struct VM<'vm> {
     arena_paths: Arena<String>,
 
     map_paths: Mutex<AHashSet<&'vm str>>,
+}
+
+struct Crate<'vm> {
+    rustc_worker: Option<RustCWorker<'vm>>,
+    items: Option<&'vm CrateItems<'vm>>
 }
 
 pub struct VMThread<'vm> {
@@ -84,7 +89,7 @@ impl<'vm> VM<'vm> {
             //functions: Default::default(),
             types: TypeContext::new(),
             is_verbose: false,
-            workers: Default::default(),
+            crates: Default::default(),
 
             arena_items: Arena::new(),
             arena_functions: Arena::new(),
@@ -109,11 +114,14 @@ impl<'vm> VM<'vm> {
         worker_config: RustCWorkerConfig,
         scope: &'s std::thread::Scope<'s, 'vm>,
     ) -> CrateId {
-        let mut workers = self.workers.write().unwrap();
-        let crate_id = CrateId::new(workers.len() as u32);
+        let mut crates = self.crates.write().unwrap();
+        let crate_id = CrateId::new(crates.len() as u32);
         let worker = RustCWorker::new(worker_config, scope, self, crate_id);
 
-        workers.push(worker);
+        crates.push(Crate {
+            rustc_worker: Some(worker),
+            items: None
+        });
         crate_id
     }
 
@@ -122,15 +130,15 @@ impl<'vm> VM<'vm> {
         crate_id: CrateId,
         items: CrateItems<'vm>,
     ) -> &'vm CrateItems<'vm> {
-        let mut workers = self.workers.write().unwrap();
+        let mut crates = self.crates.write().unwrap();
         let items_ref = self.arena_items.alloc(items);
-        workers[crate_id.index()].items = Some(items_ref);
+        crates[crate_id.index()].items = Some(items_ref);
         items_ref
     }
 
     pub fn get_crate_items(&'vm self, crate_id: CrateId) -> &'vm CrateItems<'vm> {
-        let workers = self.workers.read().unwrap();
-        workers[crate_id.index()]
+        let crates = self.crates.read().unwrap();
+        crates[crate_id.index()]
             .items
             .expect("crate is missing items")
     }
@@ -138,16 +146,16 @@ impl<'vm> VM<'vm> {
     pub fn wait_for_setup(&self, crate_id: CrateId) {
         // structured like this to prevent deadlocking the RwLock
         let res = {
-            let workers = self.workers.read().unwrap();
-            let worker = &workers[crate_id.index()];
+            let crates = self.crates.read().unwrap();
+            let worker = crates[crate_id.index()].rustc_worker.as_ref().unwrap();
             worker.wait_for_setup()
         };
         res.wait();
     }
 
     pub fn build_function_ir(&self, crate_id: CrateId, item_id: ItemId) {
-        let workers = self.workers.read().unwrap();
-        let worker = &workers[crate_id.index()];
+        let crates = self.crates.read().unwrap();
+        let worker = crates[crate_id.index()].rustc_worker.as_ref().unwrap();
         worker.build_function_ir(item_id);
     }
 

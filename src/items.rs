@@ -44,8 +44,25 @@ impl<'vm> CrateItems<'vm> {
     }
 
     pub fn save_items(&self, file_name: &str) {
-        let mut write_ctx = PersistWriteContext::default();
+        let mut write_ctx = PersistWriteContext::new(self.crate_id);
         self.items.persist_write(&mut write_ctx);
+
+        // write types
+        {
+            let type_count = write_ctx.types.len();
+            println!("types = {}",type_count);
+            type_count.persist_write(&mut write_ctx);
+    
+            for i in 0..type_count {
+                let ty = write_ctx.types[i];
+                ty.kind().persist_write(&mut write_ctx);
+            }
+    
+            // ensure no more types were added, if they
+            // are it indicates a bug in `prepare_child_types`
+            assert!(type_count == write_ctx.types.len());
+        }
+
         write_ctx.save(file_name);
     }
 
@@ -90,6 +107,7 @@ impl<'vm> CrateItems<'vm> {
             did: Some(did),
             path: path.clone(),
             kind,
+            persist_data: None
         });
 
         // add to did map
@@ -177,13 +195,13 @@ impl<'vm> ItemPath<'vm> {
 }
 
 impl<'vm> Persist<'vm> for ItemPath<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         match self.0 {
             NameSpace::Type => write_ctx.write_byte('t' as u8),
             NameSpace::Value => write_ctx.write_byte('v' as u8),
             NameSpace::DebugOnly => write_ctx.write_byte('d' as u8),
         }
-        self.1.persist_write(write_ctx);
+        write_ctx.write_str(self.1);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -195,7 +213,7 @@ impl<'vm> Persist<'vm> for ItemPath<'vm> {
             _ => panic!(),
         };
 
-        let string = <&str>::persist_read(read_ctx);
+        let string = read_ctx.read_str();
 
         Self(ns, string)
     }
@@ -235,11 +253,14 @@ impl ItemId {
 
 pub struct Item<'vm> {
     pub vm: &'vm VM<'vm>,
-    crate_id: CrateId,
-    item_id: ItemId,
+    pub crate_id: CrateId,
+    pub item_id: ItemId,
     pub did: Option<rustc_hir::def_id::LocalDefId>,
     pub path: ItemPath<'vm>,
     kind: ItemKind<'vm>,
+    /// A slice of data which can be deserialized lazily.
+    /// Only filled when loading IR from the disk.
+    persist_data: Option<&'vm [u8]>
 }
 
 impl<'vm> std::fmt::Debug for Item<'vm> {
@@ -264,7 +285,7 @@ impl<'vm> Hash for Item<'vm> {
 }
 
 impl<'vm> Persist<'vm> for Item<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.path.persist_write(write_ctx);
         match &self.kind {
             ItemKind::Function {
@@ -274,25 +295,26 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             } => {
                 write_ctx.write_byte('f' as u8);
                 virtual_info.persist_write(write_ctx);
-                let extern_name: Option<&str> = extern_name.as_ref().map(|(abi, name)| {
-                    assert!(*abi == FunctionAbi::RustIntrinsic);
-                    name.as_str()
-                });
                 extern_name.persist_write(write_ctx);
-                // todo IR
+                let ir = self.raw_ir();
+                println!("has ir? {}",ir.is_some());
             }
             ItemKind::Constant { virtual_info, .. } => {
                 write_ctx.write_byte('c' as u8);
                 virtual_info.persist_write(write_ctx);
-                // todo IR
+                let ir = self.raw_ir();
+                println!("has ir? {}",ir.is_some());
             }
             ItemKind::AssociatedType { virtual_info } => {
                 write_ctx.write_byte('y' as u8);
                 virtual_info.persist_write(write_ctx);
             }
-            ItemKind::Adt { .. } => {
+            ItemKind::Adt { info } => {
                 write_ctx.write_byte('a' as u8);
-                // todo info
+                // adt info must be filled after parsing types
+                write_ctx.start_block();
+                info.get().unwrap().persist_write(write_ctx);
+                write_ctx.end_block();
             }
             ItemKind::Trait { .. } => {
                 write_ctx.write_byte('t' as u8);
@@ -306,33 +328,41 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
         // todo actual kind
         let kind_c = read_ctx.read_byte() as char;
-        let kind = match kind_c {
+        let (kind,persist_data) = match kind_c {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
-                let extern_name = Option::<&str>::persist_read(read_ctx);
-                let extern_name =
-                    extern_name.map(|name| (FunctionAbi::RustIntrinsic, name.to_owned()));
-                ItemKind::Function {
+                let extern_name = Option::<(FunctionAbi,String)>::persist_read(read_ctx);
+                let kind = ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
                     virtual_info,
                     extern_name,
-                }
+                };
+                (kind,None)
             }
             'c' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
-                ItemKind::Constant {
+                let kind = ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
                     virtual_info,
-                }
+                };
+                (kind,None)
             }
             'y' => {
                 let virtual_info = VirtualInfo::persist_read(read_ctx);
-                ItemKind::AssociatedType { virtual_info }
+                let kind = ItemKind::AssociatedType { virtual_info };
+                (kind,None)
             }
-            'a' => ItemKind::new_adt(),
-            't' => ItemKind::new_trait(),
+            'a' => {
+                let adt_info_block = read_ctx.read_block();
+                let kind = ItemKind::new_adt();
+                (kind,Some(adt_info_block))
+            }
+            't' => {
+                let kind = ItemKind::new_trait();
+                (kind,None)
+            }
             _ => panic!(),
         };
 
@@ -346,6 +376,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             path,
             did: None,
             kind,
+            persist_data
         }
     }
 }
@@ -353,6 +384,18 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 #[derive(PartialEq)]
 pub enum FunctionAbi {
     RustIntrinsic,
+}
+
+impl<'vm> Persist<'vm> for (FunctionAbi,String) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        assert!(self.0 == FunctionAbi::RustIntrinsic);
+        write_ctx.write_str(&self.1);
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let ident = read_ctx.read_str().to_owned();
+        (FunctionAbi::RustIntrinsic,ident)
+    }
 }
 
 ///
@@ -418,6 +461,22 @@ pub struct AdtInfo<'vm> {
     pub discriminator_ty: Option<Type<'vm>>,
 }
 
+impl<'vm> Persist<'vm> for AdtInfo<'vm> {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.variant_fields.persist_write(write_ctx);
+        self.discriminator_ty.persist_write(write_ctx);
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(read_ctx);
+        let discriminator_ty = <Option<Type<'vm>>>::persist_read(read_ctx);
+        AdtInfo{
+            variant_fields,
+            discriminator_ty
+        }
+    }
+}
+
 /// Always refers to a trait item in the same crate.
 pub struct VirtualInfo {
     pub trait_id: ItemId,
@@ -425,15 +484,14 @@ pub struct VirtualInfo {
 }
 
 impl<'vm> Persist<'vm> for VirtualInfo {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.trait_id.index().persist_write(write_ctx);
-        let ident: &str = self.ident.as_ref();
-        ident.persist_write(write_ctx);
+        write_ctx.write_str(self.ident.as_ref());
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let trait_id = ItemId(u32::persist_read(read_ctx));
-        let ident = <&str>::persist_read(read_ctx).to_owned();
+        let ident = read_ctx.read_str().to_owned();
         Self { trait_id, ident }
     }
 }
@@ -506,6 +564,14 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
+    pub fn new_const_virtual(trait_id: ItemId, ident: String) -> Self {
+        Self::Constant {
+            ir: Default::default(),
+            mono_values: Default::default(),
+            virtual_info: Some(VirtualInfo { trait_id, ident }),
+        }
+    }
+
     pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
         Self::AssociatedType {
             virtual_info: VirtualInfo { trait_id, ident },
@@ -539,6 +605,14 @@ impl<'vm> Item<'vm> {
             .or_insert_with(|| self.vm.alloc_function(self, subs.clone()));
 
         result_func
+    }
+
+    pub fn is_meh(&self) -> bool {
+        if let ItemKind::Function{..} = &self.kind {
+            true
+        } else {
+            false
+        }
     }
 
     pub fn func_extern(&self) -> &Option<(FunctionAbi, String)> {
@@ -592,6 +666,21 @@ impl<'vm> Item<'vm> {
 
             self.vm.build_function_ir(self.crate_id, self.item_id);
         }
+    }
+
+    /// Try getting the IR without any complicated lookup.
+    /// This is used when saving IR to the disk.
+    pub fn raw_ir(&self) -> Option<Arc<IRFunction<'vm>>> {
+
+        let ir = match &self.kind {
+            ItemKind::Function {ir, ..} => ir,
+            ItemKind::Constant {ir, ..} => ir,
+            _ => panic!("item kind mismatch"),
+        };
+
+        let ir = ir.lock().unwrap();
+
+        ir.clone()
     }
 
     pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
@@ -969,6 +1058,9 @@ pub fn path_from_rustc<'vm>(
                 result.push_str("::{impl}");
                 is_debug = true;
             }
+            DefPathData::Ctor => {
+                // do nothing
+            }
             DefPathData::ForeignMod => {
                 // do nothing
             }
@@ -989,6 +1081,7 @@ pub fn path_from_rustc<'vm>(
         match last_elem.data {
             DefPathData::ValueNs(_) => ItemPath(NameSpace::Value, result),
             DefPathData::TypeNs(_) => ItemPath(NameSpace::Type, result),
+            DefPathData::Ctor => ItemPath(NameSpace::Value, result),
             _ => panic!("can't determine namespace: {:?}", last_elem.data),
         }
     } else {

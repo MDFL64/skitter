@@ -54,6 +54,7 @@ pub struct Block {
 pub struct MatchArm<'vm> {
     pub pattern: Pattern<'vm>,
     pub expr: ExprId,
+    pub has_guard: bool
 }
 
 #[derive(Debug)]
@@ -67,6 +68,9 @@ pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
     /// Stores an optional scope ID which is used to resolve breaks
     Dummy(ExprId, Option<u32>),
+
+    /// Used for unsupported expressions, allowing us to serialize all IR
+    Error,
 
     /// Primitive casts
     Cast(ExprId),
@@ -168,6 +172,9 @@ pub enum PatternKind<'vm> {
     LiteralValue(i128),
 
     Hole,
+
+    /// Error, for unsupported patterns
+    Error
 }
 
 #[derive(Debug)]
@@ -246,10 +253,10 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             .arms
             .iter()
             .map(|arm| {
-                assert!(arm.guard.is_none());
                 let pattern = builder.pattern(&arm.pattern);
                 let expr = builder.expr_id(arm.body);
-                MatchArm { pattern, expr }
+                let has_guard = arm.guard.is_some();
+                MatchArm { pattern, expr, has_guard }
             })
             .collect();
 
@@ -398,8 +405,15 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                     }
                     LitKind::Bool(b) => ExprKind::LiteralValue(if b { 1 } else { 0 }),
                     LitKind::Char(c) => ExprKind::LiteralValue(c as i128),
+                    LitKind::Byte(b) => {
+                        ExprKind::LiteralValue(b as i128)
+                    }
                     LitKind::Str(sym, _) => {
                         let bytes = sym.as_str().as_bytes().to_owned();
+                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
+                    }
+                    LitKind::ByteStr(ref bytes,_) => {
+                        let bytes = bytes.iter().copied().collect();
                         ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
                     }
                     _ => panic!("lit other {:?}", lit.node),
@@ -507,6 +521,21 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 ExprKind::Array(fields)
             }
 
+            // NYI:
+            thir::ExprKind::Repeat{..} => {
+                ExprKind::Error
+            }
+            thir::ExprKind::Closure{..} => {
+                ExprKind::Error
+            }
+            thir::ExprKind::StaticRef{..} => {
+                ExprKind::Error
+            }
+            // needs substs -- is it just syntactic sugar for an inline constant?
+            thir::ExprKind::ConstBlock{..} => {
+                ExprKind::Error
+            }
+
             thir::ExprKind::Field {
                 lhs,
                 variant_index,
@@ -609,6 +638,8 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 }
                 _ => panic!("const kind"),
             },
+            thir::PatKind::Slice{..} => PatternKind::Error,
+            thir::PatKind::Range{..} => PatternKind::Error,
             thir::PatKind::Wild => PatternKind::Hole,
             _ => panic!("pattern kind {:?}", old.kind),
         };

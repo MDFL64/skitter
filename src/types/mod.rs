@@ -2,6 +2,7 @@ mod layout;
 mod subs;
 mod type_context;
 mod types;
+mod type_persist;
 
 use std::sync::{OnceLock, RwLock};
 
@@ -22,4 +23,5 @@ struct InternedType<'vm> {
     kind: TypeKind<'vm>,
     layout: OnceLock<layout::Layout>,
     assoc_values: RwLock<AHashMap<String, (CrateId, AssocValue<'vm>)>>,
+    persist_id: OnceLock<u32>
 }

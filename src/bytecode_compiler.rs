@@ -1084,6 +1084,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 true
             }
             PatternKind::Hole => false,
+            PatternKind::Error => todo!()
         }
     }
 

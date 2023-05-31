@@ -1,17 +1,48 @@
-use crate::{items::CrateId, vm::VM};
+use crate::{items::CrateId, vm::VM, types::Type};
 
-#[derive(Default)]
-pub struct PersistWriteContext {
+pub struct PersistWriteContext<'vm> {
     output: Vec<u8>,
+    stack: Vec<Vec<u8>>,
+
+    pub this_crate: CrateId,
+    pub types: Vec<Type<'vm>>
 }
 
-impl PersistWriteContext {
+impl<'vm> PersistWriteContext<'vm> {
+    pub fn new(this_crate: CrateId) -> Self {
+        Self {
+            output: vec!(),
+            stack: vec!(),
+            this_crate,
+            types: vec!()
+        }
+    }
+
     pub fn write_byte(&mut self, bytes: u8) {
         self.output.push(bytes);
     }
 
     pub fn write_bytes(&mut self, bytes: &[u8]) {
         self.output.extend_from_slice(bytes);
+    }
+
+    pub fn write_str(&mut self, string: &str) {
+        string.len().persist_write(self);
+        self.write_bytes(string.as_bytes());
+    }
+
+    /// Start a nested sub-block that can be skipped over and parsed later.
+    pub fn start_block(&mut self) {
+        let parent = std::mem::take(&mut self.output);
+        self.stack.push(parent);
+    }
+
+    pub fn end_block(&mut self) {
+        let parent = self.stack.pop().unwrap();
+
+        let child = std::mem::replace(&mut self.output, parent);
+        child.len().persist_write(self);
+        self.write_bytes(&child);
     }
 
     pub fn save(&self, file_name: &str) {
@@ -52,10 +83,21 @@ impl<'vm> PersistReadContext<'vm> {
         self.index += n;
         &self.data[start..end]
     }
+
+    pub fn read_str(&mut self) -> &'vm str {
+        let len = usize::persist_read(self);
+        let data = self.read_bytes(len);
+        std::str::from_utf8(data).unwrap()
+    }
+
+    pub fn read_block(&mut self) -> &'vm [u8] {
+        let len = usize::persist_read(self);
+        self.read_bytes(len)
+    }
 }
 
 pub trait Persist<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext);
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>);
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self;
 }
@@ -64,8 +106,11 @@ macro_rules! persist_uint {
     ($ty:ty) => {
         impl<'vm> Persist<'vm> for $ty {
             fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
-                if *self < 252 {
+                if *self < 251 {
                     write_ctx.write_byte(*self as u8);
+                } else if *self < 256 {
+                    write_ctx.write_byte(251);
+                    write_ctx.write_bytes(&(*self as u16).to_le_bytes());
                 } else if *self < 65536 {
                     write_ctx.write_byte(252);
                     write_ctx.write_bytes(&(*self as u16).to_le_bytes());
@@ -82,6 +127,10 @@ macro_rules! persist_uint {
                         let bs = read_ctx.read_bytes(2);
                         u16::from_le_bytes(bs.try_into().unwrap()) as _
                     }
+                    251 => {
+                        let b = read_ctx.read_byte();
+                        b as _
+                    }
                     _ => n as _,
                 }
             }
@@ -92,26 +141,11 @@ macro_rules! persist_uint {
 persist_uint!(usize);
 persist_uint!(u32);
 
-impl<'vm> Persist<'vm> for &'vm str {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
-        self.len().persist_write(write_ctx);
-        write_ctx.write_bytes(self.as_bytes());
-    }
-
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let len = usize::persist_read(read_ctx);
-        let data = read_ctx.read_bytes(len);
-        std::str::from_utf8(data).unwrap()
-        //String::from_utf8(data.to_owned()).expect("deserialized bad string")
-        //String::new()
-    }
-}
-
 impl<'vm, T> Persist<'vm> for Vec<T>
 where
     T: Persist<'vm>,
 {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.len().persist_write(write_ctx);
         for item in self {
             item.persist_write(write_ctx);
@@ -132,7 +166,7 @@ impl<'vm, T> Persist<'vm> for Option<T>
 where
     T: Persist<'vm>,
 {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         match self {
             Option::None => {
                 write_ctx.write_byte(0);
