@@ -246,7 +246,6 @@ impl<'vm> RustCWorker<'vm> {
 
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-                                            println!("enum ctor = {:?}",item_path);
     
                                             let kind = ItemKind::new_adt();
         
