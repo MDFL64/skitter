@@ -211,16 +211,29 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot
             }
             ExprKind::Cast(source) => {
-                let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
-
-                let arg_slot = self.lower_expr(*source, None);
-
                 let arg_ty = self.expr_ty(*source);
                 let dst_ty = expr_ty;
 
-                let ctor = bytecode_select::cast(arg_ty, dst_ty);
-                self.out_bc.push(ctor(dst_slot, arg_slot));
-                dst_slot
+                // Sometimes we will encounter a no-op cast.
+                if arg_ty == dst_ty {
+                    let arg_slot = self.lower_expr(*source, None);
+
+                    if let Some(dst_slot) = dst_slot {
+                        self.out_bc.push(bytecode_select::copy(dst_slot, arg_slot, arg_ty).unwrap());
+                        dst_slot
+                    } else {
+                        arg_slot
+                    }
+                } else {
+                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+    
+                    let arg_slot = self.lower_expr(*source, None);
+    
+                    let ctor = bytecode_select::cast(arg_ty, dst_ty);
+                    self.out_bc.push(ctor(dst_slot, arg_slot));
+                    dst_slot
+                }
+
             }
             ExprKind::Binary(op, lhs, rhs) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
@@ -428,7 +441,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 });
                 let loop_count = self.loops.len();
 
-                self.lower_expr(*body, Some(Slot::DUMMY));
+                self.lower_block(*body, Some(Slot::DUMMY));
 
                 assert_eq!(loop_count, self.loops.len());
                 self.loops.pop();
@@ -451,7 +464,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::Break { scope_id, value } => {
+            /*ExprKind::Break { scope_id, value } => {
                 let loop_id = *scope_id;
 
                 if let Some(value) = value {
@@ -490,7 +503,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
-            }
+            }*/
             ExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.lower_expr(*value, Some(Slot::new(0)));
@@ -800,6 +813,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             | ExprKind::Array(_)
             | ExprKind::Adt { .. }
             | ExprKind::LiteralValue { .. } => {
+                // TODO it may be necessary to pre-allocate a slot here to avoid aliasing locals
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
             }

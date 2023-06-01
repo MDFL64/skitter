@@ -102,13 +102,13 @@ pub enum ExprKind<'vm> {
         then: ExprId,
         else_opt: Option<ExprId>,
     },
-    Loop(ExprId),
+    Loop(BlockId),
     Break {
-        scope_id: u32,
+        loop_id: ExprId,
         value: Option<ExprId>,
     },
     Continue {
-        scope_id: u32,
+        loop_id: ExprId,
     },
     Return(Option<ExprId>),
 
@@ -387,9 +387,6 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         let ty = self.types.expr_ty(expr);
         let ty = self.ctx.type_from_rustc(ty);
 
-        let adjust = self.types.expr_adjustments(expr);
-        assert!(adjust.len() == 0);
-
         let expr_kind = match expr.kind {
             hir::ExprKind::Lit(lit) => {
                 use rustc_ast::ast::LitKind;
@@ -456,6 +453,12 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
                 ExprKind::AssignOp(op, lhs, rhs)
             }
+            hir::ExprKind::Assign(lhs,rhs,_) => {
+                let lhs = self.expr(lhs);
+                let rhs = self.expr(rhs);
+
+                ExprKind::Assign(lhs, rhs)
+            }
             hir::ExprKind::Call(func,args) => {
                 let func = self.expr(func);
 
@@ -464,6 +467,16 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 }).collect();
 
                 ExprKind::Call{ func, args }
+            }
+            hir::ExprKind::If(cond,then,else_opt) => {
+                let cond = self.expr(cond);
+                let then = self.expr(then);
+                let else_opt = else_opt.map(|e| self.expr(e));
+                ExprKind::If{ cond, then, else_opt }
+            }
+            hir::ExprKind::Loop(body,..) => {
+                let body = self.block(body);
+                ExprKind::Loop(body)
             }
             hir::ExprKind::Path(path) => {
                 let res = self.types.qpath_res(&path,expr.hir_id);
@@ -494,16 +507,30 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 let block_id = self.block(block);
                 ExprKind::Block(block_id)
             }
+            hir::ExprKind::DropTemps(e) => {
+                // TODO TODO TODO
+                // this may pose an issue when implementing destructors / drop
+                return self.expr(e);
+            }
             _ => panic!("todo expr kind {:?}",expr.kind)
         };
 
-        let expr = Expr{
+        let mut expr_id = self.add_expr(Expr{
             kind: expr_kind,
             ty
-        };
+        });
 
+        let adjust_list = self.types.expr_adjustments(expr);
+        for adjust in adjust_list {
+            panic!("todo adjustment");
+        }
+
+        expr_id
+    }
+
+    fn add_expr(&mut self, e: Expr<'vm>) -> ExprId {
         let expr_id = ExprId(self.exprs.len() as u32);
-        self.exprs.push(expr);
+        self.exprs.push(e);
         expr_id
     }
 
@@ -712,18 +739,18 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 then: self.expr_id(then),
                 else_opt: else_opt.map(|e| self.expr_id(e)),
             },
-            thir::ExprKind::Break { label, value } => ExprKind::Break {
+            /*thir::ExprKind::Break { label, value } => ExprKind::Break {
                 scope_id: label.id.as_u32(),
                 value: value.map(|e| self.expr_id(e)),
             },
             thir::ExprKind::Continue { label } => ExprKind::Continue {
                 scope_id: label.id.as_u32(),
-            },
+            },*/
             thir::ExprKind::Return { value } => {
                 let value = value.map(|e| self.expr_id(e));
                 ExprKind::Return(value)
             }
-            thir::ExprKind::Loop { body } => ExprKind::Loop(self.expr_id(body)),
+            //thir::ExprKind::Loop { body } => ExprKind::Loop(self.expr_id(body)),
             thir::ExprKind::Match {
                 scrutinee,
                 ref arms,
