@@ -605,8 +605,8 @@ impl<'vm> RustCWorker<'vm> {
                                     let has_body = hir.maybe_body_owned_by(did).is_some();
                                     if has_body {
                                         println!("go {:?}",did);
-                                        let (thir, root) = ctx.tcx.thir_body(did).unwrap();
-                                        let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
+                                        //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
+                                        //let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
                                         println!("done");
                                     }
                                 }
@@ -656,8 +656,17 @@ impl<'vm> RustCWorker<'vm> {
             let item = ctx.items.get(item_id);
             let did = item.did.unwrap();
 
-            let (thir, root) = ctx.tcx.thir_body(did).unwrap();
-            let ir = IRFunctionBuilder::build(ctx, did, root, &thir.borrow());
+            let hir = ctx.tcx.hir();
+
+            let body_id = hir.body_owned_by(did);
+            let body = hir.body(body_id);
+
+            let types = ctx.tcx.typeck(did);
+
+            //panic!("handle body");
+
+            //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
+            let ir = IRFunctionBuilder::build(ctx, did, body, types);
             item.set_ir(ir);
         });
         res.wait();

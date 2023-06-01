@@ -294,11 +294,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Call {
-                func_ty,
-                func_expr,
+                func,
                 args,
             } => {
-                let ty = self.apply_subs(*func_ty);
+                let ty = self.expr_ty(*func);
                 let func_ref = ty.func_item().expect("can't find function");
 
                 if let Some((FunctionAbi::RustIntrinsic, extern_name)) = func_ref.item.func_extern()
