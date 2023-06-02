@@ -14,19 +14,19 @@ pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
     pub is_constant: bool,
     pub root_expr: ExprId,
-    pub params: Vec<Pattern<'vm>>,
+    pub params: Vec<PatternId>,
     exprs: Vec<Expr<'vm>>,
-    stmts: Vec<Stmt<'vm>>,
-    blocks: Vec<Block>,
-    arms: Vec<MatchArm<'vm>>,
+    patterns: Vec<Pattern<'vm>>,
+
+    //stmts: Vec<Stmt<'vm>>,
+    //blocks: Vec<Block>,
+    //arms: Vec<MatchArm<'vm>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BlockId(u32);
-#[derive(Debug, Clone, Copy)]
-pub struct StmtId(u32);
-#[derive(Debug, Clone, Copy)]
 pub struct ExprId(u32);
+#[derive(Debug, Clone, Copy)]
+pub struct PatternId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LoopId(u32);
@@ -40,17 +40,18 @@ pub struct Expr<'vm> {
 }
 
 #[derive(Debug)]
-pub enum Stmt<'vm> {
+pub enum Stmt {
     Expr(ExprId),
     Let {
-        pattern: Pattern<'vm>,
+        pattern: PatternId,
         init: Option<ExprId>,
-        else_block: Option<BlockId>,
+        else_block: Option<Block>,
     },
 }
 
+#[derive(Debug)]
 pub struct Block {
-    pub stmts: Vec<StmtId>,
+    pub stmts: Vec<Stmt>,
     pub result: Option<ExprId>,
 }
 
@@ -63,7 +64,7 @@ pub struct MatchArm<'vm> {
 
 #[derive(Debug)]
 pub struct Pattern<'vm> {
-    pub kind: PatternKind<'vm>,
+    pub kind: PatternKind,
     pub ty: Type<'vm>,
 }
 
@@ -81,7 +82,7 @@ pub enum ExprKind<'vm> {
     /// Pointer casts
     PointerCast(ExprId, PointerCast),
 
-    Block(BlockId),
+    Block(Block),
 
     /// Variable reference
     VarRef(u32),
@@ -104,7 +105,7 @@ pub enum ExprKind<'vm> {
         then: ExprId,
         else_opt: Option<ExprId>,
     },
-    Loop(BlockId,LoopId),
+    Loop(Block,LoopId),
     Break {
         loop_id: LoopId,
         value: Option<ExprId>,
@@ -142,7 +143,7 @@ pub enum ExprKind<'vm> {
     },
 
     Let {
-        pattern: Pattern<'vm>,
+        pattern: PatternId,
         init: ExprId,
     },
     Match {
@@ -152,24 +153,24 @@ pub enum ExprKind<'vm> {
 }
 
 #[derive(Debug)]
-pub enum PatternKind<'vm> {
+pub enum PatternKind {
     LocalBinding {
         local_id: u32,
         mode: BindingMode,
-        sub_pattern: Option<Box<Pattern<'vm>>>,
+        sub_pattern: Option<PatternId>,
     },
     Struct {
-        fields: Vec<FieldPattern<'vm>>,
+        fields: Vec<FieldPattern>,
     },
     Enum {
-        fields: Vec<FieldPattern<'vm>>,
+        fields: Vec<FieldPattern>,
         variant_index: u32,
     },
     Or {
-        options: Vec<Pattern<'vm>>,
+        options: Vec<PatternId>,
     },
     DeRef {
-        sub_pattern: Box<Pattern<'vm>>,
+        sub_pattern: PatternId,
     },
     /// Small literals: integer, float, char, or bool types (same as the ExprKind)
     LiteralValue(i128),
@@ -187,9 +188,9 @@ pub enum BindingMode {
 }
 
 #[derive(Debug)]
-pub struct FieldPattern<'vm> {
+pub struct FieldPattern {
     pub field: u32,
-    pub pattern: Pattern<'vm>,
+    pub pattern: PatternId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -246,8 +247,7 @@ pub struct IRFunctionBuilder<'vm, 'tcx> {
     loops: Vec<(hir::HirId,LoopId)>,
     // parts of our result function
     exprs: Vec<Expr<'vm>>,
-    stmts: Vec<Stmt<'vm>>,
-    blocks: Vec<Block>,
+    patterns: Vec<Pattern<'vm>>,
 }
 
 impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
@@ -267,18 +267,21 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             types,
             loops: vec!(),
             exprs: vec!(),
-            stmts: vec!(),
-            blocks: vec!()
+            patterns: vec!(),
         };
         
         let params: Vec<_> = body.params.iter().map(|param| builder.pattern(param.pat)).collect();
 
         let root_expr = builder.expr(body.value);
 
-        let res_ty = builder.exprs[root_expr.0 as usize].ty;
+        let output = builder.exprs[root_expr.0 as usize].ty;
+        let inputs = params.iter().map(|p| {
+            builder.patterns[p.0 as usize].ty
+        }).collect();
+
         let sig = FunctionSig {
-            inputs: params.iter().map(|p| p.ty).collect(),
-            output: res_ty
+            inputs,
+            output
         };
 
         IRFunction {
@@ -287,22 +290,8 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             params,
             root_expr,
             exprs: builder.exprs,
-            stmts: builder.stmts,
-            blocks: builder.blocks,
-            arms: vec!(),
+            patterns: builder.patterns
         }
-    }
-
-    fn expr_id(&self, id: thir::ExprId) -> ExprId {
-        ExprId(id.as_u32())
-    }
-
-    fn stmt_id(&self, id: thir::StmtId) -> StmtId {
-        StmtId(id.as_u32())
-    }
-
-    fn block_id(&self, id: thir::BlockId) -> BlockId {
-        BlockId(id.as_u32())
     }
 
     /// Convert binary op from rust IR. Does not handle logical ops.
@@ -495,10 +484,12 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 let res = self.types.qpath_res(&path,expr.hir_id);
 
                 match res {
-                    hir::def::Res::Def(hir::def::DefKind::Struct,_) => {
+                    hir::def::Res::Def(hir::def::DefKind::Struct,_) |
+                    hir::def::Res::Def(hir::def::DefKind::TyAlias,_) |
+                    hir::def::Res::SelfTyAlias{..} => {
                         // structs are okay!
                     }
-                    _ => panic!("! {:?}",res)
+                    _ => panic!("struct? {:?}",res)
                 }
 
                 let variant = 0;
@@ -535,12 +526,14 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                     hir::def::Res::Def(def_kind,did) => {
                         match def_kind {
                             hir::def::DefKind::Fn |
-                            hir::def::DefKind::AssocFn => {
+                            hir::def::DefKind::AssocFn |
+                            hir::def::DefKind::Ctor(..) => {
                                 // return void expression, any information needed
                                 // can be pulled from the type
                                 ExprKind::LiteralVoid
                             }
-                            hir::def::DefKind::Const => {
+                            hir::def::DefKind::Const |
+                            hir::def::DefKind::AssocConst => {
                                 let subs = self.types.node_substs(expr.hir_id);
                                 let const_item = self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)
@@ -563,9 +556,15 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                     _ => panic!("path = {:?}",res)
                 }
             }
+            hir::ExprKind::Let(let_expr) => {
+                ExprKind::Let {
+                    pattern: self.pattern(let_expr.pat),
+                    init: self.expr(let_expr.init),
+                }
+            }
             hir::ExprKind::Block(block,_) => {
-                let block_id = self.block(block);
-                ExprKind::Block(block_id)
+                let block = self.block(block);
+                ExprKind::Block(block)
             }
             hir::ExprKind::DropTemps(e) => {
                 // TODO TODO TODO
@@ -605,6 +604,22 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                         ty: adjust_ty
                     });
                 }
+                Adjust::Pointer(ptr_cast) => {
+                    use rustc_middle::ty::adjustment::PointerCast as PC;
+                    let ptr_cast: PointerCast = match ptr_cast {
+                        PC::ReifyFnPointer => PointerCast::ReifyFnPointer,
+                        PC::UnsafeFnPointer => PointerCast::UnsafeFnPointer,
+                        PC::ClosureFnPointer(_) => PointerCast::ClosureFnPointer,
+                        PC::MutToConstPointer => PointerCast::MutToConstPointer,
+                        PC::ArrayToPointer => PointerCast::ArrayToPointer,
+                        PC::Unsize => PointerCast::UnSize,
+                    };
+
+                    expr_id = self.add_expr(Expr{
+                        kind: ExprKind::PointerCast(expr_id,ptr_cast),
+                        ty: adjust_ty
+                    });
+                }
                 _ => panic!("todo adjust {:?}",adjust)
             }
         }
@@ -618,27 +633,31 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         expr_id
     }
 
-    fn block(&mut self, block: &hir::Block) -> BlockId {
+    fn add_pattern(&mut self, p: Pattern<'vm>) -> PatternId {
+        let pat_id = PatternId(self.patterns.len() as u32);
+        self.patterns.push(p);
+        pat_id
+    }
+
+    fn block(&mut self, block: &hir::Block) -> Block {
         let mut stmts = vec!();
 
         for stmt in block.stmts {
-            stmts.push(self.stmt(&stmt));
+            if let Some(stmt) = self.stmt(&stmt) {
+                stmts.push(stmt);
+            }
         }
 
         let result = block.expr.map(|expr| self.expr(expr));
 
-        let block = Block{
+        Block{
             stmts,
             result
-        };
-
-        let block_id = BlockId(self.blocks.len() as u32);
-        self.blocks.push(block);
-        block_id
+        }
     }
 
-    fn stmt(&mut self, stmt: &hir::Stmt) -> StmtId {
-        let stmt_kind = match stmt.kind {
+    fn stmt(&mut self, stmt: &hir::Stmt) -> Option<Stmt> {
+        let res = match stmt.kind {
             hir::StmtKind::Expr(expr) |
             hir::StmtKind::Semi(expr) => {
                 Stmt::Expr(self.expr(&expr))
@@ -651,22 +670,15 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
                 Stmt::Let{ pattern, init, else_block }
             }
-            _ => panic!("stmt {:?}",stmt)
+            hir::StmtKind::Item(_) => return None,
         };
 
-        let stmt_id = StmtId(self.stmts.len() as u32);
-        self.stmts.push(stmt_kind);
-        stmt_id
+        Some(res)
     }
 
-    fn pattern(&self, pat: &hir::Pat) -> Pattern<'vm> {
+    fn pattern(&mut self, pat: &hir::Pat) -> PatternId {
         let ty = self.types.pat_ty(pat);
         let ty = self.ctx.type_from_rustc(ty);
-
-        let all_adjust = self.types.pat_adjustments();
-        if let Some(adjust) = all_adjust.get(pat.hir_id) {
-            assert!(adjust.len() == 0);
-        }
 
         let pattern_kind = match pat.kind {
             hir::PatKind::Binding(_,hir_id,_,sub_pattern) => {
@@ -683,247 +695,88 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 assert_eq!(hir_id.owner.def_id, self.func_id);
                 let local_id = hir_id.local_id.as_u32();
 
-                let sub_pattern = sub_pattern.map(|sub_pat| Box::new(self.pattern(sub_pat)));
+                let sub_pattern = sub_pattern.map(|sub_pat| self.pattern(sub_pat));
 
                 PatternKind::LocalBinding{ local_id, mode, sub_pattern }
             }
-            _ => panic!("pat {:?}",pat)
+            hir::PatKind::Lit(lit) => {
+                if let hir::ExprKind::Lit(lit) = lit.kind {
+                    use rustc_ast::ast::LitKind;
+                    match lit.node {
+                        LitKind::Int(n, _) => {
+                            let n = n as i128;
+                            PatternKind::LiteralValue(n)
+                        }
+                        _ => panic!("pat lit kind {:?}",lit.node)
+                    }
+                } else {
+                    panic!("pat lit {:?}",lit);
+                }
+            }
+            hir::PatKind::Tuple(children,gap_pos) => {
+                let tup_size = if let TypeKind::Tuple(children) = ty.kind() {
+                    children.len()
+                } else {
+                    panic!("tuple pattern is not a tuple?");
+                };
+
+                let gap_pos = gap_pos.as_opt_usize();
+
+                let fields = children.iter().enumerate().map(|(i,child)| {
+
+                    let field = if let Some(gap_pos) = gap_pos {
+                        if i > gap_pos {
+                            let back_offset = children.len() - i;
+                            (tup_size - back_offset) as u32
+                        } else {
+                            i as u32
+                        }
+                    } else {
+                        i as u32
+                    };
+
+                    FieldPattern{
+                        pattern: self.pattern(child),
+                        field
+                    }
+                }).collect();
+
+                PatternKind::Struct { fields }
+            }
+            hir::PatKind::Or(options) => {
+                let options = options.iter().map(|p| self.pattern(p)).collect();
+                PatternKind::Or{ options }
+            }
+            hir::PatKind::Wild => {
+                PatternKind::Hole
+            }
+            _ => panic!("pat {:?}",pat.kind)
         };
 
-        Pattern{
+        let mut res_pat = self.add_pattern(Pattern{
             kind: pattern_kind,
             ty
+        });
+
+        let all_adjust = self.types.pat_adjustments();
+        if let Some(adjust) = all_adjust.get(pat.hir_id) {
+            for adjust_ty in adjust.iter().rev() {
+                let adjust_ty = self.ctx.type_from_rustc(*adjust_ty);
+                res_pat = self.add_pattern(Pattern{
+                    kind: PatternKind::DeRef{
+                        sub_pattern: res_pat
+                    },
+                    ty: adjust_ty
+                });
+            }
         }
-    }
 
-    fn expr_old(&self, old: &thir::Expr<'tcx>) -> Expr<'vm> {
-        panic!()
-        /*let kind = match old.kind {
-            thir::ExprKind::Use { source }
-            | thir::ExprKind::NeverToAny { source }
-            | thir::ExprKind::ValueTypeAscription { source, .. } => {
-                ExprKind::Dummy(self.expr_id(source), None)
-            }
-            thir::ExprKind::Scope {
-                value,
-                region_scope,
-                ..
-            } => ExprKind::Dummy(self.expr_id(value), Some(region_scope.id.as_u32())),
-            thir::ExprKind::Cast { source } => ExprKind::Cast(self.expr_id(source)),
-            thir::ExprKind::Pointer { cast, source } => {
-                use rustc_middle::ty::adjustment::PointerCast as PC;
-                let cast = match cast {
-                    PC::ReifyFnPointer => PointerCast::ReifyFnPointer,
-                    PC::UnsafeFnPointer => PointerCast::UnsafeFnPointer,
-                    PC::ClosureFnPointer(_) => PointerCast::ClosureFnPointer,
-                    PC::MutToConstPointer => PointerCast::MutToConstPointer,
-                    PC::ArrayToPointer => PointerCast::ArrayToPointer,
-                    PC::Unsize => PointerCast::UnSize,
-                };
-                ExprKind::PointerCast(self.expr_id(source), cast)
-            }
-
-            thir::ExprKind::Block { block } => ExprKind::Block(self.block_id(block)),
-
-            thir::ExprKind::Literal { lit, neg } => {
-                use rustc_ast::ast::LitKind;
-                match lit.node {
-                    LitKind::Int(n, _) => {
-                        let mut n = n as i128;
-                        if neg {
-                            n = -n;
-                        }
-                        ExprKind::LiteralValue(n)
-                    }
-                    LitKind::Float(sym, _) => {
-                        let rustc_middle::ty::TyKind::Float(float_ty) = old.ty.kind() else {
-                            panic!("non-float float literal");
-                        };
-                        match float_ty {
-                            rustc_middle::ty::FloatTy::F32 => {
-                                let mut n = f32::from_str(sym.as_str()).unwrap();
-                                if neg {
-                                    n = -n;
-                                }
-                                let x: i32 = unsafe { std::mem::transmute(n) };
-                                ExprKind::LiteralValue(x as i128)
-                            }
-                            rustc_middle::ty::FloatTy::F64 => {
-                                let mut n = f64::from_str(sym.as_str()).unwrap();
-                                if neg {
-                                    n = -n;
-                                }
-                                let x: i64 = unsafe { std::mem::transmute(n) };
-                                ExprKind::LiteralValue(x as i128)
-                            }
-                        }
-                    }
-                    LitKind::Bool(b) => ExprKind::LiteralValue(if b { 1 } else { 0 }),
-                    LitKind::Char(c) => ExprKind::LiteralValue(c as i128),
-                    LitKind::Byte(b) => {
-                        ExprKind::LiteralValue(b as i128)
-                    }
-                    LitKind::Str(sym, _) => {
-                        let bytes = sym.as_str().as_bytes().to_owned();
-                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
-                    }
-                    LitKind::ByteStr(ref bytes,_) => {
-                        let bytes = bytes.iter().copied().collect();
-                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
-                    }
-                    _ => panic!("lit other {:?}", lit.node),
-                }
-            }
-            thir::ExprKind::ZstLiteral { .. } => ExprKind::LiteralVoid,
-            thir::ExprKind::VarRef { id } => {
-                let hir_id = id.0;
-                // will probably not hold true for closures
-                assert_eq!(hir_id.owner.def_id, self.func_id);
-
-                let local_id = hir_id.local_id.as_u32();
-                ExprKind::VarRef(local_id)
-            }
-            thir::ExprKind::Unary { op, arg } => {
-                use rustc_middle::mir::UnOp;
-                let op = match op {
-                    UnOp::Not => UnaryOp::Not,
-                    UnOp::Neg => UnaryOp::Neg,
-                };
-                ExprKind::Unary(op, self.expr_id(arg))
-            }
-            thir::ExprKind::LogicalOp { op, lhs, rhs } => {
-                use rustc_middle::thir::LogicalOp;
-                let op = match op {
-                    LogicalOp::And => LogicOp::And,
-                    LogicalOp::Or => LogicOp::Or,
-                };
-                ExprKind::LogicOp(op, self.expr_id(lhs), self.expr_id(rhs))
-            }
-            /*thir::ExprKind::Binary { op, lhs, rhs } => {
-                ExprKind::Binary(self.bin_op(op), self.expr_id(lhs), self.expr_id(rhs))
-            }
-            thir::ExprKind::AssignOp { op, lhs, rhs } => {
-                ExprKind::AssignOp(self.bin_op(op), self.expr_id(lhs), self.expr_id(rhs))
-            }*/
-            thir::ExprKind::Assign { lhs, rhs } => {
-                ExprKind::Assign(self.expr_id(lhs), self.expr_id(rhs))
-            }
-
-            thir::ExprKind::Borrow { arg, .. } | thir::ExprKind::AddressOf { arg, .. } => {
-                ExprKind::Ref(self.expr_id(arg))
-            }
-            thir::ExprKind::Deref { arg } => ExprKind::DeRef(self.expr_id(arg)),
-
-            thir::ExprKind::If {
-                cond,
-                then,
-                else_opt,
-                ..
-            } => ExprKind::If {
-                cond: self.expr_id(cond),
-                then: self.expr_id(then),
-                else_opt: else_opt.map(|e| self.expr_id(e)),
-            },
-            /*thir::ExprKind::Break { label, value } => ExprKind::Break {
-                scope_id: label.id.as_u32(),
-                value: value.map(|e| self.expr_id(e)),
-            },
-            thir::ExprKind::Continue { label } => ExprKind::Continue {
-                scope_id: label.id.as_u32(),
-            },*/
-            thir::ExprKind::Return { value } => {
-                let value = value.map(|e| self.expr_id(e));
-                ExprKind::Return(value)
-            }
-            //thir::ExprKind::Loop { body } => ExprKind::Loop(self.expr_id(body)),
-            thir::ExprKind::Match {
-                scrutinee,
-                ref arms,
-            } => {
-                let arms = arms.iter().map(|arm_id| ArmId(arm_id.as_u32())).collect();
-
-                ExprKind::Match {
-                    arg: self.expr_id(scrutinee),
-                    arms,
-                }
-            }
-
-            thir::ExprKind::Call {
-                ty, fun, ref args, ..
-            } => panic!(),/*ExprKind::Call {
-                func_ty: self.ctx.type_from_rustc(ty),
-                func_expr: self.expr_id(fun),
-                args: args.iter().map(|arg| self.expr_id(*arg)).collect(),
-            },*/
-            thir::ExprKind::Tuple { ref fields } => {
-                let fields = fields.iter().map(|f| self.expr_id(*f)).collect();
-                ExprKind::Tuple(fields)
-            }
-            thir::ExprKind::Adt(ref adt) => {
-                let fields = adt
-                    .fields
-                    .iter()
-                    .map(|f| (f.name.as_u32(), self.expr_id(f.expr)))
-                    .collect();
-
-                ExprKind::Adt {
-                    variant: adt.variant_index.as_u32(),
-                    fields,
-                }
-            }
-            thir::ExprKind::Array { ref fields } => {
-                let fields = fields.iter().map(|f| self.expr_id(*f)).collect();
-                ExprKind::Array(fields)
-            }
-
-            // NYI:
-            thir::ExprKind::Repeat{..} => {
-                ExprKind::Error
-            }
-            thir::ExprKind::Closure{..} => {
-                ExprKind::Error
-            }
-            thir::ExprKind::StaticRef{..} => {
-                ExprKind::Error
-            }
-            // needs substs -- is it just syntactic sugar for an inline constant?
-            thir::ExprKind::ConstBlock{..} => {
-                ExprKind::Error
-            }
-
-            thir::ExprKind::Field {
-                lhs,
-                variant_index,
-                name,
-            } => ExprKind::Field {
-                lhs: self.expr_id(lhs),
-                variant: variant_index.as_u32(),
-                field: name.as_u32(),
-            },
-            thir::ExprKind::Index { lhs, index } => ExprKind::Index {
-                lhs: self.expr_id(lhs),
-                index: self.expr_id(index),
-            },
-            thir::ExprKind::Let { expr, ref pat } => ExprKind::Let {
-                pattern: self.pattern_old(pat),
-                init: self.expr_id(expr),
-            },
-            thir::ExprKind::NamedConst { def_id, substs, .. } => {
-                let item_ref = self.ctx.vm.types.def_from_rustc(def_id, substs, &self.ctx);
-                ExprKind::NamedConst(item_ref)
-            }
-
-            _ => panic!("convert {:?}", old.kind),
-        };
-
-        Expr {
-            kind,
-            ty: self.ctx.type_from_rustc(old.ty),
-        }*/
+        res_pat
     }
 
     fn pattern_old(&self, old: &thir::Pat<'tcx>) -> Pattern<'vm> {
-        let ty = self.ctx.type_from_rustc(old.ty);
+        panic!();
+        /*let ty = self.ctx.type_from_rustc(old.ty);
 
         let kind = match old.kind {
             thir::PatKind::AscribeUserType { ref subpattern, .. } => {
@@ -1002,24 +855,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         Pattern {
             kind,
             ty: self.ctx.type_from_rustc(old.ty),
-        }
-    }
-
-    fn stmt_old(&self, old: &thir::Stmt<'tcx>) -> Stmt<'vm> {
-        use rustc_middle::thir::StmtKind;
-        match old.kind {
-            StmtKind::Expr { expr, .. } => Stmt::Expr(self.expr_id(expr)),
-            StmtKind::Let {
-                ref pattern,
-                initializer,
-                else_block,
-                ..
-            } => Stmt::Let {
-                pattern: self.pattern_old(pattern),
-                init: initializer.map(|x| self.expr_id(x)),
-                else_block: else_block.map(|x| self.block_id(x)),
-            },
-        }
+        }*/
     }
 }
 
@@ -1028,16 +864,8 @@ impl<'vm> IRFunction<'vm> {
         &self.exprs[id.0 as usize]
     }
 
-    pub fn stmt(&self, id: StmtId) -> &Stmt<'vm> {
-        &self.stmts[id.0 as usize]
-    }
-
-    pub fn block(&self, id: BlockId) -> &Block {
-        &self.blocks[id.0 as usize]
-    }
-
-    pub fn arm(&self, id: ArmId) -> &MatchArm<'vm> {
-        &self.arms[id.0 as usize]
+    pub fn pattern(&self, id: PatternId) -> &Pattern<'vm> {
+        &self.patterns[id.0 as usize]
     }
 }
 
@@ -1048,7 +876,8 @@ pub fn glue_ir_for_fn_trait<'vm>(
     args_ty: Type<'vm>,
     res_ty: Type<'vm>,
 ) -> IRFunction<'vm> {
-    assert!(func_ty.is_concrete());
+    panic!("fixme");
+    /*assert!(func_ty.is_concrete());
     assert!(args_ty.is_concrete());
 
     let sig = FunctionSig {
@@ -1121,5 +950,5 @@ pub fn glue_ir_for_fn_trait<'vm>(
         arms: vec![],
         blocks: vec![],
         stmts: vec![],
-    }
+    }*/
 }

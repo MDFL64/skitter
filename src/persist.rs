@@ -188,3 +188,19 @@ where
         }
     }
 }
+
+impl<'vm, A, B> Persist<'vm> for (A,B)
+where
+    A: Persist<'vm>, B: Persist<'vm>
+{
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.0.persist_write(write_ctx);
+        self.1.persist_write(write_ctx);
+    }
+
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        let a = A::persist_read(read_ctx);
+        let b = B::persist_read(read_ctx);
+        (a,b)
+    }
+}

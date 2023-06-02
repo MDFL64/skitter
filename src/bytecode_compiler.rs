@@ -2,13 +2,12 @@ use crate::abi::POINTER_SIZE;
 use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
 use crate::ir::{
-    BinaryOp, BindingMode, BlockId, ExprId, ExprKind, IRFunction, LogicOp, Pattern, PatternKind,
-    PointerCast, Stmt, StmtId, LoopId,
+    BinaryOp, BindingMode, ExprId, ExprKind, IRFunction, LogicOp, Pattern, PatternKind,
+    PointerCast, Stmt, LoopId, PatternId, Block,
 };
 use crate::items::FunctionAbi;
 use crate::types::{Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
-use crate::vm::Function;
 use crate::vm::{self, instr::Slot};
 
 pub struct BytecodeCompiler<'vm, 'f> {
@@ -62,11 +61,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         let param_slots: Vec<Slot> = ir
             .params
             .iter()
-            .map(|pat| compiler.alloc_pattern(pat))
+            .map(|pat| compiler.alloc_pattern(*pat))
             .collect();
 
         for (pat, slot) in ir.params.iter().zip(param_slots) {
-            compiler.match_pattern(pat, slot, None);
+            compiler.match_pattern(*pat, slot, None);
         }
 
         compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
@@ -89,10 +88,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn lower_block(&mut self, id: BlockId, dst_slot: Option<Slot>) -> Slot {
-        let block = self.in_func.block(id);
-        for stmt_id in block.stmts.iter() {
-            self.lower_stmt(*stmt_id);
+    fn lower_block(&mut self, block: &Block, dst_slot: Option<Slot>) -> Slot {
+        for stmt in block.stmts.iter() {
+            self.lower_stmt(stmt);
         }
         if let Some(expr) = block.result {
             // ALWAYS have a slot allocated for the final expression
@@ -105,8 +103,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn lower_stmt(&mut self, id: StmtId) {
-        let stmt = self.in_func.stmt(id);
+    fn lower_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Let {
                 pattern,
@@ -115,11 +112,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ..
             } => {
                 assert!(else_block.is_none());
-                let dst_slot = self.alloc_pattern(pattern);
+                let dst_slot = self.alloc_pattern(*pattern);
                 if let Some(init) = init {
                     self.lower_expr(*init, Some(dst_slot));
                 }
-                self.match_pattern(pattern, dst_slot, None);
+                self.match_pattern(*pattern, dst_slot, None);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -136,7 +133,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Dummy(value) => {
                 self.lower_expr(*value, dst_slot)
             }
-            ExprKind::Block(block) => self.lower_block(*block, dst_slot),
+            ExprKind::Block(block) => self.lower_block(block, dst_slot),
             // PLACES:
             ExprKind::NamedConst(_)
             | ExprKind::VarRef { .. }
@@ -434,7 +431,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 });
                 let loop_count = self.loops.len();
 
-                self.lower_block(*body, Some(Slot::DUMMY));
+                self.lower_block(body, Some(Slot::DUMMY));
 
                 assert_eq!(loop_count, self.loops.len());
                 self.loops.pop();
@@ -654,7 +651,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let value_slot = self.stack.alloc(self.expr_ty(*init));
                 self.lower_expr(*init, Some(value_slot));
 
-                self.match_pattern(pattern, value_slot, Some(dst_slot));
+                self.match_pattern(*pattern, value_slot, Some(dst_slot));
 
                 dst_slot
             }
@@ -673,14 +670,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let mut jump_gaps = Vec::new();
 
                 for arm_id in arms {
-                    let arm = self.in_func.arm(*arm_id);
+                    panic!("todo fix match");
+                    /*let arm = self.in_func.arm(*arm_id);
                     self.match_pattern(&arm.pattern, arg_slot, Some(match_result_slot));
                     let check_end_index = self.skip_instr();
                     self.lower_expr(arm.expr, Some(dst_slot));
                     jump_gaps.push(self.skip_instr());
 
                     self.out_bc[check_end_index] =
-                        Instr::JumpF(-self.get_jump_offset(check_end_index), match_result_slot);
+                        Instr::JumpF(-self.get_jump_offset(check_end_index), match_result_slot);*/
                 }
 
                 for gap_index in jump_gaps {
@@ -821,14 +819,19 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         self.apply_subs(ty)
     }
 
-    fn alloc_pattern(&mut self, pat: &Pattern<'vm>) -> Slot {
+    fn alloc_pattern(&mut self, pat_id: PatternId) -> Slot {
+        let pat = self.in_func.pattern(pat_id);
+
         let ty = self.apply_subs(pat.ty);
         let slot = self.stack.alloc(ty);
         slot
     }
 
     /// Use to both setup variable bindings AND generate pattern matching code.
-    fn match_pattern(&mut self, pat: &Pattern<'vm>, source: Slot, match_result_slot: Option<Slot>) {
+    fn match_pattern(&mut self, pat_id: PatternId, source: Slot, match_result_slot: Option<Slot>) {
+
+        let pat = self.in_func.pattern(pat_id);
+
         let refutable =
             self.match_pattern_internal(pat, Place::Local(source), false, match_result_slot);
 
@@ -849,6 +852,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         must_copy: bool,
         match_result_slot: Option<Slot>,
     ) -> bool {
+
         match &pat.kind {
             PatternKind::LocalBinding {
                 local_id,
@@ -903,6 +907,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 }
                 if let Some(sub_pattern) = sub_pattern {
                     // copy values if there are possible aliases
+                    let sub_pattern = self.in_func.pattern(*sub_pattern);
                     self.match_pattern_internal(sub_pattern, source, true, match_result_slot)
                 } else {
                     false
@@ -915,9 +920,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let mut result = false;
 
                 for field in fields {
+                    let field_pattern = self.in_func.pattern(field.pattern);
+
                     let offset = layout.field_offsets[0][field.field as usize];
                     let refutable = self.match_pattern_internal(
-                        &field.pattern,
+                        field_pattern,
                         source.offset_by(offset),
                         must_copy,
                         match_result_slot,
@@ -974,10 +981,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 }
 
                 for field in fields {
+                    let field_pattern = self.in_func.pattern(field.pattern);
+
                     let offset =
                         layout.field_offsets[*variant_index as usize][field.field as usize];
+                    
                     let refutable = self.match_pattern_internal(
-                        &field.pattern,
+                        field_pattern,
                         source.offset_by(offset),
                         must_copy,
                         match_result_slot,
@@ -1013,6 +1023,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 assert!(options.len() >= 2);
 
                 for option in options {
+                    let option = self.in_func.pattern(*option);
+
                     // always copy values since a local may appear multiple times
                     let refutable =
                         self.match_pattern_internal(option, source, true, match_result_slot);
@@ -1046,6 +1058,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             }
             PatternKind::DeRef { sub_pattern } => {
                 if let Place::Local(source_slot) = source {
+                    let sub_pattern = self.in_func.pattern(*sub_pattern);
                     // must_copy is probably irrelevant at this stage
                     self.match_pattern_internal(
                         sub_pattern,

@@ -19,7 +19,7 @@ pub fn pick_tup(t: (i32,i32,i32)) {
         _builtin::print_int(2000 + (x as i128));
     } else if let (2,_,x) = t {
         _builtin::print_int(3000 + (x as i128));
-    } else if let (x,..) = t {
+    } else if let (..,x) = t {
         _builtin::print_int(4000 + (x as i128));
     } else {
         _builtin::print_int(9999);
@@ -36,7 +36,7 @@ pub fn pick_tup_or(t: (i32,i32,i32)) {
     }
 }
 
-pub fn pick_tup_ref(t: &(i32,i32,i32)) {
+pub fn pick_tup_ref(t: &&(i32,i32,i32)) {
     if let (1,x,2) = t {
         _builtin::print_int(1000 + (*x as i128));
     } else if let (3,3,x) = t {
@@ -80,10 +80,10 @@ pub fn main() {
         pick_tup_or((2,2,2));
     }
     {
-        pick_tup_ref(&(1,2,3));
-        pick_tup_ref(&(3,3,5));
-        pick_tup_ref(&(1,7,2));
-        pick_tup_ref(&(2,2,2));
+        pick_tup_ref(&&(1,2,3));
+        pick_tup_ref(&&(3,3,5));
+        pick_tup_ref(&&(1,7,2));
+        pick_tup_ref(&&(2,2,2));
     }
     {
         pick_tup_or_ref(&(1,2,3));

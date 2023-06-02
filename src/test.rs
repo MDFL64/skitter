@@ -114,6 +114,8 @@ struct TestResult {
     fraction: f64,
 }
 
+const ERROR_CHARS: usize = 80;
+
 fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String> {
     use std::process::Command;
 
@@ -176,11 +178,16 @@ fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String>
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
-                if let Some(code) = cmd_res.status.code() {
-                    return Err(format!("skitter failed ({})", code));
+                let skitter_err = std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
+                let first_line = skitter_err.lines().nth(0).unwrap_or_else(|| "");
+
+                let first_line = if first_line.len() > ERROR_CHARS {
+                    &first_line[..ERROR_CHARS]
                 } else {
-                    return fail();
-                }
+                    first_line
+                };
+
+                return Err(format!("skitter failed ( {} )", first_line));
             } else {
                 cmd_res.stdout
             }

@@ -222,7 +222,7 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_function_ctor(adt_id);
+                                            let kind = ItemKind::new_function_ctor(adt_id, 0);
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }
@@ -241,7 +241,7 @@ impl<'vm> RustCWorker<'vm> {
                                     };
 
                                     // add ctors
-                                    for variant in enum_def.variants {
+                                    for (index,variant) in enum_def.variants.iter().enumerate() {
                                         let local_id = match variant.data {
                                             VariantData::Struct(..) => None,
                                             VariantData::Tuple(_,_,did) => Some(did),
@@ -251,7 +251,7 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_function_ctor(adt_id);
+                                            let kind = ItemKind::new_function_ctor(adt_id,index as u32);
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }
