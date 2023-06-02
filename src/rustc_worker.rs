@@ -221,7 +221,7 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_adt();
+                                            let kind = ItemKind::new_function();
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }
@@ -236,7 +236,7 @@ impl<'vm> RustCWorker<'vm> {
                                     let item_id = items.add_item(vm, kind, item_path, local_id);
                                     adt_items.push(item_id);
 
-                                    // add ctor
+                                    // add ctors
                                     for variant in enum_def.variants {
                                         let local_id = match variant.data {
                                             VariantData::Struct(..) => None,
@@ -247,7 +247,7 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_adt();
+                                            let kind = ItemKind::new_function();
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }
@@ -600,7 +600,7 @@ impl<'vm> RustCWorker<'vm> {
                         if worker_config.save {
                             println!("generating ir for all bodies");
                             for item in ctx.items.all() {
-                                if item.is_meh() {
+                                //if item.is_meh() {
                                     let did = item.did.unwrap();
                                     let has_body = hir.maybe_body_owned_by(did).is_some();
                                     if has_body {
@@ -609,7 +609,7 @@ impl<'vm> RustCWorker<'vm> {
                                         //let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
                                         println!("done");
                                     }
-                                }
+                                //}
                             }
                         }
 
@@ -663,10 +663,9 @@ impl<'vm> RustCWorker<'vm> {
 
             let types = ctx.tcx.typeck(did);
 
-            //panic!("handle body");
+            let is_constant = !item.is_function();
 
-            //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
-            let ir = IRFunctionBuilder::build(ctx, did, body, types);
+            let ir = IRFunctionBuilder::build(ctx, did, body, types, is_constant);
             item.set_ir(ir);
         });
         res.wait();

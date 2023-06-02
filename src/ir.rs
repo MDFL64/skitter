@@ -28,6 +28,9 @@ pub struct StmtId(u32);
 #[derive(Debug, Clone, Copy)]
 pub struct ExprId(u32);
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoopId(u32);
+
 #[derive(Debug, Clone, Copy)]
 pub struct ArmId(u32);
 
@@ -67,8 +70,7 @@ pub struct Pattern<'vm> {
 #[derive(Debug)]
 pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
-    /// Stores an optional scope ID which is used to resolve breaks
-    Dummy(ExprId, Option<u32>),
+    Dummy(ExprId),
 
     /// Used for unsupported expressions, allowing us to serialize all IR
     Error,
@@ -102,13 +104,13 @@ pub enum ExprKind<'vm> {
         then: ExprId,
         else_opt: Option<ExprId>,
     },
-    Loop(BlockId),
+    Loop(BlockId,LoopId),
     Break {
-        loop_id: ExprId,
+        loop_id: LoopId,
         value: Option<ExprId>,
     },
     Continue {
-        loop_id: ExprId,
+        loop_id: LoopId,
     },
     Return(Option<ExprId>),
 
@@ -241,6 +243,7 @@ pub struct IRFunctionBuilder<'vm, 'tcx> {
     ctx: RustCContext<'vm, 'tcx>,
     func_id: LocalDefId,
     types: &'tcx TypeckResults<'tcx>,
+    loops: Vec<(hir::HirId,LoopId)>,
     // parts of our result function
     exprs: Vec<Expr<'vm>>,
     stmts: Vec<Stmt<'vm>>,
@@ -253,84 +256,29 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         func_id: LocalDefId,
         body: &rustc_hir::Body,
         types: &'tcx TypeckResults<'tcx>,
+        is_constant: bool
     ) -> IRFunction<'vm> {
 
-        assert!(body.params.len() == 0);
         assert!(body.generator_kind.is_none());
-
+        
         let mut builder = Self {
             ctx,
             func_id,
             types,
+            loops: vec!(),
             exprs: vec!(),
             stmts: vec!(),
             blocks: vec!()
         };
+        
+        let params: Vec<_> = body.params.iter().map(|param| builder.pattern(param.pat)).collect();
 
         let root_expr = builder.expr(body.value);
 
-        // TODO
-        let is_constant = false;
         let res_ty = builder.exprs[root_expr.0 as usize].ty;
         let sig = FunctionSig {
-            inputs: vec!(),
+            inputs: params.iter().map(|p| p.ty).collect(),
             output: res_ty
-        };
-
-        IRFunction {
-            sig,
-            is_constant,
-            params: vec!(),
-            root_expr,
-            exprs: builder.exprs,
-            stmts: builder.stmts,
-            blocks: builder.blocks,
-            arms: vec!(),
-        }
-
-        /*let root_expr = builder.expr_id(root);
-
-        let arms = thir
-            .arms
-            .iter()
-            .map(|arm| {
-                let pattern = builder.pattern(&arm.pattern);
-                let expr = builder.expr_id(arm.body);
-                let has_guard = arm.guard.is_some();
-                MatchArm { pattern, expr, has_guard }
-            })
-            .collect();
-
-        let exprs = thir.exprs.iter().map(|old| builder.expr(old)).collect();
-        let stmts = thir.stmts.iter().map(|old| builder.stmt(old)).collect();
-        let blocks = thir
-            .blocks
-            .iter()
-            .map(|old| {
-                let stmts = old.stmts.iter().map(|x| builder.stmt_id(*x)).collect();
-                let result = old.expr.map(|x| builder.expr_id(x));
-                Block { stmts, result }
-            })
-            .collect();
-
-        let params = thir
-            .params
-            .iter()
-            .map(|param| builder.pattern(param.pat.as_ref().unwrap()))
-            .collect();
-
-        let (sig, is_constant) = match thir.body_type {
-            thir::BodyTy::Fn(sig) => (FunctionSig::from_rustc(&sig, &builder.ctx), false),
-            thir::BodyTy::Const(ty) => {
-                let output = builder.ctx.type_from_rustc(ty);
-                (
-                    FunctionSig {
-                        inputs: vec![],
-                        output,
-                    },
-                    true,
-                )
-            }
         };
 
         IRFunction {
@@ -338,11 +286,11 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             is_constant,
             params,
             root_expr,
-            exprs,
-            stmts,
-            blocks,
-            arms,
-        }*/
+            exprs: builder.exprs,
+            stmts: builder.stmts,
+            blocks: builder.blocks,
+            arms: vec!(),
+        }
     }
 
     fn expr_id(&self, id: thir::ExprId) -> ExprId {
@@ -431,20 +379,39 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             hir::ExprKind::Cast(arg,_) => {
                 ExprKind::Cast(self.expr(arg))
             }
+            hir::ExprKind::AddrOf(_,_,arg) => {
+                ExprKind::Ref(self.expr(arg))
+            }
             hir::ExprKind::Unary(op,arg) => {
-                let op = match op {
-                    hir::UnOp::Not => UnaryOp::Not,
-                    hir::UnOp::Neg => UnaryOp::Neg,
-                    hir::UnOp::Deref => panic!("deref")
-                };
-                ExprKind::Unary(op, self.expr(arg))
+                if let hir::UnOp::Deref = op {
+                    ExprKind::DeRef(self.expr(arg))
+                } else {
+                    let op = match op {
+                        hir::UnOp::Not => UnaryOp::Not,
+                        hir::UnOp::Neg => UnaryOp::Neg,
+                        _ => panic!() 
+                    };
+
+                    ExprKind::Unary(op, self.expr(arg))
+                }
             }
             hir::ExprKind::Binary(op,lhs,rhs) => {
-                let op = self.bin_op(op.node);
                 let lhs = self.expr(lhs);
                 let rhs = self.expr(rhs);
 
-                ExprKind::Binary(op, lhs, rhs)
+                match op.node {
+                    hir::BinOpKind::And => {
+                        ExprKind::LogicOp(LogicOp::And, lhs, rhs)
+                    },
+                    hir::BinOpKind::Or => {
+                        ExprKind::LogicOp(LogicOp::Or, lhs, rhs)
+                    },
+                    _ => {
+                        let op = self.bin_op(op.node);
+        
+                        ExprKind::Binary(op, lhs, rhs)
+                    }
+                }
             }
             hir::ExprKind::AssignOp(op,lhs,rhs) => {
                 let op = self.bin_op(op.node);
@@ -468,6 +435,25 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
                 ExprKind::Call{ func, args }
             }
+            hir::ExprKind::MethodCall(_,lhs,args,_) => {
+                // We need to pull the actual method def from typeck results.
+                let method_did = self.types.type_dependent_def_id(expr.hir_id).unwrap();
+                let method_subs = self.types.node_substs(expr.hir_id);
+                let method_item = self.ctx.vm.types.def_from_rustc(method_did, method_subs, &self.ctx);
+                let method_ty = self.ctx.vm.ty_func_def(method_item);
+
+                let lhs = self.expr(lhs);
+                let args = args.iter().map(|arg| self.expr(arg));
+
+                let full_args = std::iter::once(lhs).chain(args).collect();
+
+                let func = self.add_expr(Expr{
+                    kind: ExprKind::LiteralVoid,
+                    ty: method_ty
+                });
+
+                ExprKind::Call{ func, args: full_args }
+            }
             hir::ExprKind::If(cond,then,else_opt) => {
                 let cond = self.expr(cond);
                 let then = self.expr(then);
@@ -475,32 +461,67 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 ExprKind::If{ cond, then, else_opt }
             }
             hir::ExprKind::Loop(body,..) => {
+                let loop_id = LoopId(self.loops.len() as u32);
+                self.loops.push((expr.hir_id,loop_id));
+
                 let body = self.block(body);
-                ExprKind::Loop(body)
+                ExprKind::Loop(body,loop_id)
+            }
+            hir::ExprKind::Break(dest,value) => {
+                let target = dest.target_id.unwrap();
+                let (_,loop_id) = self.loops.iter().find(|(h,_)| h == &target).copied().unwrap();
+
+                let value = value.map(|e| self.expr(e));
+
+                ExprKind::Break { loop_id, value }
+            }
+            hir::ExprKind::Continue(dest) => {
+                let target = dest.target_id.unwrap();
+                let (_,loop_id) = self.loops.iter().find(|(h,_)| h == &target).copied().unwrap();
+
+                ExprKind::Continue { loop_id }
+            }
+            hir::ExprKind::Ret(value) => {
+                let value = value.map(|e| self.expr(e));
+
+                ExprKind::Return(value)
+            }
+            hir::ExprKind::Tup(args) => {
+                let args = args.iter().map(|a| self.expr(a)).collect();
+                ExprKind::Tuple(args)
+            }
+            hir::ExprKind::Field(lhs,field) => {
+                let index = self.types.field_index(expr.hir_id);
+                let lhs = self.expr(lhs);
+                ExprKind::Field{ lhs, variant: 0, field: index.as_u32() }
             }
             hir::ExprKind::Path(path) => {
                 let res = self.types.qpath_res(&path,expr.hir_id);
                 
-                if let hir::def::Res::Def(def_kind,did) = res {
-                    //let subs = self.types.node_substs(expr.hir_id);
-                    //let item_with_subs = self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
-
-                    match def_kind {
-                        hir::def::DefKind::Fn => {
-                            // pull information from the type instead
-                            ExprKind::LiteralVoid
-                            //ExprKind::Function(item_with_subs)
+                match res {
+                    hir::def::Res::Def(def_kind,did) => {
+                        match def_kind {
+                            hir::def::DefKind::Fn |
+                            hir::def::DefKind::AssocFn => {
+                                // pull information from the type instead
+                                ExprKind::LiteralVoid
+                                //ExprKind::Function(item_with_subs)
+                            }
+                            _ => panic!("def = {:?}",def_kind)
                         }
-                        _ => panic!("def = {:?}",def_kind)
                     }
-                } else if let hir::def::Res::Local(hir_id) = res {
+                    hir::def::Res::SelfCtor(did) => {
+                        println!("ty = {:?}",ty);
+                        ExprKind::LiteralVoid
+                    }
+                    hir::def::Res::Local(hir_id) => {
 
-                    assert_eq!(hir_id.owner.def_id, self.func_id);
-                    let local_id = hir_id.local_id.as_u32();
-
-                    ExprKind::VarRef(local_id)
-                } else {
-                    panic!("path = {:?}",res);
+                        assert_eq!(hir_id.owner.def_id, self.func_id);
+                        let local_id = hir_id.local_id.as_u32();
+    
+                        ExprKind::VarRef(local_id)
+                    }
+                    _ => panic!("path = {:?}",res)
                 }
             }
             hir::ExprKind::Block(block,_) => {
@@ -522,7 +543,31 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
         let adjust_list = self.types.expr_adjustments(expr);
         for adjust in adjust_list {
-            panic!("todo adjustment");
+            let adjust_ty = self.ctx.type_from_rustc(adjust.target);
+
+            use rustc_middle::ty::adjustment::Adjust;
+            match adjust.kind {
+                Adjust::NeverToAny => {
+                    expr_id = self.add_expr(Expr{
+                        kind: ExprKind::Dummy(expr_id),
+                        ty: adjust_ty
+                    });
+                }
+                Adjust::Deref(overloaded) => {
+                    assert!(overloaded.is_none());
+                    expr_id = self.add_expr(Expr{
+                        kind: ExprKind::DeRef(expr_id),
+                        ty: adjust_ty
+                    });
+                }
+                Adjust::Borrow(_) => {
+                    expr_id = self.add_expr(Expr{
+                        kind: ExprKind::Ref(expr_id),
+                        ty: adjust_ty
+                    });
+                }
+                _ => panic!("todo adjust {:?}",adjust)
+            }
         }
 
         expr_id
@@ -613,7 +658,8 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
     }
 
     fn expr_old(&self, old: &thir::Expr<'tcx>) -> Expr<'vm> {
-        let kind = match old.kind {
+        panic!()
+        /*let kind = match old.kind {
             thir::ExprKind::Use { source }
             | thir::ExprKind::NeverToAny { source }
             | thir::ExprKind::ValueTypeAscription { source, .. } => {
@@ -834,7 +880,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         Expr {
             kind,
             ty: self.ctx.type_from_rustc(old.ty),
-        }
+        }*/
     }
 
     fn pattern_old(&self, old: &thir::Pat<'tcx>) -> Pattern<'vm> {

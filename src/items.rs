@@ -607,7 +607,7 @@ impl<'vm> Item<'vm> {
         result_func
     }
 
-    pub fn is_meh(&self) -> bool {
+    pub fn is_function(&self) -> bool {
         if let ItemKind::Function{..} = &self.kind {
             true
         } else {

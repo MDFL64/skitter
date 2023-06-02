@@ -10,6 +10,7 @@ use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::IntSign;
 use crate::types::IntWidth;
+use crate::types::ItemWithSubs;
 use crate::types::SubList;
 use crate::types::Type;
 use crate::types::TypeContext;
@@ -214,9 +215,9 @@ impl<'vm> VM<'vm> {
         self.types.intern(TypeKind::Bool, self)
     }
 
-    /*pub fn ty_param(&'vm self, n: u32) -> Type<'vm> {
-        self.types.intern(TypeKind::Param(n),self)
-    }*/
+    pub fn ty_func_def(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
+        self.types.intern(TypeKind::FunctionDef(def),self)
+    }
 
     pub fn ty_unknown(&'vm self) -> Type<'vm> {
         self.types.intern(TypeKind::Unknown, self)

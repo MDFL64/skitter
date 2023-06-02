@@ -3,7 +3,7 @@ use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
 use crate::ir::{
     BinaryOp, BindingMode, BlockId, ExprId, ExprKind, IRFunction, LogicOp, Pattern, PatternKind,
-    PointerCast, Stmt, StmtId,
+    PointerCast, Stmt, StmtId, LoopId,
 };
 use crate::items::FunctionAbi;
 use crate::types::{Mutability, SubList, Type, TypeKind};
@@ -18,19 +18,18 @@ pub struct BytecodeCompiler<'vm, 'f> {
     vm: &'vm vm::VM<'vm>,
     stack: CompilerStack,
     locals: Vec<(u32, Slot)>,
-    last_scope: u32,
     loops: Vec<LoopInfo>,
     loop_breaks: Vec<BreakInfo>,
 }
 
 struct LoopInfo {
-    loop_id: u32,
+    loop_id: LoopId,
     result_slot: Slot,
     start_index: usize,
 }
 
 struct BreakInfo {
-    loop_id: u32,
+    loop_id: LoopId,
     break_index: usize,
 }
 
@@ -52,7 +51,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             vm,
             stack: Default::default(),
             locals: Vec::new(),
-            last_scope: 0xFFFFFFFF,
             loops: Vec::new(),
             loop_breaks: Vec::new(),
         };
@@ -135,10 +133,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         //println!("lower {:?} :: {}",expr.kind,expr.ty);
 
         match &expr.kind {
-            ExprKind::Dummy(value, scope_id) => {
-                if let Some(scope_id) = scope_id {
-                    self.last_scope = *scope_id;
-                }
+            ExprKind::Dummy(value) => {
                 self.lower_expr(*value, dst_slot)
             }
             ExprKind::Block(block) => self.lower_block(*block, dst_slot),
@@ -427,15 +422,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::Loop(body) => {
+            ExprKind::Loop(body,loop_id) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
-
-                let loop_id = self.last_scope;
 
                 let loop_index = self.out_bc.len();
 
                 self.loops.push(LoopInfo {
-                    loop_id,
+                    loop_id: *loop_id,
                     result_slot: dst_slot,
                     start_index: loop_index,
                 });
@@ -453,7 +446,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 // fix breaks
                 let break_indices: Vec<_> = self
                     .loop_breaks
-                    .drain_filter(|break_info| break_info.loop_id == loop_id)
+                    .drain_filter(|break_info| break_info.loop_id == *loop_id)
                     .map(|break_info| break_info.break_index)
                     .collect();
 
@@ -464,14 +457,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            /*ExprKind::Break { scope_id, value } => {
-                let loop_id = *scope_id;
+            ExprKind::Break { loop_id, value } => {
 
                 if let Some(value) = value {
                     let loop_slot = self
                         .loops
                         .iter()
-                        .find(|x| x.loop_id == loop_id)
+                        .find(|x| x.loop_id == *loop_id)
                         .unwrap()
                         .result_slot;
                     self.lower_expr(*value, Some(loop_slot));
@@ -479,22 +471,19 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let break_index = self.skip_instr(); //self.out_bc.len();
                 self.loop_breaks.push(BreakInfo {
-                    loop_id,
+                    loop_id: *loop_id,
                     break_index,
                 });
-
-                //self.out_bc.push(Instr::Bad);
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Continue { scope_id } => {
-                let loop_id = *scope_id;
+            ExprKind::Continue { loop_id } => {
 
                 let loop_start = self
                     .loops
                     .iter()
-                    .find(|x| x.loop_id == loop_id)
+                    .find(|x| x.loop_id == *loop_id)
                     .unwrap()
                     .start_index;
 
@@ -503,7 +492,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
-            }*/
+            }
             ExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.lower_expr(*value, Some(Slot::new(0)));
@@ -708,7 +697,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         let expr = self.in_func.expr(id);
 
         match &expr.kind {
-            ExprKind::Dummy(value, _) => self.expr_to_place(*value),
+            ExprKind::Dummy(value) => self.expr_to_place(*value),
             ExprKind::DeRef(arg) => {
                 let addr_slot = self.lower_expr(*arg, None);
                 Place::Ptr(addr_slot, 0)
