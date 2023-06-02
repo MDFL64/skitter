@@ -291,11 +291,13 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             ItemKind::Function {
                 virtual_info,
                 extern_name,
+                ctor_for,
                 ..
             } => {
                 write_ctx.write_byte('f' as u8);
                 virtual_info.persist_write(write_ctx);
                 extern_name.persist_write(write_ctx);
+                ctor_for.map(|x| x.0).persist_write(write_ctx);
                 let ir = self.raw_ir();
                 println!("has ir? {}",ir.is_some());
             }
@@ -332,11 +334,13 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
                 let extern_name = Option::<(FunctionAbi,String)>::persist_read(read_ctx);
+                let ctor_for = Option::<u32>::persist_read(read_ctx).map(|x| ItemId(x));
                 let kind = ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
                     virtual_info,
                     extern_name,
+                    ctor_for
                 };
                 (kind,None)
             }
@@ -407,6 +411,7 @@ pub enum ItemKind<'vm> {
         mono_instances: Mutex<HashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
         extern_name: Option<(FunctionAbi, String)>,
+        ctor_for: Option<ItemId>
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -535,6 +540,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: None,
             extern_name: None,
+            ctor_for: None
         }
     }
 
@@ -544,6 +550,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: Some(VirtualInfo { trait_id, ident }),
             extern_name: None,
+            ctor_for: None
         }
     }
 
@@ -553,6 +560,17 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: None,
             extern_name: Some((abi, name)),
+            ctor_for: None
+        }
+    }
+
+    pub fn new_function_ctor(adt_id: ItemId) -> Self {
+        Self::Function {
+            ir: Default::default(),
+            mono_instances: Default::default(),
+            virtual_info: None,
+            extern_name: None,
+            ctor_for: Some(adt_id)
         }
     }
 

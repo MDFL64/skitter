@@ -200,7 +200,7 @@ impl<'vm> RustCWorker<'vm> {
                                 }
                                 HirItemKind::Struct(variant,_)
                                 | HirItemKind::Union(variant,_) => {
-                                    {
+                                    let adt_id = {
                                         let local_id = item.owner_id.def_id;
                                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
@@ -208,7 +208,8 @@ impl<'vm> RustCWorker<'vm> {
     
                                         let item_id = items.add_item(vm, kind, item_path, local_id);
                                         adt_items.push(item_id);
-                                    }
+                                        item_id
+                                    };
 
                                     // add ctor
                                     {
@@ -221,20 +222,23 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_function();
+                                            let kind = ItemKind::new_function_ctor(adt_id);
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }
                                     }
                                 }
                                 HirItemKind::Enum(enum_def,_) => {
-                                    let local_id = item.owner_id.def_id;
-                                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-
-                                    let kind = ItemKind::new_adt();
-
-                                    let item_id = items.add_item(vm, kind, item_path, local_id);
-                                    adt_items.push(item_id);
+                                    let adt_id = {
+                                        let local_id = item.owner_id.def_id;
+                                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+    
+                                        let kind = ItemKind::new_adt();
+    
+                                        let item_id = items.add_item(vm, kind, item_path, local_id);
+                                        adt_items.push(item_id);
+                                        item_id
+                                    };
 
                                     // add ctors
                                     for variant in enum_def.variants {
@@ -247,7 +251,7 @@ impl<'vm> RustCWorker<'vm> {
                                         if let Some(local_id) = local_id {
                                             let item_path = path_from_rustc(&hir.def_path(local_id), vm);
     
-                                            let kind = ItemKind::new_function();
+                                            let kind = ItemKind::new_function_ctor(adt_id);
         
                                             items.add_item(vm, kind, item_path, local_id);
                                         }

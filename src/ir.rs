@@ -490,6 +490,39 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 let args = args.iter().map(|a| self.expr(a)).collect();
                 ExprKind::Tuple(args)
             }
+            hir::ExprKind::Struct(path,fields,rest) => {
+                assert!(rest.is_none());
+                let res = self.types.qpath_res(&path,expr.hir_id);
+
+                match res {
+                    hir::def::Res::Def(hir::def::DefKind::Struct,_) => {
+                        // structs are okay!
+                    }
+                    _ => panic!("! {:?}",res)
+                }
+
+                let variant = 0;
+
+                let fields = fields.iter().map(|field| {
+                    let id = self.types.field_index(field.hir_id).as_u32();
+                    let expr = self.expr(field.expr);
+                    (id,expr)
+                }).collect();
+
+                ExprKind::Adt{
+                    variant,
+                    fields
+                }
+            }
+            hir::ExprKind::Array(args) => {
+                let args = args.iter().map(|a| self.expr(a)).collect();
+                ExprKind::Array(args)
+            }
+            hir::ExprKind::Index(lhs,index) => {
+                let lhs = self.expr(lhs);
+                let index = self.expr(index);
+                ExprKind::Index{ lhs, index }
+            }
             hir::ExprKind::Field(lhs,field) => {
                 let index = self.types.field_index(expr.hir_id);
                 let lhs = self.expr(lhs);
@@ -503,15 +536,21 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                         match def_kind {
                             hir::def::DefKind::Fn |
                             hir::def::DefKind::AssocFn => {
-                                // pull information from the type instead
+                                // return void expression, any information needed
+                                // can be pulled from the type
                                 ExprKind::LiteralVoid
-                                //ExprKind::Function(item_with_subs)
+                            }
+                            hir::def::DefKind::Const => {
+                                let subs = self.types.node_substs(expr.hir_id);
+                                let const_item = self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
+                                ExprKind::NamedConst(const_item)
                             }
                             _ => panic!("def = {:?}",def_kind)
                         }
                     }
-                    hir::def::Res::SelfCtor(did) => {
-                        println!("ty = {:?}",ty);
+                    hir::def::Res::SelfCtor(_) => {
+                        // return void expression, any information needed
+                        // can be pulled from the type
                         ExprKind::LiteralVoid
                     }
                     hir::def::Res::Local(hir_id) => {
