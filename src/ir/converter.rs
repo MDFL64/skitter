@@ -75,8 +75,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
     }
 
     fn expr(&mut self, expr: &hir::Expr) -> ExprId {
-        let ty = self.types.expr_ty(expr);
-        let ty = self.ctx.type_from_rustc(ty);
+        let rs_ty = self.types.expr_ty(expr);
+        let ty = self.ctx.type_from_rustc(rs_ty);
 
         let expr_kind = match expr.kind {
             hir::ExprKind::Lit(lit) => {
@@ -265,16 +265,21 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 assert!(rest.is_none());
                 let res = self.types.qpath_res(&path,expr.hir_id);
 
-                match res {
-                    hir::def::Res::Def(hir::def::DefKind::Struct,_) |
+                let variant = match res {
+                    // never refer to a variant
                     hir::def::Res::Def(hir::def::DefKind::TyAlias,_) |
-                    hir::def::Res::SelfTyAlias{..} => {
-                        // structs are okay!
+                    hir::def::Res::SelfTyAlias{..} => 0,
+                    
+                    hir::def::Res::Def(_,def_id) => {
+                        let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
+                            panic!("attempt to convert struct without adt");
+                        };
+                        adt_def.variant_index_with_id(def_id).as_u32()
                     }
-                    _ => panic!("struct? {:?}",res)
-                }
-
-                let variant = 0;
+                    _ => {
+                        panic!("struct from {:?}",res)
+                    }
+                };
 
                 let fields = fields.iter().map(|field| {
                     let id = self.types.field_index(field.hir_id).as_u32();

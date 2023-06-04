@@ -3,7 +3,7 @@ mod _builtin;
 enum Value{
     Int(i32),
     Float(f32),
-    Pair(i32,i32),
+    Pair{a: i32, b: i32},
     None
 }
 
@@ -12,7 +12,7 @@ fn print_value(v: Value) {
         _builtin::print_int(i as _);
     } else if let Value::Float(f) = v {
         _builtin::print_float(f as _);
-    } else if let Value::Pair(a,b) = v {
+    } else if let Value::Pair{a,b} = v {
         _builtin::print_int(a as _);
         _builtin::print_int(b as _);
     } else if let Value::None = v {
@@ -25,7 +25,7 @@ fn print_value_ref(v: &Value) {
         _builtin::print_int(i as _);
     } else if let &Value::Float(f) = v {
         _builtin::print_float(f as _);
-    } else if let &Value::Pair(a,b) = v {
+    } else if let &Value::Pair{a,b} = v {
         _builtin::print_int(a as _);
         _builtin::print_int(b as _);
     } else if let &Value::None = v {
@@ -34,7 +34,7 @@ fn print_value_ref(v: &Value) {
 }
 
 fn get_n(v: Value) -> i32 {
-    if let Value::Int(x) | Value::Pair(x,_)  = v {
+    if let Value::Int(x) | Value::Pair{a: x,..}  = v {
         x
     } else if let Value::Float(f) = v {
         (f * 100.0) as i32
@@ -49,7 +49,7 @@ fn main() {
     {
         let x = Value::Int(5);
         let y = Value::Float(3.5);
-        let z = Value::Pair(6,2);
+        let z = Value::Pair{a: 6,b: 2};
         let q = Value::None;
     
         print_value(x);
@@ -61,7 +61,7 @@ fn main() {
     {
         let x = Value::Int(5);
         let y = Value::Float(3.5);
-        let z = Value::Pair(6,2);
+        let z = Value::Pair{a: 6,b: 2};
         let q = Value::None;
 
         print_value_ref(&x);
@@ -73,7 +73,7 @@ fn main() {
     {
         let x = Value::Int(5);
         let y = Value::Float(3.5);
-        let z = Value::Pair(6,2);
+        let z = Value::Pair{a: 6,b: 2};
         let q = Value::None;
 
         _builtin::print_int(get_n(x) as _);
