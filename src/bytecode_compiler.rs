@@ -797,6 +797,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             | ExprKind::Tuple { .. }
             | ExprKind::Binary { .. }
             | ExprKind::Ref { .. }
+            | ExprKind::LiteralVoid
             | ExprKind::Array(_)
             | ExprKind::Adt { .. }
             | ExprKind::LiteralValue { .. } => {
@@ -885,20 +886,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
                     (BindingMode::Ref, Place::Local(source_slot)) => {
                         // ref to local
-                        let ty = self.apply_subs(pat.ty);
-                        assert!(ty.layout().is_sized()); // todo???
-                                                         // NOTE: mutability here may not be correct!
-                        let ref_ty = ty.ref_to(Mutability::Mut);
+                        let ref_ty = self.apply_subs(pat.ty);
                         let var_slot = self.find_or_alloc_local(*local_id, ref_ty);
 
                         self.out_bc.push(Instr::SlotAddr(var_slot, source_slot));
                     }
                     (BindingMode::Ref, Place::Ptr(ref_slot, ref_offset)) => {
                         // offset pointer
-                        let ty = self.apply_subs(pat.ty);
-                        assert!(ty.layout().is_sized()); // todo???
-                                                         // NOTE: mutability here may not be correct!
-                        let ref_ty = ty.ref_to(Mutability::Mut);
+                        let ref_ty = self.apply_subs(pat.ty);
                         let var_slot = self.find_or_alloc_local(*local_id, ref_ty);
 
                         self.out_bc
@@ -1057,17 +1052,30 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 result
             }
             PatternKind::DeRef { sub_pattern } => {
-                if let Place::Local(source_slot) = source {
-                    let sub_pattern = self.in_func.pattern(*sub_pattern);
+                let sub_pattern = self.in_func.pattern(*sub_pattern);
+                match source {
                     // must_copy is probably irrelevant at this stage
-                    self.match_pattern_internal(
-                        sub_pattern,
-                        Place::Ptr(source_slot, 0),
-                        true,
-                        match_result_slot,
-                    )
-                } else {
-                    panic!("deref pattern in ref context?");
+                    Place::Local(source_slot) => {
+                        self.match_pattern_internal(
+                            sub_pattern,
+                            Place::Ptr(source_slot, 0),
+                            true,
+                            match_result_slot,
+                        )
+                    }
+                    Place::Ptr(ptr_slot,ptr_offset) => {
+                        let new_slot = self.stack.alloc(pat.ty);
+                        if let Some(copy) = bytecode_select::copy_from_ptr(new_slot, ptr_slot, pat.ty, ptr_offset) {
+                            self.out_bc.push(copy);
+                        }
+
+                        self.match_pattern_internal(
+                            sub_pattern,
+                            Place::Ptr(new_slot, 0),
+                            true,
+                            match_result_slot,
+                        )
+                    }
                 }
             }
             PatternKind::LiteralValue(n) => {

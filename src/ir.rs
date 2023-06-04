@@ -396,9 +396,22 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                         ExprKind::LogicOp(LogicOp::Or, lhs, rhs)
                     },
                     _ => {
-                        let op = self.bin_op(op.node);
-        
-                        ExprKind::Binary(op, lhs, rhs)
+                        if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                            let subs = self.types.node_substs(expr.hir_id);
+                            let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
+                            let func_ty = self.ctx.vm.ty_func_def(func_item);
+
+                            let func = self.add_expr(Expr{
+                                kind: ExprKind::LiteralVoid,
+                                ty: func_ty
+                            });
+
+                            ExprKind::Call{ func, args: vec!(lhs,rhs) }
+                        } else {
+                            let op = self.bin_op(op.node);
+
+                            ExprKind::Binary(op, lhs, rhs)
+                        }
                     }
                 }
             }
@@ -416,13 +429,17 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 ExprKind::Assign(lhs, rhs)
             }
             hir::ExprKind::Call(func,args) => {
-                let func = self.expr(func);
-
-                let args = args.iter().map(|arg| {
-                    self.expr(arg)
-                }).collect();
-
-                ExprKind::Call{ func, args }
+                if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                    panic!("{:?}",func_did)
+                } else {
+                    let func = self.expr(func);
+    
+                    let args = args.iter().map(|arg| {
+                        self.expr(arg)
+                    }).collect();
+    
+                    ExprKind::Call{ func, args }
+                }
             }
             hir::ExprKind::MethodCall(_,lhs,args,_) => {
                 // We need to pull the actual method def from typeck results.
@@ -725,7 +742,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 let fields = children.iter().enumerate().map(|(i,child)| {
 
                     let field = if let Some(gap_pos) = gap_pos {
-                        if i > gap_pos {
+                        if i >= gap_pos {
                             let back_offset = children.len() - i;
                             (tup_size - back_offset) as u32
                         } else {
@@ -742,6 +759,10 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 }).collect();
 
                 PatternKind::Struct { fields }
+            }
+            hir::PatKind::Ref(sub_pattern,_) => {
+                let sub_pattern = self.pattern(sub_pattern);
+                PatternKind::DeRef{ sub_pattern }
             }
             hir::PatKind::Or(options) => {
                 let options = options.iter().map(|p| self.pattern(p)).collect();
