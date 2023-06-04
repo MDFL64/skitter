@@ -669,16 +669,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let mut jump_gaps = Vec::new();
 
-                for arm_id in arms {
-                    panic!("todo fix match");
-                    /*let arm = self.in_func.arm(*arm_id);
-                    self.match_pattern(&arm.pattern, arg_slot, Some(match_result_slot));
+                for arm in arms {
+                    assert!(!arm.has_guard); // todo
+                    self.match_pattern(arm.pattern, arg_slot, Some(match_result_slot));
                     let check_end_index = self.skip_instr();
-                    self.lower_expr(arm.expr, Some(dst_slot));
+                    self.lower_expr(arm.body, Some(dst_slot));
                     jump_gaps.push(self.skip_instr());
 
                     self.out_bc[check_end_index] =
-                        Instr::JumpF(-self.get_jump_offset(check_end_index), match_result_slot);*/
+                        Instr::JumpF(-self.get_jump_offset(check_end_index), match_result_slot);
                 }
 
                 for gap_index in jump_gaps {

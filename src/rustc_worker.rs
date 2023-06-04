@@ -13,7 +13,7 @@ use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    ir::IRFunctionBuilder,
+    ir::{IRFunctionBuilder, converter::IRFunctionConverter},
     items::{
         path_from_rustc, AdtInfo, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
         FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl,
@@ -669,7 +669,7 @@ impl<'vm> RustCWorker<'vm> {
 
             let is_constant = !item.is_function();
 
-            let ir = IRFunctionBuilder::build(ctx, did, body, types, is_constant);
+            let ir = IRFunctionConverter::run(ctx, did, body, types, is_constant);
             item.set_ir(ir);
         });
         res.wait();

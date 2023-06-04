@@ -4,7 +4,7 @@ use crate::{
     abi::POINTER_SIZE,
     bytecode_compiler::CompilerStack,
     bytecode_select,
-    ir::{glue_ir_for_fn_trait, BinaryOp},
+    ir::{BinaryOp, glue_builder::glue_for_fn_trait},
     items::{AssocValue, CrateId, GenericCounts, TraitImpl},
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
@@ -103,7 +103,7 @@ impl BuiltinTrait {
                     match self {
                         BuiltinTrait::FnOnce => {
                             let call_ir =
-                                glue_ir_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
+                                glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
                             res.assoc_values.insert(
                                 "call_once".to_owned(),
                                 AssocValue::RawFunctionIR(Arc::new(call_ir)),
@@ -114,7 +114,7 @@ impl BuiltinTrait {
                         BuiltinTrait::FnMut => {
                             let ref_ty = func_ty.ref_to(Mutability::Mut);
                             let call_ir =
-                                glue_ir_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                                glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
                             res.assoc_values.insert(
                                 "call_mut".to_owned(),
                                 AssocValue::RawFunctionIR(Arc::new(call_ir)),
@@ -123,7 +123,7 @@ impl BuiltinTrait {
                         BuiltinTrait::Fn => {
                             let ref_ty = func_ty.ref_to(Mutability::Const);
                             let call_ir =
-                                glue_ir_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                                glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
                             res.assoc_values.insert(
                                 "call".to_owned(),
                                 AssocValue::RawFunctionIR(Arc::new(call_ir)),

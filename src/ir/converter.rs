@@ -1,257 +1,29 @@
-/// This module contains a re-implementation of the THIR, compatible with our own interned types and suitable for serialization.
-use std::str::FromStr;
-
-use rustc_hir::def_id::LocalDefId;
-use rustc_middle::thir;
 use rustc_hir as hir;
+use rustc_hir::def_id::LocalDefId;
 use rustc_middle::ty::TypeckResults;
 
-use crate::items::FunctionSig;
-use crate::rustc_worker::RustCContext;
-use crate::types::{ItemWithSubs, Type, TypeKind, FloatWidth};
+use std::str::FromStr;
 
-pub struct IRFunction<'vm> {
-    pub sig: FunctionSig<'vm>,
-    pub is_constant: bool,
-    pub root_expr: ExprId,
-    pub params: Vec<PatternId>,
-    exprs: Vec<Expr<'vm>>,
-    patterns: Vec<Pattern<'vm>>,
+use crate::{rustc_worker::RustCContext, types::{TypeKind, FloatWidth}};
 
-    //stmts: Vec<Stmt<'vm>>,
-    //blocks: Vec<Block>,
-    //arms: Vec<MatchArm<'vm>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ExprId(u32);
-#[derive(Debug, Clone, Copy)]
-pub struct PatternId(u32);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LoopId(u32);
-
-#[derive(Debug, Clone, Copy)]
-pub struct ArmId(u32);
-
-pub struct Expr<'vm> {
-    pub kind: ExprKind<'vm>,
-    pub ty: Type<'vm>,
-}
-
-#[derive(Debug)]
-pub enum Stmt {
-    Expr(ExprId),
-    Let {
-        pattern: PatternId,
-        init: Option<ExprId>,
-        else_block: Option<Block>,
-    },
-}
-
-#[derive(Debug)]
-pub struct Block {
-    pub stmts: Vec<Stmt>,
-    pub result: Option<ExprId>,
-}
-
-#[derive(Debug)]
-pub struct MatchArm<'vm> {
-    pub pattern: Pattern<'vm>,
-    pub expr: ExprId,
-    pub has_guard: bool
-}
-
-#[derive(Debug)]
-pub struct Pattern<'vm> {
-    pub kind: PatternKind,
-    pub ty: Type<'vm>,
-}
-
-#[derive(Debug)]
-pub enum ExprKind<'vm> {
-    /// Used to replace some intermediate nodes which aren't super useful to us.
-    Dummy(ExprId),
-
-    /// Used for unsupported expressions, allowing us to serialize all IR
-    Error,
-
-    /// Primitive casts
-    Cast(ExprId),
-
-    /// Pointer casts
-    PointerCast(ExprId, PointerCast),
-
-    Block(Block),
-
-    /// Variable reference
-    VarRef(u32),
-
-    /// Small literals: integer, float, char, or bool types
-    LiteralValue(i128),
-    /// Zero-sized type literals
-    LiteralVoid,
-    /// Literal used for strings. Can't lower to a pointer at this stage because it would break serialization.
-    LiteralBytes(&'vm [u8]),
-
-    Unary(UnaryOp, ExprId),
-    Binary(BinaryOp, ExprId, ExprId),
-    AssignOp(BinaryOp, ExprId, ExprId),
-    Assign(ExprId, ExprId),
-    LogicOp(LogicOp, ExprId, ExprId),
-
-    If {
-        cond: ExprId,
-        then: ExprId,
-        else_opt: Option<ExprId>,
-    },
-    Loop(Block,LoopId),
-    Break {
-        loop_id: LoopId,
-        value: Option<ExprId>,
-    },
-    Continue {
-        loop_id: LoopId,
-    },
-    Return(Option<ExprId>),
-
-    Call {
-        func: ExprId,
-        args: Vec<ExprId>,
-    },
-    Tuple(Vec<ExprId>),
-    Adt {
-        variant: u32,
-        fields: Vec<(u32, ExprId)>,
-    },
-    Array(Vec<ExprId>),
-
-    NamedConst(ItemWithSubs<'vm>),
-    //Function(ItemWithSubs<'vm>),
-
-    Ref(ExprId),
-    DeRef(ExprId),
-
-    Field {
-        lhs: ExprId,
-        variant: u32,
-        field: u32,
-    },
-    Index {
-        lhs: ExprId,
-        index: ExprId,
-    },
-
-    Let {
-        pattern: PatternId,
-        init: ExprId,
-    },
-    Match {
-        arg: ExprId,
-        arms: Vec<ArmId>,
-    },
-}
-
-#[derive(Debug)]
-pub enum PatternKind {
-    LocalBinding {
-        local_id: u32,
-        mode: BindingMode,
-        sub_pattern: Option<PatternId>,
-    },
-    Struct {
-        fields: Vec<FieldPattern>,
-    },
-    Enum {
-        fields: Vec<FieldPattern>,
-        variant_index: u32,
-    },
-    Or {
-        options: Vec<PatternId>,
-    },
-    DeRef {
-        sub_pattern: PatternId,
-    },
-    /// Small literals: integer, float, char, or bool types (same as the ExprKind)
-    LiteralValue(i128),
-
-    Hole,
-
-    /// Error, for unsupported patterns
-    Error
-}
-
-#[derive(Debug)]
-pub enum BindingMode {
-    Value,
-    Ref,
-}
-
-#[derive(Debug)]
-pub struct FieldPattern {
-    pub field: u32,
-    pub pattern: PatternId,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum UnaryOp {
-    Neg,
-    Not,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-
-    BitAnd,
-    BitOr,
-    BitXor,
-    ShiftR,
-    ShiftL,
-
-    Eq,
-    NotEq,
-    Lt,
-    Gt,
-    LtEq,
-    GtEq,
-}
-
-#[derive(Debug)]
-pub enum LogicOp {
-    And,
-    Or,
-}
-
-#[derive(Debug)]
-pub enum PointerCast {
-    ReifyFnPointer,
-    UnsafeFnPointer,
-    ClosureFnPointer,
-    MutToConstPointer,
-    ArrayToPointer,
-    UnSize,
-}
+use super::{
+    IRFunctionBuilder, LoopId, IRFunction, BinaryOp, ExprId, UnaryOp, LogicOp, Expr, Block, Stmt, PatternId, FieldPattern,
+    ExprKind, PointerCast, BindingMode, PatternKind, Pattern, MatchArm
+};
 
 /// Converts rust IR to skitter IR.
 /// 
 /// Now uses TypeckResults instead of THIR because THIR can get randomly stolen when querying other THIR.
-pub struct IRFunctionBuilder<'vm, 'tcx> {
+pub struct IRFunctionConverter<'vm, 'tcx> {
     ctx: RustCContext<'vm, 'tcx>,
     func_id: LocalDefId,
     types: &'tcx TypeckResults<'tcx>,
     loops: Vec<(hir::HirId,LoopId)>,
-    // parts of our result function
-    exprs: Vec<Expr<'vm>>,
-    patterns: Vec<Pattern<'vm>>,
+    builder: IRFunctionBuilder<'vm>
 }
 
-impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
-    pub fn build(
+impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
+    pub fn run(
         ctx: RustCContext<'vm, 'tcx>,
         func_id: LocalDefId,
         body: &rustc_hir::Body,
@@ -261,37 +33,19 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
         assert!(body.generator_kind.is_none());
         
-        let mut builder = Self {
+        let mut converter = Self {
             ctx,
             func_id,
             types,
             loops: vec!(),
-            exprs: vec!(),
-            patterns: vec!(),
+            builder: Default::default()
         };
         
-        let params: Vec<_> = body.params.iter().map(|param| builder.pattern(param.pat)).collect();
+        let params: Vec<_> = body.params.iter().map(|param| converter.pattern(param.pat)).collect();
 
-        let root_expr = builder.expr(body.value);
+        let root_expr = converter.expr(body.value);
 
-        let output = builder.exprs[root_expr.0 as usize].ty;
-        let inputs = params.iter().map(|p| {
-            builder.patterns[p.0 as usize].ty
-        }).collect();
-
-        let sig = FunctionSig {
-            inputs,
-            output
-        };
-
-        IRFunction {
-            sig,
-            is_constant,
-            params,
-            root_expr,
-            exprs: builder.exprs,
-            patterns: builder.patterns
-        }
+        converter.builder.finish(root_expr, is_constant, params)
     }
 
     /// Convert binary op from rust IR. Does not handle logical ops.
@@ -401,7 +155,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                             let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                             let func_ty = self.ctx.vm.ty_func_def(func_item);
 
-                            let func = self.add_expr(Expr{
+                            let func = self.builder.add_expr(Expr{
                                 kind: ExprKind::LiteralVoid,
                                 ty: func_ty
                             });
@@ -453,7 +207,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
                 let full_args = std::iter::once(lhs).chain(args).collect();
 
-                let func = self.add_expr(Expr{
+                let func = self.builder.add_expr(Expr{
                     kind: ExprKind::LiteralVoid,
                     ty: method_ty
                 });
@@ -466,8 +220,19 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                 let else_opt = else_opt.map(|e| self.expr(e));
                 ExprKind::If{ cond, then, else_opt }
             }
+            hir::ExprKind::Match(arg,arms,_) => {
+                let arg = self.expr(arg);
+                let arms = arms.iter().map(|arm| {
+                    MatchArm{
+                        pattern: self.pattern(arm.pat),
+                        body: self.expr(arm.body),
+                        has_guard: arm.guard.is_some(),
+                    }
+                }).collect();
+                ExprKind::Match{ arg, arms }
+            }
             hir::ExprKind::Loop(body,..) => {
-                let loop_id = LoopId(self.loops.len() as u32);
+                let loop_id = LoopId::new(self.loops.len() as u32);
                 self.loops.push((expr.hir_id,loop_id));
 
                 let body = self.block(body);
@@ -591,7 +356,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             _ => panic!("todo expr kind {:?}",expr.kind)
         };
 
-        let mut expr_id = self.add_expr(Expr{
+        let mut expr_id = self.builder.add_expr(Expr{
             kind: expr_kind,
             ty
         });
@@ -603,20 +368,20 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             use rustc_middle::ty::adjustment::Adjust;
             match adjust.kind {
                 Adjust::NeverToAny => {
-                    expr_id = self.add_expr(Expr{
+                    expr_id = self.builder.add_expr(Expr{
                         kind: ExprKind::Dummy(expr_id),
                         ty: adjust_ty
                     });
                 }
                 Adjust::Deref(overloaded) => {
                     assert!(overloaded.is_none());
-                    expr_id = self.add_expr(Expr{
+                    expr_id = self.builder.add_expr(Expr{
                         kind: ExprKind::DeRef(expr_id),
                         ty: adjust_ty
                     });
                 }
                 Adjust::Borrow(_) => {
-                    expr_id = self.add_expr(Expr{
+                    expr_id = self.builder.add_expr(Expr{
                         kind: ExprKind::Ref(expr_id),
                         ty: adjust_ty
                     });
@@ -632,7 +397,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
                         PC::Unsize => PointerCast::UnSize,
                     };
 
-                    expr_id = self.add_expr(Expr{
+                    expr_id = self.builder.add_expr(Expr{
                         kind: ExprKind::PointerCast(expr_id,ptr_cast),
                         ty: adjust_ty
                     });
@@ -642,18 +407,6 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         }
 
         expr_id
-    }
-
-    fn add_expr(&mut self, e: Expr<'vm>) -> ExprId {
-        let expr_id = ExprId(self.exprs.len() as u32);
-        self.exprs.push(e);
-        expr_id
-    }
-
-    fn add_pattern(&mut self, p: Pattern<'vm>) -> PatternId {
-        let pat_id = PatternId(self.patterns.len() as u32);
-        self.patterns.push(p);
-        pat_id
     }
 
     fn block(&mut self, block: &hir::Block) -> Block {
@@ -774,7 +527,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
             _ => panic!("pat {:?}",pat.kind)
         };
 
-        let mut res_pat = self.add_pattern(Pattern{
+        let mut res_pat = self.builder.add_pattern(Pattern{
             kind: pattern_kind,
             ty
         });
@@ -783,7 +536,7 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
         if let Some(adjust) = all_adjust.get(pat.hir_id) {
             for adjust_ty in adjust.iter().rev() {
                 let adjust_ty = self.ctx.type_from_rustc(*adjust_ty);
-                res_pat = self.add_pattern(Pattern{
+                res_pat = self.builder.add_pattern(Pattern{
                     kind: PatternKind::DeRef{
                         sub_pattern: res_pat
                     },
@@ -794,182 +547,4 @@ impl<'vm, 'tcx, 'a> IRFunctionBuilder<'vm, 'tcx> {
 
         res_pat
     }
-
-    fn pattern_old(&self, old: &thir::Pat<'tcx>) -> Pattern<'vm> {
-        panic!();
-        /*let ty = self.ctx.type_from_rustc(old.ty);
-
-        let kind = match old.kind {
-            thir::PatKind::AscribeUserType { ref subpattern, .. } => {
-                return self.pattern_old(subpattern);
-            }
-            thir::PatKind::Binding {
-                ref subpattern,
-                ref var,
-                mode,
-                ..
-            } => {
-                let mode = match mode {
-                    rustc_middle::thir::BindingMode::ByValue => BindingMode::Value,
-                    rustc_middle::thir::BindingMode::ByRef(_) => BindingMode::Ref,
-                };
-                let hir_id = var.0;
-                // should hold true, even for closures? when are we ever going
-                // to bind a variable that doesn't belong to our current function?
-                assert_eq!(hir_id.owner.def_id, self.func_id);
-
-                let local_id = hir_id.local_id.as_u32();
-                PatternKind::LocalBinding {
-                    local_id,
-                    mode,
-                    sub_pattern: subpattern.as_ref().map(|pat| Box::new(self.pattern_old(&pat))),
-                }
-            }
-            thir::PatKind::Leaf { ref subpatterns } => {
-                let fields: Vec<_> = subpatterns
-                    .iter()
-                    .map(|child| FieldPattern {
-                        field: child.field.as_u32(),
-                        pattern: self.pattern_old(&child.pattern),
-                    })
-                    .collect();
-                PatternKind::Struct { fields }
-            }
-            thir::PatKind::Variant {
-                ref subpatterns,
-                variant_index,
-                ..
-            } => {
-                let fields: Vec<_> = subpatterns
-                    .iter()
-                    .map(|child| FieldPattern {
-                        field: child.field.as_u32(),
-                        pattern: self.pattern_old(&child.pattern),
-                    })
-                    .collect();
-                PatternKind::Enum {
-                    fields,
-                    variant_index: variant_index.as_u32(),
-                }
-            }
-            thir::PatKind::Or { ref pats } => {
-                let options = pats.iter().map(|child| self.pattern_old(child)).collect();
-                PatternKind::Or { options }
-            }
-            thir::PatKind::Deref { ref subpattern } => PatternKind::DeRef {
-                sub_pattern: Box::new(self.pattern_old(subpattern)),
-            },
-            thir::PatKind::Constant { ref value } => match ty.kind() {
-                TypeKind::Int(..) | TypeKind::Char | TypeKind::Bool => {
-                    let size = rustc_abi::Size::from_bytes(ty.layout().assert_size());
-                    let bits = value.try_to_bits(size).expect("failed to get const bits");
-                    PatternKind::LiteralValue(bits as i128)
-                }
-                _ => panic!("const kind"),
-            },
-            thir::PatKind::Slice{..} => PatternKind::Error,
-            thir::PatKind::Range{..} => PatternKind::Error,
-            thir::PatKind::Wild => PatternKind::Hole,
-            _ => panic!("pattern kind {:?}", old.kind),
-        };
-
-        Pattern {
-            kind,
-            ty: self.ctx.type_from_rustc(old.ty),
-        }*/
-    }
-}
-
-impl<'vm> IRFunction<'vm> {
-    pub fn expr(&self, id: ExprId) -> &Expr<'vm> {
-        &self.exprs[id.0 as usize]
-    }
-
-    pub fn pattern(&self, id: PatternId) -> &Pattern<'vm> {
-        &self.patterns[id.0 as usize]
-    }
-}
-
-// used to generate glue code for Fn* traits on regular functions
-pub fn glue_ir_for_fn_trait<'vm>(
-    func_ty: Type<'vm>,
-    self_ty: Type<'vm>,
-    args_ty: Type<'vm>,
-    res_ty: Type<'vm>,
-) -> IRFunction<'vm> {
-    panic!("fixme");
-    /*assert!(func_ty.is_concrete());
-    assert!(args_ty.is_concrete());
-
-    let sig = FunctionSig {
-        inputs: vec![self_ty, args_ty],
-        output: res_ty,
-    };
-
-    let params = sig
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(i, ty)| Pattern {
-            kind: PatternKind::LocalBinding {
-                local_id: i as u32,
-                mode: BindingMode::Value,
-                sub_pattern: None,
-            },
-            ty: *ty,
-        })
-        .collect();
-
-    let TypeKind::Tuple(inner_arg_tys) = args_ty.kind() else {
-        panic!("fn trait args must be a tuple");
-    };
-
-    // build the actual ir
-    let mut exprs = Vec::new();
-
-    let func_expr = ExprId(0);
-    exprs.push(Expr {
-        kind: ExprKind::LiteralVoid,
-        ty: func_ty,
-    });
-
-    let tuple_expr = ExprId(1);
-    exprs.push(Expr {
-        kind: ExprKind::VarRef(1),
-        ty: args_ty,
-    });
-
-    let mut call_args = Vec::new();
-    for (i, arg_ty) in inner_arg_tys.iter().enumerate() {
-        call_args.push(ExprId(2 + i as u32));
-        exprs.push(Expr {
-            kind: ExprKind::Field {
-                lhs: tuple_expr,
-                variant: 0,
-                field: i as u32,
-            },
-            ty: *arg_ty,
-        });
-    }
-
-    let root_expr = ExprId(exprs.len() as u32);
-    exprs.push(Expr {
-        kind: ExprKind::Call {
-            func: func_expr,
-            args: call_args,
-        },
-        ty: res_ty,
-    });
-
-    IRFunction {
-        sig,
-        is_constant: false,
-        params,
-        exprs,
-        root_expr,
-
-        arms: vec![],
-        blocks: vec![],
-        stmts: vec![],
-    }*/
 }
