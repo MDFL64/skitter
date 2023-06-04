@@ -219,6 +219,10 @@ impl<'vm> VM<'vm> {
         self.types.intern(TypeKind::FunctionDef(def),self)
     }
 
+    pub fn ty_adt(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
+        self.types.intern(TypeKind::Adt(def),self)
+    }
+
     pub fn ty_unknown(&'vm self) -> Type<'vm> {
         self.types.intern(TypeKind::Unknown, self)
     }

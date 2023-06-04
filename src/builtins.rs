@@ -68,7 +68,7 @@ impl BuiltinTrait {
                 assert!(query_subs.list.len() == 1);
                 let ty = query_subs.list[0].assert_ty();
                 if ty.is_concrete() {
-                    if let Some(discrim_ty) = ty.get_adt_discriminator_ty() {
+                    if let Some(discrim_ty) = ty.adt_discriminator_ty() {
                         let mut res = trait_impl(query_subs.clone());
 
                         res.assoc_tys.insert("Discriminant".to_owned(), discrim_ty);
@@ -298,7 +298,7 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let arg_ty = subs.list[0].assert_ty();
             let discrim_ty = arg_ty
-                .get_adt_discriminator_ty()
+                .adt_discriminator_ty()
                 .expect("missing discriminator type");
 
             out_bc.push(

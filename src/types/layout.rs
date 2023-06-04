@@ -85,7 +85,7 @@ impl Layout {
                 }
             }
             TypeKind::Adt(ItemWithSubs { item, subs }) => {
-                let info = item.get_adt_info();
+                let info = item.adt_info();
 
                 let fixed_fields = info
                     .variant_fields

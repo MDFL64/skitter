@@ -184,7 +184,33 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             }
             hir::ExprKind::Call(func,args) => {
                 if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
-                    panic!("{:?}",func_did)
+                    let old_func = self.expr(func);
+
+                    // assume this is a Fn* trait call
+                    let func_subs = self.types.node_substs(expr.hir_id);
+                    let func_item = self.ctx.vm.types.def_from_rustc(func_did, func_subs, &self.ctx);
+
+                    assert!(func_item.subs.list.len() == 2);
+
+                    let arg_tup_ty = func_item.subs.list[1].assert_ty();
+
+                    let func_ty = self.ctx.vm.ty_func_def(func_item);
+
+                    let args: Vec<_> = args.iter().map(|arg| {
+                        self.expr(arg)
+                    }).collect();
+
+                    let arg_tup = self.builder.add_expr(Expr{
+                        kind: ExprKind::Tuple(args),
+                        ty: arg_tup_ty
+                    });
+
+                    let func = self.builder.add_expr(Expr{
+                        kind: ExprKind::LiteralVoid,
+                        ty: func_ty
+                    });
+
+                    ExprKind::Call{ func, args: vec!(old_func,arg_tup) }
                 } else {
                     let func = self.expr(func);
     
@@ -269,7 +295,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                     // never refer to a variant
                     hir::def::Res::Def(hir::def::DefKind::TyAlias,_) |
                     hir::def::Res::SelfTyAlias{..} => 0,
-                    
+
                     hir::def::Res::Def(_,def_id) => {
                         let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
                             panic!("attempt to convert struct without adt");
@@ -309,18 +335,20 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             hir::ExprKind::Path(path) => {
                 let res = self.types.qpath_res(&path,expr.hir_id);
                 
+                use rustc_hir::def::CtorKind;
                 match res {
                     hir::def::Res::Def(def_kind,did) => {
                         match def_kind {
                             hir::def::DefKind::Fn |
                             hir::def::DefKind::AssocFn |
-                            hir::def::DefKind::Ctor(..) => {
+                            hir::def::DefKind::Ctor(_,CtorKind::Fn) => {
                                 // return void expression, any information needed
                                 // can be pulled from the type
                                 ExprKind::LiteralVoid
                             }
                             hir::def::DefKind::Const |
-                            hir::def::DefKind::AssocConst => {
+                            hir::def::DefKind::AssocConst |
+                            hir::def::DefKind::Ctor(_,CtorKind::Const) => {
                                 let subs = self.types.node_substs(expr.hir_id);
                                 let const_item = self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)

@@ -1,4 +1,4 @@
-use crate::{types::{Type, TypeKind}, ir::{Pattern, PatternKind, BindingMode, IRFunctionBuilder, ExprKind, Expr}};
+use crate::{types::{Type, TypeKind, SubList}, ir::{Pattern, PatternKind, BindingMode, IRFunctionBuilder, ExprKind, Expr}, items::AdtInfo};
 
 use super::IRFunction;
 
@@ -63,4 +63,47 @@ pub fn glue_for_fn_trait<'vm>(
     });
 
     builder.finish(root_expr, false, params)
+}
+
+
+pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) -> IRFunction<'vm> {
+    
+    let TypeKind::Adt(item_with_subs) = adt_ty.kind() else {
+        panic!("attempt to get ctor for non-adt");
+    };
+
+    let adt_info = item_with_subs.item.adt_info();
+
+    let mut builder = IRFunctionBuilder::default();
+
+    let params: Vec<_> = adt_info.variant_fields[variant as usize]
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            let ty = ty.sub(&item_with_subs.subs);
+
+            builder.add_pattern(Pattern {
+                kind: PatternKind::LocalBinding {
+                    local_id: i as u32,
+                    mode: BindingMode::Value,
+                    sub_pattern: None,
+                },
+                ty
+            })
+        }).collect();
+
+    let fields = params.iter().enumerate().map(|(i,pat_id)| {
+        let expr_id = builder.add_expr(Expr {
+            kind: ExprKind::VarRef(i as u32),
+            ty: builder.pattern(*pat_id).ty
+        });
+        (i as u32,expr_id)
+    }).collect();
+
+    let struct_expr = builder.add_expr(Expr {
+        kind: ExprKind::Adt{ variant, fields },
+        ty: adt_ty
+    });
+
+    builder.finish(struct_expr, is_constant, params)
 }

@@ -19,6 +19,14 @@ impl<'vm> IRFunctionBuilder<'vm> {
         pat_id
     }
 
+    pub fn expr(&self, id: ExprId) -> &Expr<'vm> {
+        &self.exprs[id.0 as usize]
+    }
+
+    pub fn pattern(&self, id: PatternId) -> &Pattern<'vm> {
+        &self.patterns[id.0 as usize]
+    }
+
     pub fn finish(self, root_expr: ExprId, is_constant: bool, params: Vec<PatternId>) -> IRFunction<'vm> {
 
         let output = self.exprs[root_expr.0 as usize].ty;
