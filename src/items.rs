@@ -467,24 +467,60 @@ impl<'vm> FunctionSig<'vm> {
     }
 }
 
+pub enum AdtKind<'vm> {
+    Struct,
+    EnumWithDiscriminant(Type<'vm>),
+    EnumNonZero
+}
+
 pub struct AdtInfo<'vm> {
     pub variant_fields: Vec<Vec<Type<'vm>>>,
-    pub discriminator_ty: Option<Type<'vm>>,
+    pub kind: AdtKind<'vm>,
+}
+
+impl<'vm> AdtInfo<'vm> {
+    pub fn is_enum(&self) -> bool {
+        match self.kind {
+            AdtKind::Struct => false,
+            AdtKind::EnumNonZero |
+            AdtKind::EnumWithDiscriminant(_) => true
+        }
+    }
+
+    pub fn discriminant_ty(&self) -> Option<Type<'vm>> {
+        match self.kind {
+            AdtKind::EnumWithDiscriminant(ty) => Some(ty),
+            _ => None
+        }
+    }
 }
 
 impl<'vm> Persist<'vm> for AdtInfo<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.variant_fields.persist_write(write_ctx);
-        self.discriminator_ty.persist_write(write_ctx);
+
+        match self.kind {
+            AdtKind::Struct => {
+                write_ctx.write_byte(0);
+            }
+            AdtKind::EnumWithDiscriminant(ty) => {
+                write_ctx.write_byte(1);
+                ty.persist_write(write_ctx);
+            }
+            AdtKind::EnumNonZero => {
+                write_ctx.write_byte(2);
+            }
+        }
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(read_ctx);
-        let discriminator_ty = <Option<Type<'vm>>>::persist_read(read_ctx);
-        AdtInfo{
+        panic!("fixme");
+        //let discriminator_ty = <Option<Type<'vm>>>::persist_read(read_ctx);
+        /*AdtInfo{
             variant_fields,
             discriminator_ty
-        }
+        }*/
     }
 }
 
@@ -752,6 +788,18 @@ impl<'vm> Item<'vm> {
 
         let const_bytes = const_thread.copy_result(ty.layout().assert_size() as usize);
         self.vm.alloc_constant(const_bytes)
+    }
+
+    pub fn ctor_info(&self) -> Option<(ItemId,u32)> {
+        match &self.kind {
+            ItemKind::Function {
+                ctor_for, ..
+            } => ctor_for.clone(),
+            ItemKind::Constant {
+                ctor_for, ..
+            } => ctor_for.clone(),
+            _ => panic!("item kind mismatch"),
+        }
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {

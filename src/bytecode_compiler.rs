@@ -623,7 +623,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Adt { variant, fields } => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                if let Some(discriminator_ty) = expr_ty.adt_discriminator_ty() {
+                if let Some(discriminator_ty) = expr_ty.adt_info().discriminant_ty() {
                     let dl = discriminator_ty.layout();
                     self.out_bc.push(bytecode_select::literal(
                         *variant as i128,
@@ -957,13 +957,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // test the discriminator by building a fake literal pattern
                 {
-                    let discriminator_ty = pat
+                    let discriminant_ty = pat
                         .ty
-                        .adt_discriminator_ty()
+                        .adt_info().discriminant_ty()
                         .expect("no discriminator type");
                     let fake_pattern = Pattern {
                         kind: PatternKind::LiteralValue(*variant_index as i128),
-                        ty: discriminator_ty,
+                        ty: discriminant_ty,
                     };
                     self.match_pattern_internal(
                         &fake_pattern,

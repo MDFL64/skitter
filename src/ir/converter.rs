@@ -289,23 +289,9 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             }
             hir::ExprKind::Struct(path,fields,rest) => {
                 assert!(rest.is_none());
+
                 let res = self.types.qpath_res(&path,expr.hir_id);
-
-                let variant = match res {
-                    // never refer to a variant
-                    hir::def::Res::Def(hir::def::DefKind::TyAlias,_) |
-                    hir::def::Res::SelfTyAlias{..} => 0,
-
-                    hir::def::Res::Def(_,def_id) => {
-                        let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
-                            panic!("attempt to convert struct without adt");
-                        };
-                        adt_def.variant_index_with_id(def_id).as_u32()
-                    }
-                    _ => {
-                        panic!("struct from {:?}",res)
-                    }
-                };
+                let variant = Self::def_variant(&res,rs_ty);
 
                 let fields = fields.iter().map(|field| {
                     let id = self.types.field_index(field.hir_id).as_u32();
@@ -334,21 +320,21 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             }
             hir::ExprKind::Path(path) => {
                 let res = self.types.qpath_res(&path,expr.hir_id);
-                
-                use rustc_hir::def::CtorKind;
+
+                use hir::def::{Res,DefKind,CtorKind};
                 match res {
-                    hir::def::Res::Def(def_kind,did) => {
+                    Res::Def(def_kind,did) => {
                         match def_kind {
-                            hir::def::DefKind::Fn |
-                            hir::def::DefKind::AssocFn |
-                            hir::def::DefKind::Ctor(_,CtorKind::Fn) => {
+                            DefKind::Fn |
+                            DefKind::AssocFn |
+                            DefKind::Ctor(_,CtorKind::Fn) => {
                                 // return void expression, any information needed
                                 // can be pulled from the type
                                 ExprKind::LiteralVoid
                             }
-                            hir::def::DefKind::Const |
-                            hir::def::DefKind::AssocConst |
-                            hir::def::DefKind::Ctor(_,CtorKind::Const) => {
+                            DefKind::Const |
+                            DefKind::AssocConst |
+                            DefKind::Ctor(_,CtorKind::Const) => {
                                 let subs = self.types.node_substs(expr.hir_id);
                                 let const_item = self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)
@@ -480,8 +466,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
     }
 
     fn pattern(&mut self, pat: &hir::Pat) -> PatternId {
-        let ty = self.types.pat_ty(pat);
-        let ty = self.ctx.type_from_rustc(ty);
+        let rs_ty = self.types.pat_ty(pat);
+        let ty = self.ctx.type_from_rustc(rs_ty);
 
         let pattern_kind = match pat.kind {
             hir::PatKind::Binding(_,hir_id,_,sub_pattern) => {
@@ -546,6 +532,75 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
 
                 PatternKind::Struct { fields }
             }
+            hir::PatKind::TupleStruct(struct_path,children,gap_pos) => {
+                let adt = if let TypeKind::Adt(adt) = ty.kind() {
+                    adt
+                } else {
+                    panic!("struct pattern is not a struct?");
+                };
+                let adt_info = adt.item.adt_info();
+
+                // It's not easy to get a variant from a ctor so we do some annoying stuff.
+                let res = self.types.qpath_res(&struct_path,pat.hir_id);
+                let def = res.def_id();
+                let ctor_item = self.ctx.vm.types.def_from_rustc(def, &[], &self.ctx).item;
+
+                let (_,variant_index) = ctor_item.ctor_info().unwrap();
+
+                let tup_size = adt_info.variant_fields[variant_index as usize].len();
+
+                let gap_pos = gap_pos.as_opt_usize();
+
+                let fields = children.iter().enumerate().map(|(i,child)| {
+
+                    let field = if let Some(gap_pos) = gap_pos {
+                        if i >= gap_pos {
+                            let back_offset = children.len() - i;
+                            (tup_size - back_offset) as u32
+                        } else {
+                            i as u32
+                        }
+                    } else {
+                        i as u32
+                    };
+
+                    FieldPattern{
+                        pattern: self.pattern(child),
+                        field
+                    }
+                }).collect();
+
+                if adt_info.is_enum() {
+                    PatternKind::Enum { fields, variant_index }
+                } else {
+                    PatternKind::Struct { fields }
+                }
+            }
+            hir::PatKind::Struct(struct_path,fields,_) => {
+                let adt = if let TypeKind::Adt(adt) = ty.kind() {
+                    adt
+                } else {
+                    panic!("struct pattern is not a struct?");
+                };
+                let adt_info = adt.item.adt_info();
+
+                let fields = fields.iter().map(|field| {
+                    let id = self.types.field_index(field.hir_id).as_u32();
+                    FieldPattern{
+                        field: id,
+                        pattern: self.pattern(field.pat)
+                    }
+                }).collect();
+
+                if adt_info.is_enum() {
+                    let res = self.types.qpath_res(&struct_path,pat.hir_id);
+                    let variant_index = Self::def_variant(&res,rs_ty);
+
+                    PatternKind::Enum { fields, variant_index }
+                } else {
+                    PatternKind::Struct { fields }
+                }
+            }
             hir::PatKind::Ref(sub_pattern,_) => {
                 let sub_pattern = self.pattern(sub_pattern);
                 PatternKind::DeRef{ sub_pattern }
@@ -579,5 +634,24 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
         }
 
         res_pat
+    }
+
+    fn def_variant(res: &hir::def::Res, rs_ty: rustc_middle::ty::Ty) -> u32 {
+        use hir::def::{Res,DefKind};
+        match res {
+            // never refer to a variant
+            Res::Def(DefKind::TyAlias,_) |
+            Res::SelfTyAlias{..} => 0,
+
+            Res::Def(_,def_id) => {
+                let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
+                    panic!("attempt to convert struct without adt");
+                };
+                adt_def.variant_index_with_id(*def_id).as_u32()
+            }
+            _ => {
+                panic!("struct from {:?}",res)
+            }
+        }
     }
 }

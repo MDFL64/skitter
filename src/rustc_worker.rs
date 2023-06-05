@@ -16,7 +16,7 @@ use crate::{
     ir::{IRFunctionBuilder, converter::IRFunctionConverter},
     items::{
         path_from_rustc, AdtInfo, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
-        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl,
+        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, AdtKind,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
     vm::VM,
@@ -447,16 +447,16 @@ impl<'vm> RustCWorker<'vm> {
                                 })
                                 .collect();
 
-                            let discriminator_ty = if adt_def.is_enum() {
+                            let kind = if adt_def.is_enum() {
                                 let kind = TypeKind::Int(IntWidth::I32, IntSign::Unsigned);
-                                Some(vm.types.intern(kind, vm))
+                                AdtKind::EnumWithDiscriminant(vm.types.intern(kind, vm))
                             } else {
-                                None
+                                AdtKind::Struct
                             };
 
                             item.set_adt_info(AdtInfo {
                                 variant_fields,
-                                discriminator_ty,
+                                kind
                             });
                         }
 

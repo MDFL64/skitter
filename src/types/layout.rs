@@ -92,7 +92,7 @@ impl Layout {
                     .iter()
                     .map(|fields| fields.iter().map(|field| field.sub(subs)));
 
-                Layout::compound(fixed_fields, info.discriminator_ty)
+                Layout::compound(fixed_fields, info.discriminant_ty())
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),

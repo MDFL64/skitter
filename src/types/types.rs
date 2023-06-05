@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::items::{AssocValue, CrateId, Item, AdtInfo};
+use crate::items::{AssocValue, CrateId, Item, AdtInfo, AdtKind};
 
 use super::{
     layout::Layout,
@@ -244,12 +244,12 @@ impl<'vm> Type<'vm> {
         assoc_values.get(name).cloned()
     }
 
-    pub fn adt_discriminator_ty(&self) -> Option<Type<'vm>> {
+    pub fn adt_info(&self) -> &AdtInfo<'vm> {
         let TypeKind::Adt(ItemWithSubs{item,..}) = self.kind() else {
-            panic!("adt_discriminator_ty: not an adt");
+            panic!("adt_info: not an adt");
         };
         let info = item.adt_info();
-        info.discriminator_ty
+        info
     }
 
     pub fn func_item(&self) -> Option<ItemWithSubs<'vm>> {
