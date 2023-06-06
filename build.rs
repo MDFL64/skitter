@@ -358,6 +358,7 @@ fn write_exec_match() {
 
     write_bulk_move_sp("MovSP4N", "u32", &mut source);
     write_bulk_move_sp("MovSP8N", "u64", &mut source);
+    write_bulk_move_sp("MovSP16N", "u128", &mut source);
 
     write_bulk_move_ps("MovPS4N", "u32", &mut source);
 

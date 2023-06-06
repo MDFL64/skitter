@@ -4,7 +4,7 @@ use rustc_middle::ty::TypeckResults;
 
 use std::str::FromStr;
 
-use crate::{rustc_worker::RustCContext, types::{TypeKind, FloatWidth}};
+use crate::{rustc_worker::RustCContext, types::{TypeKind, FloatWidth, Type}};
 
 use super::{
     IRFunctionBuilder, LoopId, IRFunction, BinaryOp, ExprId, UnaryOp, LogicOp, Expr, Block, Stmt, PatternId, FieldPattern,
@@ -79,45 +79,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
         let ty = self.ctx.type_from_rustc(rs_ty);
 
         let expr_kind = match expr.kind {
-            hir::ExprKind::Lit(lit) => {
-                use rustc_ast::ast::LitKind;
-                match lit.node {
-                    LitKind::Int(n, _) => {
-                        let n = n as i128;
-                        ExprKind::LiteralValue(n)
-                    }
-                    LitKind::Float(sym, _) => {
-                        let TypeKind::Float(float_width) = ty.kind() else {
-                            panic!("non-float float literal");
-                        };
-                        match float_width {
-                            FloatWidth::F32 => {
-                                let n = f32::from_str(sym.as_str()).unwrap();
-                                let x: i32 = unsafe { std::mem::transmute(n) };
-                                ExprKind::LiteralValue(x as i128)
-                            }
-                            FloatWidth::F64 => {
-                                let n = f64::from_str(sym.as_str()).unwrap();
-                                let x: i64 = unsafe { std::mem::transmute(n) };
-                                ExprKind::LiteralValue(x as i128)
-                            }
-                        }
-                    }
-                    LitKind::Bool(b) => ExprKind::LiteralValue(if b { 1 } else { 0 }),
-                    LitKind::Char(c) => ExprKind::LiteralValue(c as i128),
-                    LitKind::Byte(b) => {
-                        ExprKind::LiteralValue(b as i128)
-                    }
-                    LitKind::Str(sym, _) => {
-                        let bytes = sym.as_str().as_bytes().to_owned();
-                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
-                    }
-                    LitKind::ByteStr(ref bytes,_) => {
-                        let bytes = bytes.iter().copied().collect();
-                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
-                    }
-                    _ => panic!("lit other {:?}", lit.node),
-                }
+            hir::ExprKind::Lit(_) => {
+                self.expr_literal(expr, ty, false)
             }
             hir::ExprKind::Cast(arg,_) => {
                 ExprKind::Cast(self.expr(arg))
@@ -428,6 +391,73 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
         expr_id
     }
 
+    fn expr_literal(&self, expr: &hir::Expr, ty: Type<'vm>, negative: bool) -> ExprKind<'vm> {
+        match expr.kind {
+            hir::ExprKind::Lit(lit) => {
+                use rustc_ast::ast::LitKind;
+                match lit.node {
+                    LitKind::Int(n, _) => {
+                        let mut n = n as i128;
+                        if negative {
+                            n = -n;
+                        }
+                        ExprKind::LiteralValue(n)
+                    }
+                    LitKind::Float(sym, _) => {
+                        let TypeKind::Float(float_width) = ty.kind() else {
+                            panic!("non-float float literal");
+                        };
+                        match float_width {
+                            FloatWidth::F32 => {
+                                let mut n = f32::from_str(sym.as_str()).unwrap();
+                                if negative {
+                                    n = -n;
+                                }
+                                let x: i32 = unsafe { std::mem::transmute(n) };
+                                ExprKind::LiteralValue(x as i128)
+                            }
+                            FloatWidth::F64 => {
+                                let mut n = f64::from_str(sym.as_str()).unwrap();
+                                if negative {
+                                    n = -n;
+                                }
+                                let x: i64 = unsafe { std::mem::transmute(n) };
+                                ExprKind::LiteralValue(x as i128)
+                            }
+                        }
+                    }
+                    LitKind::Bool(b) => {
+                        assert!(!negative);
+                        ExprKind::LiteralValue(if b { 1 } else { 0 })
+                    }
+                    LitKind::Char(c) => {
+                        assert!(!negative);
+                        ExprKind::LiteralValue(c as i128)
+                    }
+                    LitKind::Byte(b) => {
+                        assert!(!negative);
+                        ExprKind::LiteralValue(b as i128)
+                    }
+                    LitKind::Str(sym, _) => {
+                        assert!(!negative);
+                        let bytes = sym.as_str().as_bytes().to_owned();
+                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
+                    }
+                    LitKind::ByteStr(ref bytes,_) => {
+                        assert!(!negative);
+                        let bytes = bytes.iter().copied().collect();
+                        ExprKind::LiteralBytes(self.ctx.vm.alloc_constant(bytes))
+                    }
+                    _ => panic!("lit other {:?}", lit.node),
+                }
+            }
+            hir::ExprKind::Unary(hir::UnOp::Neg,sub_expr) => {
+                self.expr_literal(sub_expr, ty, true)
+            }
+            _ => panic!("lit = {:?}",expr.kind)
+        }
+    }
+
     fn block(&mut self, block: &hir::Block) -> Block {
         let mut stmts = vec!();
 
@@ -489,17 +519,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 PatternKind::LocalBinding{ local_id, mode, sub_pattern }
             }
             hir::PatKind::Lit(lit) => {
-                if let hir::ExprKind::Lit(lit) = lit.kind {
-                    use rustc_ast::ast::LitKind;
-                    match lit.node {
-                        LitKind::Int(n, _) => {
-                            let n = n as i128;
-                            PatternKind::LiteralValue(n)
-                        }
-                        _ => panic!("pat lit kind {:?}",lit.node)
-                    }
-                } else {
-                    panic!("pat lit {:?}",lit);
+                let lit = self.expr_literal(lit,ty,false);
+
+                match lit {
+                    ExprKind::LiteralValue(val) => PatternKind::LiteralValue(val),
+                    _ => panic!("pat lit {:?}",lit)
                 }
             }
             hir::PatKind::Tuple(children,gap_pos) => {
