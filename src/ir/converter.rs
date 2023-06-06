@@ -89,8 +89,21 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 ExprKind::Ref(self.expr(arg))
             }
             hir::ExprKind::Unary(op,arg) => {
+                let arg = self.expr(arg);
+
                 if let hir::UnOp::Deref = op {
-                    ExprKind::DeRef(self.expr(arg))
+                    ExprKind::DeRef(arg)
+                } else if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                    let subs = self.types.node_substs(expr.hir_id);
+                    let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
+                    let func_ty = self.ctx.vm.ty_func_def(func_item);
+
+                    let func = self.builder.add_expr(Expr{
+                        kind: ExprKind::LiteralVoid,
+                        ty: func_ty
+                    });
+
+                    ExprKind::Call{ func, args: vec!(arg) }
                 } else {
                     let op = match op {
                         hir::UnOp::Not => UnaryOp::Not,
@@ -98,7 +111,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                         _ => panic!() 
                     };
 
-                    ExprKind::Unary(op, self.expr(arg))
+                    ExprKind::Unary(op, arg)
                 }
             }
             hir::ExprKind::Binary(op,lhs,rhs) => {
@@ -133,11 +146,24 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 }
             }
             hir::ExprKind::AssignOp(op,lhs,rhs) => {
-                let op = self.bin_op(op.node);
                 let lhs = self.expr(lhs);
                 let rhs = self.expr(rhs);
+                
+                if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                    let subs = self.types.node_substs(expr.hir_id);
+                    let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
+                    let func_ty = self.ctx.vm.ty_func_def(func_item);
 
-                ExprKind::AssignOp(op, lhs, rhs)
+                    let func = self.builder.add_expr(Expr{
+                        kind: ExprKind::LiteralVoid,
+                        ty: func_ty
+                    });
+
+                    ExprKind::Call{ func, args: vec!(lhs,rhs) }
+                } else {
+                    let op = self.bin_op(op.node);
+                    ExprKind::AssignOp(op, lhs, rhs)
+                }
             }
             hir::ExprKind::Assign(lhs,rhs,_) => {
                 let lhs = self.expr(lhs);

@@ -49,6 +49,24 @@ impl std::ops::Mul<Vec2> for f32 {
     }
 }
 
+impl std::ops::MulAssign<f32> for Vec2 {
+    fn mul_assign(&mut self, other: f32) {
+        self.x *= other;
+        self.y *= other;
+    }
+}
+
+impl std::ops::Neg for Vec2 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+
 pub fn main() {
     let a = Vec2::new(9.0,5.0);
     let b = Vec2::new(-1.5,2.0);
@@ -61,4 +79,10 @@ pub fn main() {
 
     d.print();
     e.print();
+
+    let mut f = -e;
+    f.print();
+
+    f *= 5.0;
+    f.print();
 }
