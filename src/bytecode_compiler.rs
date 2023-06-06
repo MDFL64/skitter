@@ -206,26 +206,22 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let arg_ty = self.expr_ty(*source);
                 let dst_ty = expr_ty;
 
+                // ALWAYS allocate a destination to avoid aliasing locals
+                let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                let arg_slot = self.lower_expr(*source, None);
+
                 // Sometimes we will encounter a no-op cast.
                 if arg_ty == dst_ty {
-                    let arg_slot = self.lower_expr(*source, None);
+                    self.out_bc.push(bytecode_select::copy(dst_slot, arg_slot, arg_ty).unwrap());
 
-                    if let Some(dst_slot) = dst_slot {
-                        self.out_bc.push(bytecode_select::copy(dst_slot, arg_slot, arg_ty).unwrap());
-                        dst_slot
-                    } else {
-                        arg_slot
-                    }
+                    dst_slot
                 } else {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
-    
-                    let arg_slot = self.lower_expr(*source, None);
     
                     let ctor = bytecode_select::cast(arg_ty, dst_ty);
                     self.out_bc.push(ctor(dst_slot, arg_slot));
                     dst_slot
                 }
-
             }
             ExprKind::Binary(op, lhs, rhs) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
@@ -800,9 +796,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             | ExprKind::Ref { .. }
             | ExprKind::LiteralVoid
             | ExprKind::Array(_)
+            | ExprKind::Cast(_)
             | ExprKind::Adt { .. }
             | ExprKind::LiteralValue { .. } => {
-                // TODO it may be necessary to pre-allocate a slot here to avoid aliasing locals
+                // WARNING: be wary of expressions that could alias locals!
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
             }
