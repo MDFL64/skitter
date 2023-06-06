@@ -313,7 +313,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 let index = self.expr(index);
                 ExprKind::Index{ lhs, index }
             }
-            hir::ExprKind::Field(lhs,field) => {
+            hir::ExprKind::Field(lhs,_) => {
                 let index = self.types.field_index(expr.hir_id);
                 let lhs = self.expr(lhs);
                 ExprKind::Field{ lhs, variant: 0, field: index.as_u32() }
@@ -599,6 +599,27 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                     PatternKind::Enum { fields, variant_index }
                 } else {
                     PatternKind::Struct { fields }
+                }
+            }
+            hir::PatKind::Path(path) => {
+
+                if let TypeKind::Adt(adt) = ty.kind() {
+                    let adt_info = adt.item.adt_info();
+                    
+                    if adt_info.is_enum() {
+                        let res = self.types.qpath_res(&path,pat.hir_id);
+                        let def = res.def_id();
+                        let ctor_item = self.ctx.vm.types.def_from_rustc(def, &[], &self.ctx).item;
+        
+                        let (_,variant_index) = ctor_item.ctor_info().unwrap();
+
+                        PatternKind::Enum { fields: vec!(), variant_index }
+                    } else {
+                        // nothing to test
+                        PatternKind::Hole
+                    }
+                } else {
+                    panic!("path pattern = {:?}",path);
                 }
             }
             hir::PatKind::Ref(sub_pattern,_) => {

@@ -780,7 +780,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ptr_ty = ty.ref_to(Mutability::Const);
                 let ptr_size = ptr_ty.layout().assert_size();
 
-                let const_ptr = const_ref.item.const_value(&const_ref.subs).as_ptr() as usize;
+                let fixed_subs = const_ref.subs.sub(&self.in_func_subs);
+
+                let const_ptr = const_ref.item.const_value(&fixed_subs).as_ptr() as usize;
 
                 let ptr_slot = self.stack.alloc(ty);
                 self.out_bc.push(bytecode_select::literal(
