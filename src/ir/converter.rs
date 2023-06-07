@@ -4,7 +4,7 @@ use rustc_middle::ty::TypeckResults;
 
 use std::str::FromStr;
 
-use crate::{rustc_worker::RustCContext, types::{TypeKind, FloatWidth, Type}};
+use crate::{rustc_worker::RustCContext, types::{TypeKind, FloatWidth, Type, Mutability}};
 
 use super::{
     IRFunctionBuilder, LoopId, IRFunction, BinaryOp, ExprId, UnaryOp, LogicOp, Expr, Block, Stmt, PatternId, FieldPattern,
@@ -91,9 +91,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             hir::ExprKind::Unary(op,arg) => {
                 let arg = self.expr(arg);
 
-                if let hir::UnOp::Deref = op {
-                    ExprKind::DeRef(arg)
-                } else if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
                     let subs = self.types.node_substs(expr.hir_id);
                     let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                     let func_ty = self.ctx.vm.ty_func_def(func_item);
@@ -103,7 +101,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                         ty: func_ty
                     });
 
-                    ExprKind::Call{ func, args: vec!(arg) }
+                    if let hir::UnOp::Deref = op {
+                        self.expr_deref_overload(func,arg,ty)
+                    } else {
+                        ExprKind::Call{ func, args: vec!(arg) }
+                    }
+                } else if let hir::UnOp::Deref = op {
+                    ExprKind::DeRef(arg)
                 } else {
                     let op = match op {
                         hir::UnOp::Not => UnaryOp::Not,
@@ -369,6 +373,10 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
             ty
         });
 
+        // Keep track of the input types to adjustments so deref methods can be built easily.
+        let mut adjust_ty_in_rs = rs_ty;
+        let mut adjust_ty_in = ty;
+
         let adjust_list = self.types.expr_adjustments(expr);
         for adjust in adjust_list {
             let adjust_ty = self.ctx.type_from_rustc(adjust.target);
@@ -382,11 +390,35 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                     });
                 }
                 Adjust::Deref(overloaded) => {
-                    assert!(overloaded.is_none());
-                    expr_id = self.builder.add_expr(Expr{
-                        kind: ExprKind::DeRef(expr_id),
-                        ty: adjust_ty
-                    });
+                    if let Some(overloaded) = overloaded {
+                        let func_ty = overloaded.method_call(self.ctx.tcx,adjust_ty_in_rs);
+                        let func_ty = self.ctx.type_from_rustc(func_ty);
+
+                        let func = self.builder.add_expr(Expr{
+                            kind: ExprKind::LiteralVoid,
+                            ty: func_ty
+                        });
+
+                        // for whatever reason, the rustc adjustments contain an extra deref
+                        // before an overloaded deref, meaning we need to ref AGAIN in order
+                        // for the deref to work
+
+                        let arg = self.builder.add_expr(Expr{
+                            kind: ExprKind::Ref(expr_id),
+                            ty: self.ctx.vm.ty_ref(adjust_ty_in, Mutability::Const)
+                        });
+
+                        let kind = self.expr_deref_overload(func,arg,adjust_ty);
+                        expr_id = self.builder.add_expr(Expr{
+                            kind,
+                            ty: adjust_ty
+                        });
+                    } else {
+                        expr_id = self.builder.add_expr(Expr{
+                            kind: ExprKind::DeRef(expr_id),
+                            ty: adjust_ty
+                        });
+                    }
                 }
                 Adjust::Borrow(_) => {
                     expr_id = self.builder.add_expr(Expr{
@@ -412,9 +444,26 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
                 }
                 _ => panic!("todo adjust {:?}",adjust)
             }
+
+            adjust_ty_in = adjust_ty;
+            adjust_ty_in_rs = adjust.target;
         }
 
         expr_id
+    }
+
+    fn expr_deref_overload(&mut self, func: ExprId, arg: ExprId, res_ty: Type<'vm>) -> ExprKind<'vm> {
+        // WARNING: ref mutability not necessarily correct
+        // hopefully not an issue as the type shouldn't
+        // be used for much
+        let ref_ty = self.ctx.vm.ty_ref(res_ty,Mutability::Const);
+
+        let res = self.builder.add_expr(Expr{
+            kind: ExprKind::Call { func, args: vec!(arg) },
+            ty: ref_ty
+        });
+
+        ExprKind::DeRef(res)
     }
 
     fn expr_literal(&self, expr: &hir::Expr, ty: Type<'vm>, negative: bool) -> ExprKind<'vm> {
