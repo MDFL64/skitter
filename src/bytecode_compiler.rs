@@ -2,8 +2,8 @@ use crate::abi::POINTER_SIZE;
 use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
 use crate::ir::{
-    BinaryOp, BindingMode, ExprId, ExprKind, IRFunction, LogicOp, Pattern, PatternKind,
-    PointerCast, Stmt, LoopId, PatternId, Block,
+    BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, Pattern,
+    PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
 use crate::types::{Mutability, SubList, Type, TypeKind};
@@ -130,9 +130,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         //println!("lower {:?} :: {}",expr.kind,expr.ty);
 
         match &expr.kind {
-            ExprKind::Dummy(value) => {
-                self.lower_expr(*value, dst_slot)
-            }
+            ExprKind::Dummy(value) => self.lower_expr(*value, dst_slot),
             ExprKind::Block(block) => self.lower_block(block, dst_slot),
             // PLACES:
             ExprKind::NamedConst(_)
@@ -213,11 +211,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // Sometimes we will encounter a no-op cast.
                 if arg_ty == dst_ty {
-                    self.out_bc.push(bytecode_select::copy(dst_slot, arg_slot, arg_ty).unwrap());
+                    self.out_bc
+                        .push(bytecode_select::copy(dst_slot, arg_slot, arg_ty).unwrap());
 
                     dst_slot
                 } else {
-    
                     let ctor = bytecode_select::cast(arg_ty, dst_ty);
                     self.out_bc.push(ctor(dst_slot, arg_slot));
                     dst_slot
@@ -294,10 +292,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 // the destination is (), just return a dummy value
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
-            ExprKind::Call {
-                func,
-                args,
-            } => {
+            ExprKind::Call { func, args } => {
                 let ty = self.expr_ty(*func);
                 let func_ref = ty.func_item().expect("can't find function");
 
@@ -415,7 +410,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::Loop(body,loop_id) => {
+            ExprKind::Loop(body, loop_id) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                 let loop_index = self.out_bc.len();
@@ -451,7 +446,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot
             }
             ExprKind::Break { loop_id, value } => {
-
                 if let Some(value) = value {
                     let loop_slot = self
                         .loops
@@ -472,7 +466,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Continue { loop_id } => {
-
                 let loop_start = self
                     .loops
                     .iter()
@@ -828,7 +821,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     /// Use to both setup variable bindings AND generate pattern matching code.
     fn match_pattern(&mut self, pat_id: PatternId, source: Slot, match_result_slot: Option<Slot>) {
-
         let pat = self.in_func.pattern(pat_id);
 
         let refutable =
@@ -851,7 +843,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         must_copy: bool,
         match_result_slot: Option<Slot>,
     ) -> bool {
-
         match &pat.kind {
             PatternKind::LocalBinding {
                 local_id,
@@ -958,7 +949,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 {
                     let discriminant_ty = pat
                         .ty
-                        .adt_info().discriminant_ty()
+                        .adt_info()
+                        .discriminant_ty()
                         .expect("no discriminator type");
                     let fake_pattern = Pattern {
                         kind: PatternKind::LiteralValue(*variant_index as i128),
@@ -978,7 +970,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let offset =
                         layout.field_offsets[*variant_index as usize][field.field as usize];
-                    
+
                     let refutable = self.match_pattern_internal(
                         field_pattern,
                         source.offset_by(offset),
@@ -1053,17 +1045,17 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let sub_pattern = self.in_func.pattern(*sub_pattern);
                 match source {
                     // must_copy is probably irrelevant at this stage
-                    Place::Local(source_slot) => {
-                        self.match_pattern_internal(
-                            sub_pattern,
-                            Place::Ptr(source_slot, 0),
-                            true,
-                            match_result_slot,
-                        )
-                    }
-                    Place::Ptr(ptr_slot,ptr_offset) => {
+                    Place::Local(source_slot) => self.match_pattern_internal(
+                        sub_pattern,
+                        Place::Ptr(source_slot, 0),
+                        true,
+                        match_result_slot,
+                    ),
+                    Place::Ptr(ptr_slot, ptr_offset) => {
                         let new_slot = self.stack.alloc(pat.ty);
-                        if let Some(copy) = bytecode_select::copy_from_ptr(new_slot, ptr_slot, pat.ty, ptr_offset) {
+                        if let Some(copy) =
+                            bytecode_select::copy_from_ptr(new_slot, ptr_slot, pat.ty, ptr_offset)
+                        {
                             self.out_bc.push(copy);
                         }
 
@@ -1105,7 +1097,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 true
             }
             PatternKind::Hole => false,
-            PatternKind::Error => todo!()
+            PatternKind::Error => todo!(),
         }
     }
 

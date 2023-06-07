@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::items::{AssocValue, CrateId, Item, AdtInfo, AdtKind};
+use crate::items::{AdtInfo, AdtKind, AssocValue, CrateId, Item};
 
 use super::{
     layout::Layout,

@@ -1,4 +1,7 @@
-use crate::{items::FunctionSig, types::{Type, ItemWithSubs}};
+use crate::{
+    items::FunctionSig,
+    types::{ItemWithSubs, Type},
+};
 
 #[derive(Default)]
 pub struct IRFunctionBuilder<'vm> {
@@ -12,7 +15,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
         self.exprs.push(e);
         expr_id
     }
-    
+
     pub fn add_pattern(&mut self, p: Pattern<'vm>) -> PatternId {
         let pat_id = PatternId(self.patterns.len() as u32);
         self.patterns.push(p);
@@ -27,17 +30,19 @@ impl<'vm> IRFunctionBuilder<'vm> {
         &self.patterns[id.0 as usize]
     }
 
-    pub fn finish(self, root_expr: ExprId, is_constant: bool, params: Vec<PatternId>) -> IRFunction<'vm> {
-
+    pub fn finish(
+        self,
+        root_expr: ExprId,
+        is_constant: bool,
+        params: Vec<PatternId>,
+    ) -> IRFunction<'vm> {
         let output = self.exprs[root_expr.0 as usize].ty;
-        let inputs = params.iter().map(|p| {
-            self.patterns[p.0 as usize].ty
-        }).collect();
+        let inputs = params
+            .iter()
+            .map(|p| self.patterns[p.0 as usize].ty)
+            .collect();
 
-        let sig = FunctionSig {
-            inputs,
-            output
-        };
+        let sig = FunctionSig { inputs, output };
 
         IRFunction {
             sig,
@@ -45,7 +50,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
             params,
             root_expr,
             exprs: self.exprs,
-            patterns: self.patterns
+            patterns: self.patterns,
         }
     }
 }
@@ -149,7 +154,7 @@ pub enum ExprKind<'vm> {
         then: ExprId,
         else_opt: Option<ExprId>,
     },
-    Loop(Block,LoopId),
+    Loop(Block, LoopId),
     Break {
         loop_id: LoopId,
         value: Option<ExprId>,
@@ -172,7 +177,6 @@ pub enum ExprKind<'vm> {
 
     NamedConst(ItemWithSubs<'vm>),
     //Function(ItemWithSubs<'vm>),
-
     Ref(ExprId),
     DeRef(ExprId),
 
@@ -222,7 +226,7 @@ pub enum PatternKind {
     Hole,
 
     /// Error, for unsupported patterns
-    Error
+    Error,
 }
 
 #[derive(Debug)]
@@ -285,5 +289,5 @@ pub enum PointerCast {
 pub struct MatchArm {
     pub pattern: PatternId,
     pub body: ExprId,
-    pub has_guard: bool
+    pub has_guard: bool,
 }

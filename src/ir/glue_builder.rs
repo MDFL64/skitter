@@ -1,4 +1,7 @@
-use crate::{types::{Type, TypeKind, SubList}, ir::{Pattern, PatternKind, BindingMode, IRFunctionBuilder, ExprKind, Expr}, items::AdtInfo};
+use crate::{
+    ir::{BindingMode, Expr, ExprKind, IRFunctionBuilder, Pattern, PatternKind},
+    types::{Type, TypeKind},
+};
 
 use super::IRFunction;
 
@@ -17,14 +20,16 @@ pub fn glue_for_fn_trait<'vm>(
     let params = vec![self_ty, args_ty]
         .iter()
         .enumerate()
-        .map(|(i, ty)| builder.add_pattern(Pattern {
-            kind: PatternKind::LocalBinding {
-                local_id: i as u32,
-                mode: BindingMode::Value,
-                sub_pattern: None,
-            },
-            ty: *ty,
-        }))
+        .map(|(i, ty)| {
+            builder.add_pattern(Pattern {
+                kind: PatternKind::LocalBinding {
+                    local_id: i as u32,
+                    mode: BindingMode::Value,
+                    sub_pattern: None,
+                },
+                ty: *ty,
+            })
+        })
         .collect();
 
     let TypeKind::Tuple(inner_arg_tys) = args_ty.kind() else {
@@ -65,9 +70,7 @@ pub fn glue_for_fn_trait<'vm>(
     builder.finish(root_expr, false, params)
 }
 
-
 pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) -> IRFunction<'vm> {
-    
     let TypeKind::Adt(item_with_subs) = adt_ty.kind() else {
         panic!("attempt to get ctor for non-adt");
     };
@@ -88,21 +91,26 @@ pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) ->
                     mode: BindingMode::Value,
                     sub_pattern: None,
                 },
-                ty
+                ty,
             })
-        }).collect();
+        })
+        .collect();
 
-    let fields = params.iter().enumerate().map(|(i,pat_id)| {
-        let expr_id = builder.add_expr(Expr {
-            kind: ExprKind::VarRef(i as u32),
-            ty: builder.pattern(*pat_id).ty
-        });
-        (i as u32,expr_id)
-    }).collect();
+    let fields = params
+        .iter()
+        .enumerate()
+        .map(|(i, pat_id)| {
+            let expr_id = builder.add_expr(Expr {
+                kind: ExprKind::VarRef(i as u32),
+                ty: builder.pattern(*pat_id).ty,
+            });
+            (i as u32, expr_id)
+        })
+        .collect();
 
     let struct_expr = builder.add_expr(Expr {
-        kind: ExprKind::Adt{ variant, fields },
-        ty: adt_ty
+        kind: ExprKind::Adt { variant, fields },
+        ty: adt_ty,
     });
 
     builder.finish(struct_expr, is_constant, params)

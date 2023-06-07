@@ -178,7 +178,8 @@ fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String>
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
-                let skitter_err = std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
+                let skitter_err =
+                    std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
                 let first_line = skitter_err.lines().nth(0).unwrap_or_else(|| "");
 
                 let first_line = if first_line.len() > ERROR_CHARS {

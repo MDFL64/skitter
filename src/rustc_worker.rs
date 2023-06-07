@@ -6,17 +6,17 @@ use std::{
 use ahash::AHashMap;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::AssocItemKind;
-use rustc_hir::VariantData;
 use rustc_hir::ItemKind as HirItemKind;
+use rustc_hir::VariantData;
 use rustc_middle::ty::{ImplSubject, Ty, TyCtxt};
 use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    ir::{IRFunctionBuilder, converter::IRFunctionConverter},
+    ir::{converter::IRFunctionConverter, IRFunctionBuilder},
     items::{
-        path_from_rustc, AdtInfo, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
-        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, AdtKind,
+        path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
+        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
     vm::VM,
@@ -198,14 +198,15 @@ impl<'vm> RustCWorker<'vm> {
 
                                     items.add_item(vm, kind, item_path, local_id);
                                 }
-                                HirItemKind::Struct(variant,_)
-                                | HirItemKind::Union(variant,_) => {
+                                HirItemKind::Struct(variant, _)
+                                | HirItemKind::Union(variant, _) => {
                                     let adt_id = {
                                         let local_id = item.owner_id.def_id;
-                                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-    
+                                        let item_path =
+                                            path_from_rustc(&hir.def_path(local_id), vm);
+
                                         let kind = ItemKind::new_adt();
-    
+
                                         let item_id = items.add_item(vm, kind, item_path, local_id);
                                         adt_items.push(item_id);
                                         item_id
@@ -214,15 +215,17 @@ impl<'vm> RustCWorker<'vm> {
                                     // add ctor
                                     match variant {
                                         VariantData::Struct(..) => (),
-                                        VariantData::Tuple(_,_,local_id) => {
-                                            let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+                                        VariantData::Tuple(_, _, local_id) => {
+                                            let item_path =
+                                                path_from_rustc(&hir.def_path(local_id), vm);
 
                                             let kind = ItemKind::new_function_ctor(adt_id, 0);
-        
+
                                             items.add_item(vm, kind, item_path, local_id);
-                                        },
-                                        VariantData::Unit(_,local_id) => {
-                                            let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+                                        }
+                                        VariantData::Unit(_, local_id) => {
+                                            let item_path =
+                                                path_from_rustc(&hir.def_path(local_id), vm);
 
                                             let kind = ItemKind::new_const_ctor(adt_id, 0);
 
@@ -230,34 +233,41 @@ impl<'vm> RustCWorker<'vm> {
                                         }
                                     }
                                 }
-                                HirItemKind::Enum(enum_def,_) => {
+                                HirItemKind::Enum(enum_def, _) => {
                                     let adt_id = {
                                         let local_id = item.owner_id.def_id;
-                                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-    
+                                        let item_path =
+                                            path_from_rustc(&hir.def_path(local_id), vm);
+
                                         let kind = ItemKind::new_adt();
-    
+
                                         let item_id = items.add_item(vm, kind, item_path, local_id);
                                         adt_items.push(item_id);
                                         item_id
                                     };
 
                                     // add ctors
-                                    for (index,variant) in enum_def.variants.iter().enumerate() {
+                                    for (index, variant) in enum_def.variants.iter().enumerate() {
                                         match variant.data {
                                             VariantData::Struct(..) => (),
-                                            VariantData::Tuple(_,_,local_id) => {
-                                                let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-    
-                                                let kind = ItemKind::new_function_ctor(adt_id, index as u32);
-            
+                                            VariantData::Tuple(_, _, local_id) => {
+                                                let item_path =
+                                                    path_from_rustc(&hir.def_path(local_id), vm);
+
+                                                let kind = ItemKind::new_function_ctor(
+                                                    adt_id,
+                                                    index as u32,
+                                                );
+
                                                 items.add_item(vm, kind, item_path, local_id);
-                                            },
-                                            VariantData::Unit(_,local_id) => {
-                                                let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-    
-                                                let kind = ItemKind::new_const_ctor(adt_id, index as u32);
-    
+                                            }
+                                            VariantData::Unit(_, local_id) => {
+                                                let item_path =
+                                                    path_from_rustc(&hir.def_path(local_id), vm);
+
+                                                let kind =
+                                                    ItemKind::new_const_ctor(adt_id, index as u32);
+
                                                 items.add_item(vm, kind, item_path, local_id);
                                             }
                                         }
@@ -329,23 +339,19 @@ impl<'vm> RustCWorker<'vm> {
                                         match item.kind {
                                             AssocItemKind::Fn { .. } => {
                                                 let kind = ItemKind::new_function_virtual(
-                                                    trait_item,
-                                                    ident,
+                                                    trait_item, ident,
                                                 );
                                                 items.add_item(vm, kind, item_path, local_id);
                                             }
                                             AssocItemKind::Type => {
                                                 let kind = ItemKind::new_associated_type(
-                                                    trait_item,
-                                                    ident,
+                                                    trait_item, ident,
                                                 );
                                                 items.add_item(vm, kind, item_path, local_id);
                                             }
                                             AssocItemKind::Const => {
-                                                let kind = ItemKind::new_const_virtual(
-                                                    trait_item,
-                                                    ident,
-                                                );
+                                                let kind =
+                                                    ItemKind::new_const_virtual(trait_item, ident);
                                                 items.add_item(vm, kind, item_path, local_id);
                                             }
                                         }
@@ -456,7 +462,7 @@ impl<'vm> RustCWorker<'vm> {
 
                             item.set_adt_info(AdtInfo {
                                 variant_fields,
-                                kind
+                                kind,
                             });
                         }
 
@@ -611,14 +617,14 @@ impl<'vm> RustCWorker<'vm> {
                             println!("generating ir for all bodies");
                             for item in ctx.items.all() {
                                 //if item.is_meh() {
-                                    let did = item.did.unwrap();
-                                    let has_body = hir.maybe_body_owned_by(did).is_some();
-                                    if has_body {
-                                        println!("go {:?}",did);
-                                        //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
-                                        //let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
-                                        println!("done");
-                                    }
+                                let did = item.did.unwrap();
+                                let has_body = hir.maybe_body_owned_by(did).is_some();
+                                if has_body {
+                                    println!("go {:?}", did);
+                                    //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
+                                    //let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
+                                    println!("done");
+                                }
                                 //}
                             }
                         }

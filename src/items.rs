@@ -8,7 +8,7 @@ use std::{
 use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::{self, BytecodeCompiler},
-    ir::{IRFunction, glue_builder::glue_for_ctor},
+    ir::{glue_builder::glue_for_ctor, IRFunction},
     persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
@@ -50,14 +50,14 @@ impl<'vm> CrateItems<'vm> {
         // write types
         {
             let type_count = write_ctx.types.len();
-            println!("types = {}",type_count);
+            println!("types = {}", type_count);
             type_count.persist_write(&mut write_ctx);
-    
+
             for i in 0..type_count {
                 let ty = write_ctx.types[i];
                 ty.kind().persist_write(&mut write_ctx);
             }
-    
+
             // ensure no more types were added, if they
             // are it indicates a bug in `prepare_child_types`
             assert!(type_count == write_ctx.types.len());
@@ -107,7 +107,7 @@ impl<'vm> CrateItems<'vm> {
             did: Some(did),
             path: path.clone(),
             kind,
-            persist_data: None
+            persist_data: None,
         });
 
         // add to did map
@@ -260,7 +260,7 @@ pub struct Item<'vm> {
     kind: ItemKind<'vm>,
     /// A slice of data which can be deserialized lazily.
     /// Only filled when loading IR from the disk.
-    persist_data: Option<&'vm [u8]>
+    persist_data: Option<&'vm [u8]>,
 }
 
 impl<'vm> std::fmt::Debug for Item<'vm> {
@@ -296,17 +296,21 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             } => {
                 write_ctx.write_byte('f' as u8);
                 virtual_info.persist_write(write_ctx);
-                ctor_for.map(|(x,y)| (x.0,y)).persist_write(write_ctx);
+                ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
                 extern_name.persist_write(write_ctx);
                 let ir = self.raw_ir();
-                println!("has ir? {}",ir.is_some());
+                println!("has ir? {}", ir.is_some());
             }
-            ItemKind::Constant { virtual_info, ctor_for, .. } => {
+            ItemKind::Constant {
+                virtual_info,
+                ctor_for,
+                ..
+            } => {
                 write_ctx.write_byte('c' as u8);
                 virtual_info.persist_write(write_ctx);
-                ctor_for.map(|(x,y)| (x.0,y)).persist_write(write_ctx);
+                ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
                 let ir = self.raw_ir();
-                println!("has ir? {}",ir.is_some());
+                println!("has ir? {}", ir.is_some());
             }
             ItemKind::AssociatedType { virtual_info } => {
                 write_ctx.write_byte('y' as u8);
@@ -331,46 +335,46 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
         // todo actual kind
         let kind_c = read_ctx.read_byte() as char;
-        let (kind,persist_data) = match kind_c {
+        let (kind, persist_data) = match kind_c {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
-                let ctor_for = Option::<(u32,u32)>::persist_read(read_ctx)
-                    .map(|(a,b)| (ItemId(a),b));
-                let extern_name = Option::<(FunctionAbi,String)>::persist_read(read_ctx);
+                let ctor_for =
+                    Option::<(u32, u32)>::persist_read(read_ctx).map(|(a, b)| (ItemId(a), b));
+                let extern_name = Option::<(FunctionAbi, String)>::persist_read(read_ctx);
                 let kind = ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
                     virtual_info,
                     extern_name,
-                    ctor_for
+                    ctor_for,
                 };
-                (kind,None)
+                (kind, None)
             }
             'c' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
-                let ctor_for = Option::<(u32,u32)>::persist_read(read_ctx)
-                    .map(|(a,b)| (ItemId(a),b));
+                let ctor_for =
+                    Option::<(u32, u32)>::persist_read(read_ctx).map(|(a, b)| (ItemId(a), b));
                 let kind = ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
                     virtual_info,
-                    ctor_for
+                    ctor_for,
                 };
-                (kind,None)
+                (kind, None)
             }
             'y' => {
                 let virtual_info = VirtualInfo::persist_read(read_ctx);
                 let kind = ItemKind::AssociatedType { virtual_info };
-                (kind,None)
+                (kind, None)
             }
             'a' => {
                 let adt_info_block = read_ctx.read_block();
                 let kind = ItemKind::new_adt();
-                (kind,Some(adt_info_block))
+                (kind, Some(adt_info_block))
             }
             't' => {
                 let kind = ItemKind::new_trait();
-                (kind,None)
+                (kind, None)
             }
             _ => panic!(),
         };
@@ -385,7 +389,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             path,
             did: None,
             kind,
-            persist_data
+            persist_data,
         }
     }
 }
@@ -395,7 +399,7 @@ pub enum FunctionAbi {
     RustIntrinsic,
 }
 
-impl<'vm> Persist<'vm> for (FunctionAbi,String) {
+impl<'vm> Persist<'vm> for (FunctionAbi, String) {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         assert!(self.0 == FunctionAbi::RustIntrinsic);
         write_ctx.write_str(&self.1);
@@ -403,7 +407,7 @@ impl<'vm> Persist<'vm> for (FunctionAbi,String) {
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let ident = read_ctx.read_str().to_owned();
-        (FunctionAbi::RustIntrinsic,ident)
+        (FunctionAbi::RustIntrinsic, ident)
     }
 }
 
@@ -416,7 +420,7 @@ pub enum ItemKind<'vm> {
         mono_instances: Mutex<HashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
-        extern_name: Option<(FunctionAbi, String)>
+        extern_name: Option<(FunctionAbi, String)>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -424,7 +428,7 @@ pub enum ItemKind<'vm> {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_values: Mutex<HashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
-        ctor_for: Option<(ItemId, u32)>
+        ctor_for: Option<(ItemId, u32)>,
     },
     AssociatedType {
         virtual_info: VirtualInfo,
@@ -470,7 +474,7 @@ impl<'vm> FunctionSig<'vm> {
 pub enum AdtKind<'vm> {
     Struct,
     EnumWithDiscriminant(Type<'vm>),
-    EnumNonZero
+    EnumNonZero,
 }
 
 pub struct AdtInfo<'vm> {
@@ -482,15 +486,14 @@ impl<'vm> AdtInfo<'vm> {
     pub fn is_enum(&self) -> bool {
         match self.kind {
             AdtKind::Struct => false,
-            AdtKind::EnumNonZero |
-            AdtKind::EnumWithDiscriminant(_) => true
+            AdtKind::EnumNonZero | AdtKind::EnumWithDiscriminant(_) => true,
         }
     }
 
     pub fn discriminant_ty(&self) -> Option<Type<'vm>> {
         match self.kind {
             AdtKind::EnumWithDiscriminant(ty) => Some(ty),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -582,7 +585,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: None,
             extern_name: None,
-            ctor_for: None
+            ctor_for: None,
         }
     }
 
@@ -592,7 +595,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: Some(VirtualInfo { trait_id, ident }),
             extern_name: None,
-            ctor_for: None
+            ctor_for: None,
         }
     }
 
@@ -602,7 +605,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: None,
             extern_name: Some((abi, name)),
-            ctor_for: None
+            ctor_for: None,
         }
     }
 
@@ -612,7 +615,7 @@ impl<'vm> ItemKind<'vm> {
             mono_instances: Default::default(),
             virtual_info: None,
             extern_name: None,
-            ctor_for: Some((adt_id,variant))
+            ctor_for: Some((adt_id, variant)),
         }
     }
 
@@ -621,7 +624,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_values: Default::default(),
             virtual_info: None,
-            ctor_for: None
+            ctor_for: None,
         }
     }
 
@@ -630,7 +633,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_values: Default::default(),
             virtual_info: Some(VirtualInfo { trait_id, ident }),
-            ctor_for: None
+            ctor_for: None,
         }
     }
 
@@ -639,7 +642,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_values: Default::default(),
             virtual_info: None,
-            ctor_for: Some((adt_id,variant))
+            ctor_for: Some((adt_id, variant)),
         }
     }
 
@@ -679,7 +682,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn is_function(&self) -> bool {
-        if let ItemKind::Function{..} = &self.kind {
+        if let ItemKind::Function { .. } = &self.kind {
             true
         } else {
             false
@@ -704,20 +707,29 @@ impl<'vm> Item<'vm> {
     pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
         let (ir, virtual_info, ctor_for, is_constant) = match &self.kind {
             ItemKind::Function {
-                ir, virtual_info, ctor_for, ..
+                ir,
+                virtual_info,
+                ctor_for,
+                ..
             } => (ir, virtual_info, ctor_for, false),
             ItemKind::Constant {
-                ir, virtual_info, ctor_for, ..
+                ir,
+                virtual_info,
+                ctor_for,
+                ..
             } => (ir, virtual_info, ctor_for, true),
             _ => panic!("item kind mismatch"),
         };
 
         // handle ctors
-        if let Some((ctor_item_id,ctor_variant)) = ctor_for {
+        if let Some((ctor_item_id, ctor_variant)) = ctor_for {
             let crate_items = self.vm.get_crate_items(self.crate_id);
             let ctor_item = crate_items.get(*ctor_item_id);
 
-            let ctor_ty = self.vm.ty_adt(ItemWithSubs { item: ctor_item, subs: subs.clone() });
+            let ctor_ty = self.vm.ty_adt(ItemWithSubs {
+                item: ctor_item,
+                subs: subs.clone(),
+            });
 
             let ir = glue_for_ctor(ctor_ty, *ctor_variant, is_constant);
             return (Arc::new(ir), Cow::Borrowed(subs));
@@ -753,10 +765,9 @@ impl<'vm> Item<'vm> {
     /// Try getting the IR without any complicated lookup.
     /// This is used when saving IR to the disk.
     pub fn raw_ir(&self) -> Option<Arc<IRFunction<'vm>>> {
-
         let ir = match &self.kind {
-            ItemKind::Function {ir, ..} => ir,
-            ItemKind::Constant {ir, ..} => ir,
+            ItemKind::Function { ir, .. } => ir,
+            ItemKind::Constant { ir, .. } => ir,
             _ => panic!("item kind mismatch"),
         };
 
@@ -790,14 +801,10 @@ impl<'vm> Item<'vm> {
         self.vm.alloc_constant(const_bytes)
     }
 
-    pub fn ctor_info(&self) -> Option<(ItemId,u32)> {
+    pub fn ctor_info(&self) -> Option<(ItemId, u32)> {
         match &self.kind {
-            ItemKind::Function {
-                ctor_for, ..
-            } => ctor_for.clone(),
-            ItemKind::Constant {
-                ctor_for, ..
-            } => ctor_for.clone(),
+            ItemKind::Function { ctor_for, .. } => ctor_for.clone(),
+            ItemKind::Constant { ctor_for, .. } => ctor_for.clone(),
             _ => panic!("item kind mismatch"),
         }
     }

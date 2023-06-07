@@ -1,20 +1,20 @@
-use crate::{items::CrateId, vm::VM, types::Type};
+use crate::{items::CrateId, types::Type, vm::VM};
 
 pub struct PersistWriteContext<'vm> {
     output: Vec<u8>,
     stack: Vec<Vec<u8>>,
 
     pub this_crate: CrateId,
-    pub types: Vec<Type<'vm>>
+    pub types: Vec<Type<'vm>>,
 }
 
 impl<'vm> PersistWriteContext<'vm> {
     pub fn new(this_crate: CrateId) -> Self {
         Self {
-            output: vec!(),
-            stack: vec!(),
+            output: vec![],
+            stack: vec![],
             this_crate,
-            types: vec!()
+            types: vec![],
         }
     }
 
@@ -189,9 +189,10 @@ where
     }
 }
 
-impl<'vm, A, B> Persist<'vm> for (A,B)
+impl<'vm, A, B> Persist<'vm> for (A, B)
 where
-    A: Persist<'vm>, B: Persist<'vm>
+    A: Persist<'vm>,
+    B: Persist<'vm>,
 {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.0.persist_write(write_ctx);
@@ -201,6 +202,6 @@ where
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let a = A::persist_read(read_ctx);
         let b = B::persist_read(read_ctx);
-        (a,b)
+        (a, b)
     }
 }

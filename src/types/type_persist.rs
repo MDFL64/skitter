@@ -1,11 +1,14 @@
-use crate::persist::{Persist, PersistWriteContext, PersistReadContext};
+use crate::persist::{Persist, PersistReadContext, PersistWriteContext};
 
-use super::{Type, TypeKind, Sub, IntWidth, IntSign, FloatWidth, Mutability, ArraySize, ItemWithSubs, SubList};
+use super::{
+    ArraySize, FloatWidth, IntSign, IntWidth, ItemWithSubs, Mutability, Sub, SubList, Type,
+    TypeKind,
+};
 
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         let type_id = self.0.persist_id.get_or_init(|| {
-            prepare_child_types(self.kind(),write_ctx);
+            prepare_child_types(self.kind(), write_ctx);
 
             let i = write_ctx.types.len();
             write_ctx.types.push(*self);
@@ -21,27 +24,27 @@ impl<'vm> Persist<'vm> for Type<'vm> {
 }
 
 /// Child types must live at lower indices when serialized.
-/// 
+///
 /// This does not include types in ADTs, which are not needed
 /// to construct types while reading and could introduce cycles.
 fn prepare_child_types<'vm>(ty_kind: &TypeKind<'vm>, write_ctx: &mut PersistWriteContext<'vm>) {
     match ty_kind {
         // No children.
-        TypeKind::Int(..) |
-        TypeKind::Float(_) |
-        TypeKind::Bool |
-        TypeKind::Char |
-        TypeKind::StringSlice |
-        TypeKind::Param(_) |
-        TypeKind::Foreign |
-        TypeKind::Dynamic |
-        TypeKind::FunctionPointer => (),
+        TypeKind::Int(..)
+        | TypeKind::Float(_)
+        | TypeKind::Bool
+        | TypeKind::Char
+        | TypeKind::StringSlice
+        | TypeKind::Param(_)
+        | TypeKind::Foreign
+        | TypeKind::Dynamic
+        | TypeKind::FunctionPointer => (),
 
         // Single child
-        TypeKind::Array(child,_) |
-        TypeKind::Slice(child) |
-        TypeKind::Ref(child,_) |
-        TypeKind::Ptr(child,_) => {
+        TypeKind::Array(child, _)
+        | TypeKind::Slice(child)
+        | TypeKind::Ref(child, _)
+        | TypeKind::Ptr(child, _) => {
             child.persist_write(write_ctx);
         }
 
@@ -53,8 +56,7 @@ fn prepare_child_types<'vm>(ty_kind: &TypeKind<'vm>, write_ctx: &mut PersistWrit
         }
 
         // Subs
-        TypeKind::Adt(item_with_subs) |
-        TypeKind::AssociatedType(item_with_subs) => {
+        TypeKind::Adt(item_with_subs) | TypeKind::AssociatedType(item_with_subs) => {
             for sub in &item_with_subs.subs.list {
                 if let Sub::Type(ty) = sub {
                     ty.persist_write(write_ctx);
@@ -62,54 +64,54 @@ fn prepare_child_types<'vm>(ty_kind: &TypeKind<'vm>, write_ctx: &mut PersistWrit
             }
         }
 
-        _ => panic!("todo children {:?}",ty_kind)
-    }   
+        _ => panic!("todo children {:?}", ty_kind),
+    }
 }
 
 impl<'vm> Persist<'vm> for TypeKind<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         match self {
-            TypeKind::Int(IntWidth::I8,IntSign::Signed) => write_ctx.write_byte(0),
-            TypeKind::Int(IntWidth::I16,IntSign::Signed) => write_ctx.write_byte(1),
-            TypeKind::Int(IntWidth::I32,IntSign::Signed) => write_ctx.write_byte(2),
-            TypeKind::Int(IntWidth::I64,IntSign::Signed) => write_ctx.write_byte(3),
-            TypeKind::Int(IntWidth::I128,IntSign::Signed) => write_ctx.write_byte(4),
-            TypeKind::Int(IntWidth::ISize,IntSign::Signed) => write_ctx.write_byte(5),
+            TypeKind::Int(IntWidth::I8, IntSign::Signed) => write_ctx.write_byte(0),
+            TypeKind::Int(IntWidth::I16, IntSign::Signed) => write_ctx.write_byte(1),
+            TypeKind::Int(IntWidth::I32, IntSign::Signed) => write_ctx.write_byte(2),
+            TypeKind::Int(IntWidth::I64, IntSign::Signed) => write_ctx.write_byte(3),
+            TypeKind::Int(IntWidth::I128, IntSign::Signed) => write_ctx.write_byte(4),
+            TypeKind::Int(IntWidth::ISize, IntSign::Signed) => write_ctx.write_byte(5),
 
-            TypeKind::Int(IntWidth::I8,IntSign::Unsigned) => write_ctx.write_byte(6),
-            TypeKind::Int(IntWidth::I16,IntSign::Unsigned) => write_ctx.write_byte(7),
-            TypeKind::Int(IntWidth::I32,IntSign::Unsigned) => write_ctx.write_byte(8),
-            TypeKind::Int(IntWidth::I64,IntSign::Unsigned) => write_ctx.write_byte(9),
-            TypeKind::Int(IntWidth::I128,IntSign::Unsigned) => write_ctx.write_byte(10),
-            TypeKind::Int(IntWidth::ISize,IntSign::Unsigned) => write_ctx.write_byte(11),
+            TypeKind::Int(IntWidth::I8, IntSign::Unsigned) => write_ctx.write_byte(6),
+            TypeKind::Int(IntWidth::I16, IntSign::Unsigned) => write_ctx.write_byte(7),
+            TypeKind::Int(IntWidth::I32, IntSign::Unsigned) => write_ctx.write_byte(8),
+            TypeKind::Int(IntWidth::I64, IntSign::Unsigned) => write_ctx.write_byte(9),
+            TypeKind::Int(IntWidth::I128, IntSign::Unsigned) => write_ctx.write_byte(10),
+            TypeKind::Int(IntWidth::ISize, IntSign::Unsigned) => write_ctx.write_byte(11),
 
             TypeKind::Float(FloatWidth::F32) => write_ctx.write_byte(12),
             TypeKind::Float(FloatWidth::F64) => write_ctx.write_byte(13),
             TypeKind::Bool => write_ctx.write_byte(14),
             TypeKind::Char => write_ctx.write_byte(15),
 
-            TypeKind::Ref(child,Mutability::Const) => {
+            TypeKind::Ref(child, Mutability::Const) => {
                 write_ctx.write_byte(16);
                 child.persist_write(write_ctx);
             }
-            TypeKind::Ref(child,Mutability::Mut) => {
+            TypeKind::Ref(child, Mutability::Mut) => {
                 write_ctx.write_byte(17);
                 child.persist_write(write_ctx);
             }
-            TypeKind::Ptr(child,Mutability::Const) => {
+            TypeKind::Ptr(child, Mutability::Const) => {
                 write_ctx.write_byte(18);
                 child.persist_write(write_ctx);
             }
-            TypeKind::Ptr(child,Mutability::Mut) => {
+            TypeKind::Ptr(child, Mutability::Mut) => {
                 write_ctx.write_byte(19);
                 child.persist_write(write_ctx);
             }
-            TypeKind::Array(child,ArraySize::Static(n)) => {
+            TypeKind::Array(child, ArraySize::Static(n)) => {
                 write_ctx.write_byte(20);
                 child.persist_write(write_ctx);
                 n.persist_write(write_ctx);
             }
-            TypeKind::Array(child,ArraySize::ConstParam(n)) => {
+            TypeKind::Array(child, ArraySize::ConstParam(n)) => {
                 write_ctx.write_byte(21);
                 child.persist_write(write_ctx);
                 // TODO
@@ -154,7 +156,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 write_ctx.write_byte(32);
             }
 
-            _ => panic!("write type {:?}",self)
+            _ => panic!("write type {:?}", self),
         }
     }
 
@@ -182,16 +184,10 @@ impl<'vm> Persist<'vm> for Sub<'vm> {
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let c = read_ctx.read_byte() as char;
         match c {
-            'T' => {
-                Sub::Type(Type::persist_read(read_ctx))
-            }
-            'C' => {
-                Sub::Const
-            }
-            'L' => {
-                Sub::Lifetime
-            }
-            _ => panic!()
+            'T' => Sub::Type(Type::persist_read(read_ctx)),
+            'C' => Sub::Const,
+            'L' => Sub::Lifetime,
+            _ => panic!(),
         }
     }
 }
@@ -202,8 +198,8 @@ impl<'vm> Persist<'vm> for SubList<'vm> {
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        SubList{
-            list: Vec::<Sub>::persist_read(read_ctx)
+        SubList {
+            list: Vec::<Sub>::persist_read(read_ctx),
         }
     }
 }
@@ -225,4 +221,3 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
         todo!()
     }
 }
-

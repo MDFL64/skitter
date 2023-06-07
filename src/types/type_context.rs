@@ -158,7 +158,7 @@ impl<'vm> TypeContext<'vm> {
             let item_path = path_from_rustc(&def_path, ctx.vm);
             if item_path.can_find() {
                 if did.krate == rustc_hir::def_id::LOCAL_CRATE {
-                    panic!("attempt to find local item by path: {:?}",item_path);
+                    panic!("attempt to find local item by path: {:?}", item_path);
                 }
                 let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
                 let crate_items = ctx.vm.get_crate_items(trait_crate_id);
@@ -209,7 +209,7 @@ impl<'vm> TypeContext<'vm> {
                     kind,
                     layout: Default::default(),
                     assoc_values: Default::default(),
-                    persist_id: Default::default()
+                    persist_id: Default::default(),
                 });
                 Type(intern_ref, vm)
             })

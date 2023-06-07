@@ -41,7 +41,7 @@ pub struct VM<'vm> {
 
 struct Crate<'vm> {
     rustc_worker: Option<RustCWorker<'vm>>,
-    items: Option<&'vm CrateItems<'vm>>
+    items: Option<&'vm CrateItems<'vm>>,
 }
 
 pub struct VMThread<'vm> {
@@ -122,7 +122,7 @@ impl<'vm> VM<'vm> {
 
         crates.push(Crate {
             rustc_worker: Some(worker),
-            items: None
+            items: None,
         });
         crate_id
     }
@@ -217,11 +217,11 @@ impl<'vm> VM<'vm> {
     }
 
     pub fn ty_func_def(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
-        self.types.intern(TypeKind::FunctionDef(def),self)
+        self.types.intern(TypeKind::FunctionDef(def), self)
     }
 
     pub fn ty_adt(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
-        self.types.intern(TypeKind::Adt(def),self)
+        self.types.intern(TypeKind::Adt(def), self)
     }
 
     pub fn ty_unknown(&'vm self) -> Type<'vm> {
@@ -233,7 +233,7 @@ impl<'vm> VM<'vm> {
     }
 
     pub fn ty_ref(&'vm self, ref_ty: Type<'vm>, mutability: Mutability) -> Type<'vm> {
-        self.types.intern(TypeKind::Ref(ref_ty,mutability), self)
+        self.types.intern(TypeKind::Ref(ref_ty, mutability), self)
     }
 }
 
