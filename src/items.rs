@@ -12,7 +12,7 @@ use crate::{
     persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM},
+    vm::{Function, VM}, lazy_collections,
 };
 use ahash::AHashMap;
 
@@ -64,6 +64,55 @@ impl<'vm> CrateItems<'vm> {
         }
 
         write_ctx.save(file_name);
+    }
+
+    pub fn index_bench(&self, vm: &'vm VM<'vm>) {
+        // LINEAR SCAN (LMAO)
+        let t = std::time::Instant::now();
+        for item in &self.items {
+            let res = self.items.iter().find(|x| x.path == item.path);
+        }
+        println!("linear scan = {:?}",t.elapsed());
+
+        // HASH LOOKUP
+        let t = std::time::Instant::now();
+        for item in &self.items {
+            let res = self.map_path_to_item.get(&item.path);
+        }
+        println!("hash lookup = {:?}",t.elapsed());
+
+        // STD HASH LOOKUP
+        let h2: HashMap<_,_> = self.map_path_to_item.iter().collect();
+
+        let t = std::time::Instant::now();
+        for item in &self.items {
+            let res = h2.get(&item.path);
+        }
+        println!("std hash lookup = {:?}",t.elapsed());
+
+
+        // SORTED ARRAY
+        let mut sorted_array: Vec<_> = self.items.iter().map(|x| x.path.clone()).collect();
+        sorted_array.sort();
+
+        let t = std::time::Instant::now();
+        for item in &self.items {
+            let res = sorted_array.binary_search(&item.path);
+        }
+        println!("binary search = {:?}",t.elapsed());
+
+        let written: &'static [u8] = lazy_collections::LazyArray::write(self.crate_id, sorted_array).leak();
+        let mut read_ctx = PersistReadContext::new(written, vm, self.crate_id);
+
+        let t = std::time::Instant::now();
+        let lazy_list = lazy_collections::LazyArray::<ItemPath>::read(&mut read_ctx);
+        println!("~ build list = {:?}",t.elapsed());
+
+        let t = std::time::Instant::now();
+        for item in &self.items {
+            let res = lazy_list.find(&item.path, vm);
+        }
+        println!("lazy list = {:?}",t.elapsed());
     }
 
     pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
@@ -173,7 +222,7 @@ impl<'vm> CrateItems<'vm> {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord)]
 pub struct ItemPath<'vm>(NameSpace, &'vm str);
 
 impl<'vm> ItemPath<'vm> {
@@ -219,7 +268,7 @@ impl<'vm> Persist<'vm> for ItemPath<'vm> {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, PartialOrd, Ord)]
 enum NameSpace {
     /// Structs, Enums, etc.
     Type,
@@ -318,10 +367,13 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             ItemKind::Adt { info } => {
                 write_ctx.write_byte('a' as u8);
+                // TODO just parse normally? the new scheme should parse all items
+                // after types
+
                 // adt info must be filled after parsing types
-                write_ctx.start_block();
+                /*write_ctx.start_block();
                 info.get().unwrap().persist_write(write_ctx);
-                write_ctx.end_block();
+                write_ctx.end_block();*/
             }
             ItemKind::Trait { .. } => {
                 write_ctx.write_byte('t' as u8);

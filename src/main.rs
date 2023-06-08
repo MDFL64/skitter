@@ -31,6 +31,7 @@ mod persist;
 mod rustc_worker;
 mod test;
 mod types;
+mod lazy_collections;
 
 use std::{process, time::Instant};
 
@@ -81,14 +82,15 @@ fn main() {
             );
             vm.wait_for_setup(core_crate);
             let core_items = vm.get_crate_items(core_crate);
-            core_items.save_items("core.bin");
+            /*core_items.save_items("core.bin");
             println!("Saved core IR.");
             {
                 println!("Loading...");
                 let t = Instant::now();
                 CrateItems::load_items("core.bin", &vm, CrateId::new(7));
                 println!("{:?}", t.elapsed());
-            }
+            }*/
+            core_items.index_bench(&vm);
 
             process::exit(0);
         }

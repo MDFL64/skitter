@@ -18,6 +18,10 @@ impl<'vm> PersistWriteContext<'vm> {
         }
     }
 
+    pub fn offset(&self) -> u32 {
+        self.output.len() as u32
+    }
+
     pub fn write_byte(&mut self, bytes: u8) {
         self.output.push(bytes);
     }
@@ -32,17 +36,20 @@ impl<'vm> PersistWriteContext<'vm> {
     }
 
     /// Start a nested sub-block that can be skipped over and parsed later.
-    pub fn start_block(&mut self) {
+    pub fn push_writer(&mut self) {
         let parent = std::mem::take(&mut self.output);
         self.stack.push(parent);
     }
 
-    pub fn end_block(&mut self) {
+    pub fn pop_writer(&mut self) -> Vec<u8> {
         let parent = self.stack.pop().unwrap();
 
         let child = std::mem::replace(&mut self.output, parent);
-        child.len().persist_write(self);
-        self.write_bytes(&child);
+        child
+    }
+
+    pub fn flip(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.output)
     }
 
     pub fn save(&self, file_name: &str) {
@@ -94,6 +101,11 @@ impl<'vm> PersistReadContext<'vm> {
         let len = usize::persist_read(self);
         self.read_bytes(len)
     }
+
+    pub fn reset(&mut self, data: &'vm [u8]) {
+        self.data = data;
+        self.index = 0;
+    }
 }
 
 pub trait Persist<'vm> {
@@ -106,14 +118,18 @@ macro_rules! persist_uint {
     ($ty:ty) => {
         impl<'vm> Persist<'vm> for $ty {
             fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
-                if *self < 251 {
-                    write_ctx.write_byte(*self as u8);
-                } else if *self < 256 {
-                    write_ctx.write_byte(251);
-                    write_ctx.write_bytes(&(*self as u16).to_le_bytes());
-                } else if *self < 65536 {
+                let n = *self as u64;
+                if n < 252 {
+                    write_ctx.write_byte(n as u8);
+                } else if n < 256 {
                     write_ctx.write_byte(252);
-                    write_ctx.write_bytes(&(*self as u16).to_le_bytes());
+                    write_ctx.write_byte(n as u8);
+                } else if n < 65536 {
+                    write_ctx.write_byte(253);
+                    write_ctx.write_bytes(&(n as u16).to_le_bytes());
+                } else if n < 4294967296 {
+                    write_ctx.write_byte(254);
+                    write_ctx.write_bytes(&(n as u32).to_le_bytes());
                 } else {
                     panic!("TOO FAT! {}", self);
                 }
@@ -122,12 +138,16 @@ macro_rules! persist_uint {
             fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
                 let n = read_ctx.read_byte();
                 match n {
-                    255 | 254 | 253 => todo!(),
-                    252 => {
+                    255 |
+                    254 => {
+                        let bs = read_ctx.read_bytes(4);
+                        u32::from_le_bytes(bs.try_into().unwrap()) as _
+                    }
+                    253 => {
                         let bs = read_ctx.read_bytes(2);
                         u16::from_le_bytes(bs.try_into().unwrap()) as _
                     }
-                    251 => {
+                    252 => {
                         let b = read_ctx.read_byte();
                         b as _
                     }
