@@ -2,6 +2,7 @@ use ahash::AHashSet;
 use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
+use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
 use crate::items::CrateItems;
 use crate::items::Item;
@@ -28,9 +29,10 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
-    crates: RwLock<Vec<Crate<'vm>>>,
+    crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
 
-    arena_items: Arena<CrateItems<'vm>>,
+    arena_crates: Arena<Box<dyn CrateProvider<'vm>>>,
+    arena_items: Arena<Item<'vm>>,
     arena_functions: Arena<Function<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>,
     arena_constants: Arena<Vec<u8>>,
@@ -93,6 +95,7 @@ impl<'vm> VM<'vm> {
             is_verbose: false,
             crates: Default::default(),
 
+            arena_crates: Arena::new(),
             arena_items: Arena::new(),
             arena_functions: Arena::new(),
             arena_bytecode: Arena::new(),
@@ -111,54 +114,28 @@ impl<'vm> VM<'vm> {
         }
     }
 
-    pub fn add_worker<'s>(
-        &'vm self,
-        worker_config: RustCWorkerConfig,
-        scope: &'s std::thread::Scope<'s, 'vm>,
+    /// I tried for so long to get this to work with scoped threads.
+    /// Got it working, and then had it break again when 
+    /// 
+    /// To hell with it. Just require a static VM to use a rustc worker.
+    pub fn add_rustc_provider(
+        &'static self,
+        worker_config: RustCWorkerConfig
     ) -> CrateId {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
-        let worker = RustCWorker::new(worker_config, scope, self, crate_id);
+        
+        let worker = Box::new(RustCWorker::new(worker_config, self, crate_id));
 
-        crates.push(Crate {
-            rustc_worker: Some(worker),
-            items: None,
-        });
+        let worker_ref = self.arena_crates.alloc(worker);
+        crates.push(worker_ref);
+
         crate_id
     }
 
-    pub fn set_crate_items(
-        &'vm self,
-        crate_id: CrateId,
-        items: CrateItems<'vm>,
-    ) -> &'vm CrateItems<'vm> {
-        let mut crates = self.crates.write().unwrap();
-        let items_ref = self.arena_items.alloc(items);
-        crates[crate_id.index()].items = Some(items_ref);
-        items_ref
-    }
-
-    pub fn get_crate_items(&'vm self, crate_id: CrateId) -> &'vm CrateItems<'vm> {
+    pub fn crate_provider(&self, crate_id: CrateId) -> &'vm Box<dyn CrateProvider<'vm>> {
         let crates = self.crates.read().unwrap();
         crates[crate_id.index()]
-            .items
-            .expect("crate is missing items")
-    }
-
-    pub fn wait_for_setup(&self, crate_id: CrateId) {
-        // structured like this to prevent deadlocking the RwLock
-        let res = {
-            let crates = self.crates.read().unwrap();
-            let worker = crates[crate_id.index()].rustc_worker.as_ref().unwrap();
-            worker.wait_for_setup()
-        };
-        res.wait();
-    }
-
-    pub fn build_function_ir(&self, crate_id: CrateId, item_id: ItemId) {
-        let crates = self.crates.read().unwrap();
-        let worker = crates[crate_id.index()].rustc_worker.as_ref().unwrap();
-        worker.build_function_ir(item_id);
     }
 
     pub fn alloc_function(
@@ -188,7 +165,11 @@ impl<'vm> VM<'vm> {
         self.arena_functions.alloc(func)
     }
 
-    pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &Vec<Instr<'vm>> {
+    pub fn alloc_item(&'vm self, item: Item<'vm>) -> &'vm Item<'vm> {
+        self.arena_items.alloc(item)
+    }
+
+    pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &'vm Vec<Instr<'vm>> {
         self.arena_bytecode.alloc(bc)
     }
 

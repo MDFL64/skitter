@@ -18,17 +18,17 @@ use super::{
 /// Converts rust IR to skitter IR.
 ///
 /// Now uses TypeckResults instead of THIR because THIR can get randomly stolen when querying other THIR.
-pub struct IRFunctionConverter<'vm, 'tcx> {
-    ctx: RustCContext<'vm, 'tcx>,
+pub struct IRFunctionConverter<'vm, 'tcx, 'a> {
+    ctx: &'a RustCContext<'vm, 'tcx>,
     func_id: LocalDefId,
     types: &'tcx TypeckResults<'tcx>,
     loops: Vec<(hir::HirId, LoopId)>,
     builder: IRFunctionBuilder<'vm>,
 }
 
-impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx> {
+impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
     pub fn run(
-        ctx: RustCContext<'vm, 'tcx>,
+        ctx: &'a RustCContext<'vm, 'tcx>,
         func_id: LocalDefId,
         body: &rustc_hir::Body,
         types: &'tcx TypeckResults<'tcx>,

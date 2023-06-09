@@ -1,10 +1,10 @@
 use std::{
-    sync::{Arc, Barrier, Mutex},
-    time::Instant,
+    sync::{Arc, Barrier, Mutex, OnceLock},
+    time::Instant, borrow::Borrow,
 };
 
 use ahash::AHashMap;
-use rustc_hir::def_id::LocalDefId;
+use rustc_hir::def_id::{LocalDefId, DefId};
 use rustc_hir::AssocItemKind;
 use rustc_hir::ItemKind as HirItemKind;
 use rustc_hir::VariantData;
@@ -13,34 +13,20 @@ use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    ir::{converter::IRFunctionConverter, IRFunctionBuilder},
+    ir::{converter::IRFunctionConverter, IRFunctionBuilder, IRFunction},
     items::{
         path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
-        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl,
+        FunctionAbi, GenericCounts, ItemId, ItemKind, ItemPath, TraitImpl, Item,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
-    vm::VM,
+    vm::VM, crate_provider::CrateProvider,
 };
 
 /////////////////////////
 
 pub struct RustCWorker<'vm> {
-    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn>>>,
-    pub items: Option<&'vm CrateItems<'vm>>,
-    //crate_id: CrateId
-}
-
-#[derive(Clone)]
-pub struct RustCContext<'vm, 'tcx> {
-    pub items: &'vm CrateItems<'vm>,
-    pub vm: &'vm VM<'vm>,
-    pub tcx: TyCtxt<'tcx>,
-}
-
-impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
-    pub fn type_from_rustc(&self, ty: Ty<'tcx>) -> Type<'vm> {
-        self.vm.types.type_from_rustc(ty, self)
-    }
+    sender: Mutex<std::sync::mpsc::Sender<Box<dyn WorkerCommandDyn<'vm>>>>,
+    items: OnceLock<Arc<RustCItems<'vm>>>
 }
 
 pub struct WorkerResult<T> {
@@ -49,8 +35,10 @@ pub struct WorkerResult<T> {
 }
 
 impl<T> WorkerResult<T> {
-    pub fn wait(&self) {
+    pub fn wait(&self) -> T {
         self.complete.wait();
+        let mut value = self.value.lock().unwrap();
+        value.take().unwrap()
     }
 }
 
@@ -59,16 +47,16 @@ struct WorkerCommand<T, F> {
     result: Arc<WorkerResult<T>>,
 }
 
-trait WorkerCommandDyn: Send + Sync {
-    fn call<'vm>(&self, context: RustCContext);
+trait WorkerCommandDyn<'vm>: Send + Sync + 'vm {
+    fn call(&self, context: &RustCContext<'vm,'_>);
 }
 
-impl<T, F> WorkerCommandDyn for WorkerCommand<T, F>
+impl<'vm, T, F> WorkerCommandDyn<'vm> for WorkerCommand<T, F>
 where
-    F: Fn(RustCContext) -> T + Send + Sync,
-    T: Send + Sync,
+    F: Fn(&RustCContext<'vm,'_>) -> T + Send + Sync + 'vm,
+    T: Send + Sync + 'vm,
 {
-    fn call<'vm>(&self, context: RustCContext) {
+    fn call(&self, context: &RustCContext<'vm,'_>) {
         let res = (self.func)(context);
         {
             let mut guard = self.result.value.lock().unwrap();
@@ -94,13 +82,11 @@ pub struct RustCWorkerConfig<'a> {
 }
 
 impl<'vm> RustCWorker<'vm> {
-    pub fn new<'s>(
+    pub fn new(
         worker_config: RustCWorkerConfig,
-        scope: &'s std::thread::Scope<'s, 'vm>,
         vm: &'vm VM<'vm>,
         this_crate: CrateId,
-    ) -> Self {
-        let is_verbose = vm.is_verbose;
+    ) -> Self where 'vm: 'static {
 
         let (sender, recv) = std::sync::mpsc::channel::<Box<dyn WorkerCommandDyn>>();
 
@@ -148,21 +134,29 @@ impl<'vm> RustCWorker<'vm> {
             registry: rustc_errors::registry::Registry::new(&rustc_error_codes::DIAGNOSTICS),
         };
 
-        scope.spawn(move || {
+        std::thread::spawn(move || {
             rustc_interface::run_compiler(config, |compiler| {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
-                        let mut items = CrateItems::new(this_crate, worker_config.extern_crates);
 
-                        let hir = tcx.hir();
+                        let ctx = RustCContext::new(vm, tcx, this_crate);
 
-                        let t = Instant::now();
-                        let hir_items = hir.items();
-                        if is_verbose {
-                            println!("rustc hir items took {:?}", t.elapsed());
+                        loop {
+                            let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
+                            cmd.call(&ctx);
                         }
+                    })
+                })
+            });
+        });
 
-                        let t = Instant::now();
+        RustCWorker {
+            sender: Mutex::new(sender),
+            items: Default::default(),
+        }
+    }
+
+                        /*let t = Instant::now();
 
                         let mut adt_items = Vec::new();
                         let mut impl_items: Vec<ImplItem> = Vec::new();
@@ -632,22 +626,13 @@ impl<'vm> RustCWorker<'vm> {
                         loop {
                             let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
                             cmd.call(RustCContext { items, tcx, vm });
-                        }
-                    })
-                });
-            });
-        });
+                        }*/
 
-        RustCWorker {
-            sender: Mutex::new(sender),
-            items: Default::default(),
-        }
-    }
 
     fn call<T, F>(&self, func: F) -> Arc<WorkerResult<T>>
     where
-        F: Fn(RustCContext) -> T + Send + Sync + 'static,
-        T: Send + Sync + 'static,
+        F: Fn(&RustCContext<'vm,'_>) -> T + Send + Sync + 'vm,
+        T: Send + Sync + 'vm,
     {
         let result = Arc::new(WorkerResult::<T> {
             complete: Barrier::new(2),
@@ -667,7 +652,34 @@ impl<'vm> RustCWorker<'vm> {
         result
     }
 
-    pub fn build_function_ir(&self, item_id: ItemId) {
+    fn items(&self) -> &RustCItems<'vm> {
+        self.items.get_or_init(|| {
+            let res = self.call(|ctx| {
+                ctx.items.clone()
+            });
+            res.wait()
+        })
+    }
+
+    /*fn init_item(&self, item_id: ItemId, def_id: LocalDefId) -> &'vm Item<'vm> {
+        let res = self.call(move |ctx| {
+            let hir = ctx.tcx.hir();
+
+            let item_source = hir.expect_item(def_id);
+
+            let kind = match item_source.kind {
+                HirItemKind::Fn(..) => {
+                    ItemKind::new_function()
+                }
+                _ => panic!("todo init {:?}",item_source)
+            };
+
+            let item = Item::new(self.vm, self.crate_id, item_id, path, kind);
+        });
+        res.wait()
+    }*/
+
+    /*pub fn build_function_ir(&self, item_id: ItemId) {
         let res = self.call(move |ctx| {
             let item = ctx.items.get(item_id);
             let did = item.did.unwrap();
@@ -689,5 +701,172 @@ impl<'vm> RustCWorker<'vm> {
 
     pub fn wait_for_setup(&self) -> Arc<WorkerResult<()>> {
         self.call(|_ctx| {})
+    }*/
+}
+
+impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
+    fn item_by_id(&self, item_id: ItemId) -> &'vm Item<'vm> {
+        let items = self.items();
+
+        items.items[item_id.index()].item
+    }
+
+    fn item_by_path(&self, path: &ItemPath) -> Option<&'vm Item<'vm>> {
+        let items = self.items();
+
+        let item_id = items.map_paths.get(path);
+
+        item_id.map(|item_id| {
+            items.items[item_id.index()].item
+        })
+    }
+
+    fn build_ir(&self, item_id: ItemId) -> Arc<IRFunction<'vm>> {
+        let items = self.items();
+
+        let item_info = &items.items[item_id.index()];
+        let did = item_info.did;
+        let is_constant = !item_info.item.is_function();
+
+        let res = self.call(move |ctx| {
+
+            let hir = ctx.tcx.hir();
+
+            let body_id = hir.body_owned_by(did);
+            let body = hir.body(body_id);
+
+            let types = ctx.tcx.typeck(did);
+
+            let ir = IRFunctionConverter::run(ctx, did, body, types, is_constant);
+            Arc::new(ir)
+        });
+        res.wait()
+    }
+}
+
+pub struct RustCContext<'vm, 'tcx> {
+    pub vm: &'vm VM<'vm>,
+    pub tcx: TyCtxt<'tcx>,
+
+    items: Arc<RustCItems<'vm>>
+}
+
+impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
+    pub fn new(vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>, crate_id: CrateId) -> Self {
+
+        let mut items = RustCItems::default();
+
+        let hir = tcx.hir();
+
+        let t = Instant::now();
+        let hir_items = hir.items();
+        if vm.is_verbose {
+            println!("rustc hir items took {:?}", t.elapsed());
+        }
+
+        for item_id in hir_items {
+            let item = hir.item(item_id);
+            match item.kind {
+                // not important
+                HirItemKind::Use(..)
+                | HirItemKind::Mod(_)
+                | HirItemKind::ExternCrate(_)
+                | HirItemKind::Macro(..)
+                | HirItemKind::TyAlias(..)
+                | HirItemKind::OpaqueTy(_)
+                | HirItemKind::TraitAlias(..) => (),
+                // simple items, add to the index
+                HirItemKind::Fn(..) => {
+                    let local_id = item.owner_id.def_id;
+                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+                    let kind = ItemKind::new_function();
+
+                    items.index_item(kind,item_path,local_id,vm,crate_id);
+                }
+                _ => panic!("todo item {:?}",item.kind)
+            }
+        }
+
+        RustCContext {
+            vm,
+            tcx,
+            items: Arc::new(items)
+        }
+    }
+
+    pub fn type_from_rustc(&self, ty: Ty<'tcx>) -> Type<'vm> {
+        self.vm.types.type_from_rustc(ty, self)
+    }
+
+    pub fn item_by_did(&self, did: DefId) -> Option<&'vm Item<'vm>> {
+        if did.krate == rustc_hir::def_id::LOCAL_CRATE {
+            let local_did = rustc_hir::def_id::LocalDefId {
+                local_def_index: did.index,
+            };
+            self.items.map_defs
+                .get(&local_did)
+                .map(|item_id| self.items.items[item_id.index()].item)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_crate_id(
+        &self,
+        crate_num: rustc_span::def_id::CrateNum,
+    ) -> CrateId {
+        todo!()
+        /*let mut cache = self.extern_crate_id_cache.lock().unwrap();
+
+        *cache.entry(crate_num).or_insert_with(|| {
+            let crate_name = tcx.crate_name(crate_num);
+            for entry in &self.extern_crate_list {
+                if entry.name == crate_name.as_str() {
+                    return entry.id;
+                }
+            }
+            panic!(
+                "lookup for crate failed: {} {}",
+                crate_num,
+                crate_name.as_str()
+            );
+        })*/
+    }
+}
+
+#[derive(Default)]
+struct RustCItems<'vm> {
+    items: Vec<RustCItem<'vm>>,
+    map_paths: AHashMap<ItemPath<'vm>,ItemId>,
+    map_defs: AHashMap<LocalDefId,ItemId>
+}
+
+struct RustCItem<'vm> {
+    did: LocalDefId,
+    item: &'vm Item<'vm>
+}
+
+impl<'vm> RustCItems<'vm> {
+    fn index_item(&mut self, kind: ItemKind<'vm>, path: ItemPath<'vm>, did: LocalDefId, vm: &'vm VM<'vm>, crate_id: CrateId) -> ItemId {
+        let item_id = ItemId::new(self.items.len() as u32);
+
+        let item = vm.alloc_item(Item::new(vm, crate_id, item_id, path, kind));
+
+        self.items.push(RustCItem{
+            did,
+            item
+        });
+
+        if item.path.can_lookup() {
+            let old = self.map_paths.insert(item.path.clone(), item_id);
+            assert!(old.is_none());
+        }
+
+        {
+            let old = self.map_defs.insert(did, item_id);
+            assert!(old.is_none());
+        }
+
+        item_id
     }
 }

@@ -151,19 +151,19 @@ impl<'vm> TypeContext<'vm> {
         args: &[GenericArg<'tcx>],
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> ItemWithSubs<'vm> {
-        let item = if let Some(item) = ctx.items.find_by_did(did) {
+        let item = if let Some(item) = ctx.item_by_did(did) {
             item
         } else {
             let def_path = ctx.tcx.def_path(did);
             let item_path = path_from_rustc(&def_path, ctx.vm);
-            if item_path.can_find() {
+            if item_path.can_lookup() {
                 if did.krate == rustc_hir::def_id::LOCAL_CRATE {
                     panic!("attempt to find local item by path: {:?}", item_path);
                 }
-                let trait_crate_id = ctx.items.find_crate_id(ctx.tcx, did.krate);
-                let crate_items = ctx.vm.get_crate_items(trait_crate_id);
+                let trait_crate_id = ctx.find_crate_id(did.krate);
+                let crate_items = ctx.vm.crate_provider(trait_crate_id);
 
-                if let Some(item) = crate_items.find_by_path(&item_path) {
+                if let Some(item) = crate_items.item_by_path(&item_path) {
                     item
                 } else {
                     panic!("couldn't find item: {:?} -> {:?}", def_path, item_path)
@@ -175,9 +175,9 @@ impl<'vm> TypeContext<'vm> {
                     ImplSubject::Inherent(ty) => {
                         let ty = self.type_from_rustc(ty, ctx);
                         if let Some((crate_id, ir_source)) = ty.find_assoc_value(ident.as_str()) {
-                            let crate_items = ctx.vm.get_crate_items(crate_id);
+                            let crate_items = ctx.vm.crate_provider(crate_id);
                             if let AssocValue::Item(item_id) = ir_source {
-                                crate_items.get(item_id)
+                                crate_items.item_by_id(item_id)
                             } else {
                                 panic!("can't convert raw IR to item, this is a bug");
                             }

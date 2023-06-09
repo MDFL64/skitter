@@ -25,6 +25,7 @@ mod builtins;
 mod bytecode_compiler;
 mod bytecode_select;
 mod cli;
+mod crate_provider;
 mod ir;
 mod items;
 mod persist;
@@ -33,14 +34,14 @@ mod test;
 mod types;
 mod lazy_collections;
 
-use std::{process, time::Instant};
+use std::process;
 
 use clap::Parser;
 use types::SubList;
 use vm::VM;
 
 use crate::{
-    items::{CrateId, CrateItems, ExternCrate, ItemPath},
+    items::{ExternCrate, ItemPath},
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -58,20 +59,20 @@ fn main() {
         test::test(&args.file_name);
     }
 
-    let mut vm = VM::new();
+    let vm: &mut VM = Box::leak(Box::new(VM::new()));
     vm.is_verbose = args.verbose;
 
     std::thread::scope(|scope| {
         let mut extern_crates = Vec::new();
 
-        if args.save_core {
+        /*if args.save_core {
             let sysroot = get_sysroot();
             let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
 
             // make sure core root exists
             assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_worker(
+            let core_crate = vm.add_rustc_provider(
                 RustCWorkerConfig {
                     source_root: &core_root,
                     extern_crates: vec![],
@@ -80,8 +81,8 @@ fn main() {
                 },
                 scope,
             );
-            vm.wait_for_setup(core_crate);
-            let core_items = vm.get_crate_items(core_crate);
+
+            let core_items = vm.crate_provider(core_crate);
             /*core_items.save_items("core.bin");
             println!("Saved core IR.");
             {
@@ -90,10 +91,10 @@ fn main() {
                 CrateItems::load_items("core.bin", &vm, CrateId::new(7));
                 println!("{:?}", t.elapsed());
             }*/
-            core_items.index_bench(&vm);
+            //core_items.index_bench(&vm);
 
             process::exit(0);
-        }
+        }*/
 
         if args.core {
             let sysroot = get_sysroot();
@@ -102,40 +103,35 @@ fn main() {
             // make sure core root exists
             assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_worker(
+            let core_crate = vm.add_rustc_provider(
                 RustCWorkerConfig {
                     source_root: &core_root,
                     extern_crates: vec![],
                     is_core: true,
                     save: false,
-                },
-                scope,
+                }
             );
 
-            vm.wait_for_setup(core_crate);
             extern_crates.push(ExternCrate {
                 id: core_crate,
                 name: "core".to_owned(),
             });
         }
 
-        let main_crate = vm.add_worker(
+        let main_crate = vm.add_rustc_provider(
             RustCWorkerConfig {
                 source_root: &args.file_name,
                 extern_crates,
                 is_core: false,
                 save: false,
-            },
-            scope,
+            }
         );
-
-        vm.wait_for_setup(main_crate);
 
         let main_path = ItemPath::main();
 
         let main_item = vm
-            .get_crate_items(main_crate)
-            .find_by_path(&main_path)
+            .crate_provider(main_crate)
+            .item_by_path(&main_path)
             .expect("no main found");
 
         let main_fn = main_item.func_mono(&SubList { list: Vec::new() });

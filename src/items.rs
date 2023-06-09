@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     builtins::BuiltinTrait,
-    bytecode_compiler::{self, BytecodeCompiler},
+    bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
     persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
@@ -32,7 +32,7 @@ pub struct ExternCrate {
 }
 
 impl<'vm> CrateItems<'vm> {
-    pub fn new(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
+    /*pub fn new_deprecated(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
         Self {
             crate_id,
             items: Default::default(),
@@ -153,7 +153,7 @@ impl<'vm> CrateItems<'vm> {
             vm,
             crate_id: self.crate_id,
             item_id,
-            did: Some(did),
+            //did: Some(did),
             path: path.clone(),
             kind,
             persist_data: None,
@@ -219,7 +219,7 @@ impl<'vm> CrateItems<'vm> {
                 crate_name.as_str()
             );
         })
-    }
+    }*/
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord)]
@@ -229,7 +229,7 @@ impl<'vm> ItemPath<'vm> {
     pub fn main() -> Self {
         Self(NameSpace::Value, "::main")
     }
-    pub fn can_find(&self) -> bool {
+    pub fn can_lookup(&self) -> bool {
         match self.0 {
             NameSpace::DebugOnly => false,
             _ => true,
@@ -295,6 +295,10 @@ impl CrateId {
 pub struct ItemId(u32);
 
 impl ItemId {
+    pub fn new(n: u32) -> Self {
+        Self(n)
+    }
+    
     pub fn index(&self) -> usize {
         self.0 as usize
     }
@@ -304,12 +308,26 @@ pub struct Item<'vm> {
     pub vm: &'vm VM<'vm>,
     pub crate_id: CrateId,
     pub item_id: ItemId,
-    pub did: Option<rustc_hir::def_id::LocalDefId>,
     pub path: ItemPath<'vm>,
-    kind: ItemKind<'vm>,
-    /// A slice of data which can be deserialized lazily.
-    /// Only filled when loading IR from the disk.
-    persist_data: Option<&'vm [u8]>,
+    kind: ItemKind<'vm>
+}
+
+impl<'vm> Item<'vm> {
+    pub fn new(
+        vm: &'vm VM<'vm>,
+        crate_id: CrateId,
+        item_id: ItemId,
+        path: ItemPath<'vm>,
+        kind: ItemKind<'vm>
+    ) -> Self {
+        Item{
+            vm,
+            crate_id,
+            item_id,
+            path,
+            kind
+        }
+    }
 }
 
 impl<'vm> std::fmt::Debug for Item<'vm> {
@@ -439,9 +457,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             crate_id: read_ctx.crate_id,
             item_id,
             path,
-            did: None,
+            //did: None,
             kind,
-            persist_data,
+            //persist_data,
         }
     }
 }
@@ -775,8 +793,8 @@ impl<'vm> Item<'vm> {
 
         // handle ctors
         if let Some((ctor_item_id, ctor_variant)) = ctor_for {
-            let crate_items = self.vm.get_crate_items(self.crate_id);
-            let ctor_item = crate_items.get(*ctor_item_id);
+            let crate_items = self.vm.crate_provider(self.crate_id);
+            let ctor_item = crate_items.item_by_id(*ctor_item_id);
 
             let ctor_ty = self.vm.ty_adt(ItemWithSubs {
                 item: ctor_item,
@@ -787,9 +805,10 @@ impl<'vm> Item<'vm> {
             return (Arc::new(ir), Cow::Borrowed(subs));
         }
 
+        // if this is virtual, try finding a concrete impl
         if let Some(virtual_info) = virtual_info {
-            let crate_items = self.vm.get_crate_items(self.crate_id);
-            let trait_item = crate_items.get(virtual_info.trait_id);
+            let crate_items = self.vm.crate_provider(self.crate_id);
+            let trait_item = crate_items.item_by_id(virtual_info.trait_id);
             let resolved_func = trait_item.find_trait_item_ir(subs, &virtual_info.ident);
             if let Some((ir, new_subs)) = resolved_func {
                 assert!(ir.is_constant == is_constant);
@@ -797,20 +816,17 @@ impl<'vm> Item<'vm> {
             }
         }
 
-        loop {
-            {
-                let ir = ir.lock().unwrap();
-                if let Some(ir) = ir.as_ref() {
-                    assert!(ir.is_constant == is_constant);
-                    return (ir.clone(), Cow::Borrowed(subs));
-                }
+        // Normal IR lookup
+        {
+            let mut ir = ir.lock().unwrap();
+            if let Some(ir) = ir.as_ref() {
+                assert!(ir.is_constant == is_constant);
+                return (ir.clone(), Cow::Borrowed(subs));
+            } else {
+                let new_ir = self.vm.crate_provider(self.crate_id).build_ir(self.item_id);
+                *ir = Some(new_ir.clone());
+                return (new_ir, Cow::Borrowed(subs));
             }
-
-            if self.vm.is_verbose {
-                println!("converting ir for {}{}", self.path.as_string(), subs);
-            }
-
-            self.vm.build_function_ir(self.crate_id, self.item_id);
         }
     }
 
@@ -898,8 +914,8 @@ impl<'vm> Item<'vm> {
             panic!("item kind mismatch");
         };
 
-        let crate_items = self.vm.get_crate_items(self.crate_id);
-        let trait_item = crate_items.get(virtual_info.trait_id);
+        let crate_items = self.vm.crate_provider(self.crate_id);
+        let trait_item = crate_items.item_by_id(virtual_info.trait_id);
 
         trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
@@ -922,14 +938,14 @@ impl<'vm> Item<'vm> {
         member_name: &str,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
         self.find_trait_impl(subs, &mut None, |trait_impl, subs| {
-            let crate_items = self.vm.get_crate_items(trait_impl.crate_id);
+            let crate_items = self.vm.crate_provider(trait_impl.crate_id);
 
             let ir_source = trait_impl.assoc_values.get(member_name);
 
             if let Some(ir_source) = ir_source {
                 match ir_source {
                     AssocValue::Item(fn_item_id) => {
-                        let fn_item = crate_items.get(*fn_item_id);
+                        let fn_item = crate_items.item_by_id(*fn_item_id);
                         let (ir, _) = fn_item.ir(&subs);
                         return Some((ir, subs));
                     }
