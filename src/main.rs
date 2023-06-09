@@ -28,11 +28,11 @@ mod cli;
 mod crate_provider;
 mod ir;
 mod items;
+mod lazy_collections;
 mod persist;
 mod rustc_worker;
 mod test;
 mod types;
-mod lazy_collections;
 
 use std::process;
 
@@ -103,14 +103,12 @@ fn main() {
             // make sure core root exists
             assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_rustc_provider(
-                RustCWorkerConfig {
-                    source_root: &core_root,
-                    extern_crates: vec![],
-                    is_core: true,
-                    save: false,
-                }
-            );
+            let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
+                source_root: &core_root,
+                extern_crates: vec![],
+                is_core: true,
+                save: false,
+            });
 
             extern_crates.push(ExternCrate {
                 id: core_crate,
@@ -118,14 +116,12 @@ fn main() {
             });
         }
 
-        let main_crate = vm.add_rustc_provider(
-            RustCWorkerConfig {
-                source_root: &args.file_name,
-                extern_crates,
-                is_core: false,
-                save: false,
-            }
-        );
+        let main_crate = vm.add_rustc_provider(RustCWorkerConfig {
+            source_root: &args.file_name,
+            extern_crates,
+            is_core: false,
+            save: false,
+        });
 
         let main_path = ItemPath::main();
 

@@ -1,17 +1,23 @@
 use std::marker::PhantomData;
 
-use crate::{persist::{PersistWriteContext, Persist, PersistReadContext}, items::CrateId, vm::VM};
-
+use crate::{
+    items::CrateId,
+    persist::{Persist, PersistReadContext, PersistWriteContext},
+    vm::VM,
+};
 
 /// A sorted array which is lazily parsed.
-pub struct LazyArray<'vm,T> {
+pub struct LazyArray<'vm, T> {
     /// offset of every item in data
     item_indices: Vec<u32>,
     data: &'vm [u8],
-    array_ty: PhantomData<T>
+    array_ty: PhantomData<T>,
 }
 
-impl<'vm,T> LazyArray<'vm,T> where T: Persist<'vm> + Ord + std::fmt::Debug {
+impl<'vm, T> LazyArray<'vm, T>
+where
+    T: Persist<'vm> + Ord + std::fmt::Debug,
+{
     /// Input must already be sorted!
     pub fn write(this_crate: CrateId, items: Vec<T>) -> Vec<u8> {
         let mut write_ctx = PersistWriteContext::new(this_crate);
@@ -25,7 +31,8 @@ impl<'vm,T> LazyArray<'vm,T> where T: Persist<'vm> + Ord + std::fmt::Debug {
         }
 
         let num_bytes = item_indices.len() * std::mem::size_of::<u32>();
-        let index_bytes: &[u8] = unsafe { std::slice::from_raw_parts(item_indices.as_ptr() as _, num_bytes) };
+        let index_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(item_indices.as_ptr() as _, num_bytes) };
 
         let data = write_ctx.flip();
 
@@ -55,26 +62,28 @@ impl<'vm,T> LazyArray<'vm,T> where T: Persist<'vm> + Ord + std::fmt::Debug {
         let dst = item_indices.as_mut_ptr() as *mut u8;
 
         unsafe {
-            std::ptr::copy(src,dst,num_bytes);
+            std::ptr::copy(src, dst, num_bytes);
         }
 
-        LazyArray{
+        LazyArray {
             item_indices,
             data,
-            array_ty: PhantomData
+            array_ty: PhantomData,
         }
     }
 
     pub fn find(&self, val: &T, vm: &'vm VM<'vm>) -> usize {
         let mut read_ctx = PersistReadContext::new(&[], vm, CrateId::new(0));
 
-        self.item_indices.binary_search_by(|index| {
-            let data = &self.data[*index as usize..];
-            read_ctx.reset(data);
+        self.item_indices
+            .binary_search_by(|index| {
+                let data = &self.data[*index as usize..];
+                read_ctx.reset(data);
 
-            let candidate = T::persist_read(&mut read_ctx);
+                let candidate = T::persist_read(&mut read_ctx);
 
-            candidate.cmp(val)
-        }).unwrap()
+                candidate.cmp(val)
+            })
+            .unwrap()
     }
 }

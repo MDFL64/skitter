@@ -115,16 +115,13 @@ impl<'vm> VM<'vm> {
     }
 
     /// I tried for so long to get this to work with scoped threads.
-    /// Got it working, and then had it break again when 
-    /// 
+    /// Got it working, and then had it break again when
+    ///
     /// To hell with it. Just require a static VM to use a rustc worker.
-    pub fn add_rustc_provider(
-        &'static self,
-        worker_config: RustCWorkerConfig
-    ) -> CrateId {
+    pub fn add_rustc_provider(&'static self, worker_config: RustCWorkerConfig) -> CrateId {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
-        
+
         let worker = Box::new(RustCWorker::new(worker_config, self, crate_id));
 
         let worker_ref = self.arena_crates.alloc(worker);

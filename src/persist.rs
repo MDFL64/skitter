@@ -138,8 +138,7 @@ macro_rules! persist_uint {
             fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
                 let n = read_ctx.read_byte();
                 match n {
-                    255 |
-                    254 => {
+                    255 | 254 => {
                         let bs = read_ctx.read_bytes(4);
                         u32::from_le_bytes(bs.try_into().unwrap()) as _
                     }

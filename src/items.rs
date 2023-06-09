@@ -9,10 +9,11 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
+    lazy_collections,
     persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM}, lazy_collections,
+    vm::{Function, VM},
 };
 use ahash::AHashMap;
 
@@ -298,7 +299,7 @@ impl ItemId {
     pub fn new(n: u32) -> Self {
         Self(n)
     }
-    
+
     pub fn index(&self) -> usize {
         self.0 as usize
     }
@@ -309,7 +310,7 @@ pub struct Item<'vm> {
     pub crate_id: CrateId,
     pub item_id: ItemId,
     pub path: ItemPath<'vm>,
-    kind: ItemKind<'vm>
+    kind: ItemKind<'vm>,
 }
 
 impl<'vm> Item<'vm> {
@@ -318,14 +319,14 @@ impl<'vm> Item<'vm> {
         crate_id: CrateId,
         item_id: ItemId,
         path: ItemPath<'vm>,
-        kind: ItemKind<'vm>
+        kind: ItemKind<'vm>,
     ) -> Self {
-        Item{
+        Item {
             vm,
             crate_id,
             item_id,
             path,
-            kind
+            kind,
         }
     }
 }
@@ -842,18 +843,6 @@ impl<'vm> Item<'vm> {
         let ir = ir.lock().unwrap();
 
         ir.clone()
-    }
-
-    pub fn set_ir(&self, new_ir: IRFunction<'vm>) {
-        let ir = match &self.kind {
-            ItemKind::Function { ir, .. } => ir,
-            ItemKind::Constant { ir, .. } => ir,
-            _ => panic!("item kind mismatch"),
-        };
-
-        let mut dest = ir.lock().unwrap();
-
-        *dest = Some(Arc::new(new_ir));
     }
 
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {

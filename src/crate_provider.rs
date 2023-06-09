@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::{items::{ItemId, Item, ItemPath}, ir::IRFunction};
+use crate::{
+    ir::IRFunction,
+    items::{Item, ItemId, ItemPath},
+};
 
 pub trait CrateProvider<'vm>: Send + Sync + 'vm {
     fn item_by_id(&self, id: ItemId) -> &'vm Item<'vm>;
