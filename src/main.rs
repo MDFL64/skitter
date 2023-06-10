@@ -59,10 +59,10 @@ fn main() {
         test::test(&args.file_name);
     }
 
-    let vm: &mut VM = Box::leak(Box::new(VM::new()));
+    let vm: &mut VM = Box::leak(Box::new(VM::new(args.core)));
     vm.is_verbose = args.verbose;
 
-    std::thread::scope(|scope| {
+    {
         let mut extern_crates = Vec::new();
 
         /*if args.save_core {
@@ -110,6 +110,8 @@ fn main() {
                 save: false,
             });
 
+            assert!(Some(core_crate) == vm.core_crate);
+
             extern_crates.push(ExternCrate {
                 id: core_crate,
                 name: "core".to_owned(),
@@ -136,7 +138,7 @@ fn main() {
         thread.call(&main_fn, 0);
 
         process::exit(0)
-    });
+    }
 }
 
 /// When any thread panics, close the process.

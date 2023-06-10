@@ -9,7 +9,6 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
-    lazy_collections,
     persist::{Persist, PersistReadContext, PersistWriteContext},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
@@ -17,211 +16,110 @@ use crate::{
 };
 use ahash::AHashMap;
 
-pub struct CrateItems<'vm> {
-    crate_id: CrateId,
-    items: Vec<Item<'vm>>,
-    map_path_to_item: AHashMap<ItemPath<'vm>, ItemId>,
-    map_did_to_item: AHashMap<rustc_hir::def_id::LocalDefId, ItemId>,
-
-    extern_crate_list: Vec<ExternCrate>,
-    extern_crate_id_cache: Mutex<AHashMap<rustc_span::def_id::CrateNum, CrateId>>,
-}
-
 pub struct ExternCrate {
     pub name: String,
     pub id: CrateId,
 }
 
-impl<'vm> CrateItems<'vm> {
-    /*pub fn new_deprecated(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
-        Self {
-            crate_id,
-            items: Default::default(),
-            map_path_to_item: Default::default(),
-            map_did_to_item: Default::default(),
-            extern_crate_list,
-            extern_crate_id_cache: Default::default(),
+/*pub fn new_deprecated(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
+    Self {
+        crate_id,
+        items: Default::default(),
+        map_path_to_item: Default::default(),
+        map_did_to_item: Default::default(),
+        extern_crate_list,
+        extern_crate_id_cache: Default::default(),
+    }
+}
+
+pub fn save_items(&self, file_name: &str) {
+    let mut write_ctx = PersistWriteContext::new(self.crate_id);
+    self.items.persist_write(&mut write_ctx);
+
+    // write types
+    {
+        let type_count = write_ctx.types.len();
+        println!("types = {}", type_count);
+        type_count.persist_write(&mut write_ctx);
+
+        for i in 0..type_count {
+            let ty = write_ctx.types[i];
+            ty.kind().persist_write(&mut write_ctx);
         }
+
+        // ensure no more types were added, if they
+        // are it indicates a bug in `prepare_child_types`
+        assert!(type_count == write_ctx.types.len());
     }
 
-    pub fn save_items(&self, file_name: &str) {
-        let mut write_ctx = PersistWriteContext::new(self.crate_id);
-        self.items.persist_write(&mut write_ctx);
+    write_ctx.save(file_name);
+}
 
-        // write types
-        {
-            let type_count = write_ctx.types.len();
-            println!("types = {}", type_count);
-            type_count.persist_write(&mut write_ctx);
-
-            for i in 0..type_count {
-                let ty = write_ctx.types[i];
-                ty.kind().persist_write(&mut write_ctx);
-            }
-
-            // ensure no more types were added, if they
-            // are it indicates a bug in `prepare_child_types`
-            assert!(type_count == write_ctx.types.len());
-        }
-
-        write_ctx.save(file_name);
+pub fn index_bench(&self, vm: &'vm VM<'vm>) {
+    // LINEAR SCAN (LMAO)
+    let t = std::time::Instant::now();
+    for item in &self.items {
+        let res = self.items.iter().find(|x| x.path == item.path);
     }
+    println!("linear scan = {:?}",t.elapsed());
 
-    pub fn index_bench(&self, vm: &'vm VM<'vm>) {
-        // LINEAR SCAN (LMAO)
-        let t = std::time::Instant::now();
-        for item in &self.items {
-            let res = self.items.iter().find(|x| x.path == item.path);
-        }
-        println!("linear scan = {:?}",t.elapsed());
-
-        // HASH LOOKUP
-        let t = std::time::Instant::now();
-        for item in &self.items {
-            let res = self.map_path_to_item.get(&item.path);
-        }
-        println!("hash lookup = {:?}",t.elapsed());
-
-        // STD HASH LOOKUP
-        let h2: HashMap<_,_> = self.map_path_to_item.iter().collect();
-
-        let t = std::time::Instant::now();
-        for item in &self.items {
-            let res = h2.get(&item.path);
-        }
-        println!("std hash lookup = {:?}",t.elapsed());
-
-
-        // SORTED ARRAY
-        let mut sorted_array: Vec<_> = self.items.iter().map(|x| x.path.clone()).collect();
-        sorted_array.sort();
-
-        let t = std::time::Instant::now();
-        for item in &self.items {
-            let res = sorted_array.binary_search(&item.path);
-        }
-        println!("binary search = {:?}",t.elapsed());
-
-        let written: &'static [u8] = lazy_collections::LazyArray::write(self.crate_id, sorted_array).leak();
-        let mut read_ctx = PersistReadContext::new(written, vm, self.crate_id);
-
-        let t = std::time::Instant::now();
-        let lazy_list = lazy_collections::LazyArray::<ItemPath>::read(&mut read_ctx);
-        println!("~ build list = {:?}",t.elapsed());
-
-        let t = std::time::Instant::now();
-        for item in &self.items {
-            let res = lazy_list.find(&item.path, vm);
-        }
-        println!("lazy list = {:?}",t.elapsed());
+    // HASH LOOKUP
+    let t = std::time::Instant::now();
+    for item in &self.items {
+        let res = self.map_path_to_item.get(&item.path);
     }
+    println!("hash lookup = {:?}",t.elapsed());
 
-    pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
-        let data: &'static [u8] = std::fs::read(file_name)
-            .expect("failed to read data")
-            .leak();
-        let mut read = PersistReadContext::new(&data, vm, crate_id);
+    // STD HASH LOOKUP
+    let h2: HashMap<_,_> = self.map_path_to_item.iter().collect();
 
-        let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
-
-        let mut map_path_to_item = AHashMap::<ItemPath<'vm>, ItemId>::new();
-        for item in items.iter() {
-            if item.path.can_find() {
-                let old = map_path_to_item.insert(item.path.clone(), item.item_id);
-                assert!(old.is_none());
-            }
-        }
+    let t = std::time::Instant::now();
+    for item in &self.items {
+        let res = h2.get(&item.path);
     }
+    println!("std hash lookup = {:?}",t.elapsed());
 
-    pub fn all(&self) -> impl Iterator<Item = &Item<'vm>> {
-        self.items.iter()
+
+    // SORTED ARRAY
+    let mut sorted_array: Vec<_> = self.items.iter().map(|x| x.path.clone()).collect();
+    sorted_array.sort();
+
+    let t = std::time::Instant::now();
+    for item in &self.items {
+        let res = sorted_array.binary_search(&item.path);
     }
+    println!("binary search = {:?}",t.elapsed());
 
-    pub fn count(&self) -> usize {
-        self.items.len()
+    let written: &'static [u8] = lazy_collections::LazyArray::write(self.crate_id, sorted_array).leak();
+    let mut read_ctx = PersistReadContext::new(written, vm, self.crate_id);
+
+    let t = std::time::Instant::now();
+    let lazy_list = lazy_collections::LazyArray::<ItemPath>::read(&mut read_ctx);
+    println!("~ build list = {:?}",t.elapsed());
+
+    let t = std::time::Instant::now();
+    for item in &self.items {
+        let res = lazy_list.find(&item.path, vm);
     }
+    println!("lazy list = {:?}",t.elapsed());
+}
 
-    pub fn add_item(
-        &mut self,
-        vm: &'vm VM<'vm>,
-        kind: ItemKind<'vm>,
-        path: ItemPath<'vm>,
-        did: rustc_hir::def_id::LocalDefId,
-    ) -> ItemId {
-        let item_id = ItemId(self.items.len() as u32);
+pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
+    let data: &'static [u8] = std::fs::read(file_name)
+        .expect("failed to read data")
+        .leak();
+    let mut read = PersistReadContext::new(&data, vm, crate_id);
 
-        self.items.push(Item {
-            vm,
-            crate_id: self.crate_id,
-            item_id,
-            //did: Some(did),
-            path: path.clone(),
-            kind,
-            persist_data: None,
-        });
+    let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
 
-        // add to did map
-        {
-            let old = self.map_did_to_item.insert(did, item_id);
+    let mut map_path_to_item = AHashMap::<ItemPath<'vm>, ItemId>::new();
+    for item in items.iter() {
+        if item.path.can_find() {
+            let old = map_path_to_item.insert(item.path.clone(), item.item_id);
             assert!(old.is_none());
         }
-
-        // add to path map
-        if path.0 != NameSpace::DebugOnly {
-            let old = self.map_path_to_item.insert(path, item_id);
-            if old.is_some() {
-                panic!("duplicate path {:?}", did);
-            }
-        }
-
-        item_id
     }
-
-    pub fn get(&self, id: ItemId) -> &Item<'vm> {
-        &self.items[id.index()]
-    }
-
-    pub fn find_by_path(&'vm self, path: &ItemPath) -> Option<&'vm Item<'vm>> {
-        self.map_path_to_item
-            .get(path)
-            .map(|item_id| &self.items[item_id.index()])
-    }
-
-    pub fn find_by_did(&'vm self, did: rustc_hir::def_id::DefId) -> Option<&'vm Item<'vm>> {
-        if did.krate == rustc_hir::def_id::LOCAL_CRATE {
-            let local_did = rustc_hir::def_id::LocalDefId {
-                local_def_index: did.index,
-            };
-            self.map_did_to_item
-                .get(&local_did)
-                .map(|item_id| &self.items[item_id.index()])
-        } else {
-            None
-        }
-    }
-
-    pub fn find_crate_id<'tcx>(
-        &self,
-        tcx: rustc_middle::ty::TyCtxt<'tcx>,
-        crate_num: rustc_span::def_id::CrateNum,
-    ) -> CrateId {
-        let mut cache = self.extern_crate_id_cache.lock().unwrap();
-
-        *cache.entry(crate_num).or_insert_with(|| {
-            let crate_name = tcx.crate_name(crate_num);
-            for entry in &self.extern_crate_list {
-                if entry.name == crate_name.as_str() {
-                    return entry.id;
-                }
-            }
-            panic!(
-                "lookup for crate failed: {} {}",
-                crate_num,
-                crate_name.as_str()
-            );
-        })
-    }*/
-}
+}*/
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord)]
 pub struct ItemPath<'vm>(NameSpace, &'vm str);
@@ -928,7 +826,6 @@ impl<'vm> Item<'vm> {
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
         self.find_trait_impl(subs, &mut None, |trait_impl, subs| {
             let crate_items = self.vm.crate_provider(trait_impl.crate_id);
-
             let ir_source = trait_impl.assoc_values.get(member_name);
 
             if let Some(ir_source) = ir_source {

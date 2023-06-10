@@ -4,9 +4,7 @@ use colosseum::sync::Arena;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
-use crate::items::CrateItems;
 use crate::items::Item;
-use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::IntSign;
@@ -29,6 +27,7 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
+    pub core_crate: Option<CrateId>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
 
     arena_crates: Arena<Box<dyn CrateProvider<'vm>>>,
@@ -39,11 +38,6 @@ pub struct VM<'vm> {
     arena_paths: Arena<String>,
 
     map_paths: Mutex<AHashSet<&'vm str>>,
-}
-
-struct Crate<'vm> {
-    rustc_worker: Option<RustCWorker<'vm>>,
-    items: Option<&'vm CrateItems<'vm>>,
 }
 
 pub struct VMThread<'vm> {
@@ -88,9 +82,15 @@ impl<'vm> VMThread<'vm> {
 }
 
 impl<'vm> VM<'vm> {
-    pub fn new() -> Self {
+    pub fn new(has_core: bool) -> Self {
+        let core_crate = if has_core {
+            Some(CrateId::new(0))
+        } else {
+            None
+        };
+
         Self {
-            //functions: Default::default(),
+            core_crate,
             types: TypeContext::new(),
             is_verbose: false,
             crates: Default::default(),

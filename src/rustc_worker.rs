@@ -1,5 +1,4 @@
 use std::{
-    borrow::Borrow,
     sync::{Arc, Barrier, Mutex, OnceLock},
     time::Instant,
 };
@@ -16,9 +15,9 @@ use rustc_session::config;
 use crate::{
     builtins::BuiltinTrait,
     crate_provider::CrateProvider,
-    ir::{converter::IRFunctionConverter, IRFunction, IRFunctionBuilder},
+    ir::{converter::IRFunctionConverter, IRFunction},
     items::{
-        path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, CrateItems, ExternCrate,
+        path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, ExternCrate,
         FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
@@ -139,7 +138,13 @@ impl<'vm> RustCWorker<'vm> {
             rustc_interface::run_compiler(config, |compiler| {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
-                        let ctx = RustCContext::new(vm, tcx, this_crate);
+                        let ctx = RustCContext::new(
+                            vm,
+                            tcx,
+                            this_crate,
+                            worker_config.extern_crates,
+                            worker_config.is_core,
+                        );
 
                         loop {
                             let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
@@ -155,470 +160,6 @@ impl<'vm> RustCWorker<'vm> {
             items: Default::default(),
         }
     }
-
-    /*let t = Instant::now();
-
-    let mut adt_items = Vec::new();
-    let mut impl_items: Vec<ImplItem> = Vec::new();
-
-    for item_id in hir_items {
-        let item = hir.item(item_id);
-        match item.kind {
-            // useless to us
-            HirItemKind::Use(..)
-            | HirItemKind::Mod(_)
-            | HirItemKind::ExternCrate(_)
-            | HirItemKind::Macro(..)
-            | HirItemKind::TyAlias(..)
-            | HirItemKind::OpaqueTy(_)
-            | HirItemKind::TraitAlias(..) => (),
-            // simple items
-            HirItemKind::Const(ty, body_id) => {
-                let local_id = item.owner_id.def_id;
-                let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-
-                let kind = ItemKind::new_const();
-
-                items.add_item(vm, kind, item_path, local_id);
-            }
-            HirItemKind::Static(..) => {
-                // todo?
-            }
-            HirItemKind::Struct(variant, _)
-            | HirItemKind::Union(variant, _) => {
-                let adt_id = {
-                    let local_id = item.owner_id.def_id;
-                    let item_path =
-                        path_from_rustc(&hir.def_path(local_id), vm);
-
-                    let kind = ItemKind::new_adt();
-
-                    let item_id = items.add_item(vm, kind, item_path, local_id);
-                    adt_items.push(item_id);
-                    item_id
-                };
-
-                // add ctor
-                match variant {
-                    VariantData::Struct(..) => (),
-                    VariantData::Tuple(_, _, local_id) => {
-                        let item_path =
-                            path_from_rustc(&hir.def_path(local_id), vm);
-
-                        let kind = ItemKind::new_function_ctor(adt_id, 0);
-
-                        items.add_item(vm, kind, item_path, local_id);
-                    }
-                    VariantData::Unit(_, local_id) => {
-                        let item_path =
-                            path_from_rustc(&hir.def_path(local_id), vm);
-
-                        let kind = ItemKind::new_const_ctor(adt_id, 0);
-
-                        items.add_item(vm, kind, item_path, local_id);
-                    }
-                }
-            }
-            HirItemKind::Enum(enum_def, _) => {
-                let adt_id = {
-                    let local_id = item.owner_id.def_id;
-                    let item_path =
-                        path_from_rustc(&hir.def_path(local_id), vm);
-
-                    let kind = ItemKind::new_adt();
-
-                    let item_id = items.add_item(vm, kind, item_path, local_id);
-                    adt_items.push(item_id);
-                    item_id
-                };
-
-                // add ctors
-                for (index, variant) in enum_def.variants.iter().enumerate() {
-                    match variant.data {
-                        VariantData::Struct(..) => (),
-                        VariantData::Tuple(_, _, local_id) => {
-                            let item_path =
-                                path_from_rustc(&hir.def_path(local_id), vm);
-
-                            let kind = ItemKind::new_function_ctor(
-                                adt_id,
-                                index as u32,
-                            );
-
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                        VariantData::Unit(_, local_id) => {
-                            let item_path =
-                                path_from_rustc(&hir.def_path(local_id), vm);
-
-                            let kind =
-                                ItemKind::new_const_ctor(adt_id, index as u32);
-
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                    }
-                }
-            }
-            HirItemKind::ForeignMod {
-                abi,
-                items: mod_items,
-            } => {
-                //let local_id = item.owner_id.def_id;
-                //let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
-                for item in mod_items {
-                    // only statics and functions are permitted according to ref
-                    let local_id = item.id.owner_id.def_id;
-                    let item_path =
-                        path_from_rustc(&hir.def_path(local_id), vm);
-
-                    let item = hir.foreign_item(item.id);
-
-                    use rustc_hir::ForeignItemKind;
-                    match item.kind {
-                        ForeignItemKind::Fn(..) => {
-                            let kind = if abi
-                                == rustc_target::spec::abi::Abi::RustIntrinsic
-                            {
-                                let ident = item.ident.as_str().to_owned();
-                                let abi = FunctionAbi::RustIntrinsic;
-                                ItemKind::new_function_extern(abi, ident)
-                            } else {
-                                ItemKind::new_function()
-                            };
-
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                        ForeignItemKind::Type => {
-                            // opaque types, eww
-                        }
-                        _ => panic!("todo foreign item {:?}", item_path),
-                    }
-                }
-            }
-            HirItemKind::Trait(
-                _is_auto,
-                _safety,
-                _generics,
-                _bounds,
-                child_items,
-            ) => {
-                // trait item
-                let trait_item = {
-                    let local_id = item.owner_id.def_id;
-                    let item_path =
-                        path_from_rustc(&hir.def_path(local_id), vm);
-
-                    let kind = ItemKind::new_trait();
-
-                    let item_id =
-                        items.add_item(vm, kind, item_path.clone(), local_id);
-                    item_id
-                };
-
-                for item in child_items {
-                    let local_id = item.id.owner_id.def_id;
-                    let item_path =
-                        path_from_rustc(&hir.def_path(local_id), vm);
-
-                    let ident = item.ident.as_str().to_owned();
-
-                    match item.kind {
-                        AssocItemKind::Fn { .. } => {
-                            let kind = ItemKind::new_function_virtual(
-                                trait_item, ident,
-                            );
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                        AssocItemKind::Type => {
-                            let kind = ItemKind::new_associated_type(
-                                trait_item, ident,
-                            );
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                        AssocItemKind::Const => {
-                            let kind =
-                                ItemKind::new_const_virtual(trait_item, ident);
-                            items.add_item(vm, kind, item_path, local_id);
-                        }
-                    }
-                }
-            }
-            HirItemKind::Impl(impl_info) => {
-                let impl_id = item.owner_id.def_id;
-
-                let subject = tcx.impl_subject(impl_id.into()).skip_binder();
-
-                let base_path = match subject {
-                    rustc_middle::ty::ImplSubject::Trait(x) => {
-                        format!("{:?}", x)
-                    }
-                    rustc_middle::ty::ImplSubject::Inherent(x) => {
-                        format!("{:?}", x)
-                    }
-                };
-
-                let mut assoc_values: Vec<(String, AssocValue<'vm>)> =
-                    Vec::new();
-                let mut assoc_tys: Vec<(String, LocalDefId)> = Vec::new();
-
-                for item in impl_info.items {
-                    let local_id = item.id.owner_id.def_id;
-
-                    let item_name = item.ident.as_str().to_owned();
-
-                    match item.kind {
-                        AssocItemKind::Fn { .. } => {
-                            let item_path = ItemPath::new_debug(
-                                &format!("{}::{}", base_path, item.ident),
-                                vm,
-                            );
-
-                            let kind = ItemKind::new_function();
-                            let item_id =
-                                items.add_item(vm, kind, item_path, local_id);
-
-                            assoc_values
-                                .push((item_name, AssocValue::Item(item_id)));
-                        }
-                        AssocItemKind::Const => {
-                            let item_path = ItemPath::new_debug(
-                                &format!("{}::{}", base_path, item.ident),
-                                vm,
-                            );
-
-                            let kind = ItemKind::new_const();
-                            let item_id =
-                                items.add_item(vm, kind, item_path, local_id);
-
-                            assoc_values
-                                .push((item_name, AssocValue::Item(item_id)));
-                        }
-                        AssocItemKind::Type => {
-                            assoc_tys.push((item_name, local_id));
-                        }
-                    }
-                }
-
-                impl_items.push(ImplItem {
-                    did: impl_id,
-                    subject,
-                    assoc_values,
-                    assoc_tys,
-                });
-            }
-            _ => panic!("can't handle item kind {:?}", item.kind),
-        }
-    }
-
-    let items = vm.set_crate_items(this_crate, items);
-
-    let ctx = RustCContext {
-        items: &items,
-        tcx,
-        vm,
-    };
-
-    // fill adt fields
-    for item_id in adt_items {
-        let item = items.get(item_id);
-
-        let adt_def = tcx.adt_def(item.did.unwrap());
-
-        let variant_fields = adt_def
-            .variants()
-            .iter()
-            .map(|variant| {
-                variant
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let ty = tcx.type_of(field.did).skip_binder();
-                        vm.types.type_from_rustc(ty, &ctx)
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let kind = if adt_def.is_enum() {
-            let kind = TypeKind::Int(IntWidth::I32, IntSign::Unsigned);
-            AdtKind::EnumWithDiscriminant(vm.types.intern(kind, vm))
-        } else {
-            AdtKind::Struct
-        };
-
-        item.set_adt_info(AdtInfo {
-            variant_fields,
-            kind,
-        });
-    }
-
-    // fill impls
-    for impl_item in impl_items {
-        match impl_item.subject {
-            ImplSubject::Inherent(ty) => {
-                let ty = vm.types.type_from_rustc(ty, &ctx);
-                ty.add_impl(this_crate, impl_item.assoc_values);
-                assert!(impl_item.assoc_tys.len() == 0);
-            }
-            ImplSubject::Trait(trait_ref) => {
-                let assoc_tys: AHashMap<_, _> = impl_item
-                    .assoc_tys
-                    .into_iter()
-                    .map(|(name, local_id)| {
-                        let ty = tcx.type_of(local_id).skip_binder();
-                        let ty = vm.types.type_from_rustc(ty, &ctx);
-                        (name, ty)
-                    })
-                    .collect();
-
-                let trait_did = trait_ref.def_id;
-
-                // Convert bounds.
-                let mut bounds: Vec<BoundKind> = Vec::new();
-                let predicates = tcx.predicates_of(impl_item.did);
-                for (p, _) in predicates.predicates {
-                    let p = p.kind().skip_binder();
-                    if let rustc_middle::ty::PredicateKind::Clause(p) = p {
-                        if let rustc_middle::ty::Clause::Trait(p) = p {
-                            if p.polarity
-                                == rustc_middle::ty::ImplPolarity::Positive
-                            {
-                                let trait_bound = vm.types.def_from_rustc(
-                                    p.trait_ref.def_id,
-                                    p.trait_ref.substs,
-                                    &ctx,
-                                );
-                                bounds.push(BoundKind::Trait(trait_bound));
-                            }
-                        } else if let rustc_middle::ty::Clause::Projection(p) =
-                            p
-                        {
-                            let assoc_ty = vm.types.def_from_rustc(
-                                p.projection_ty.def_id,
-                                p.projection_ty.substs,
-                                &ctx,
-                            );
-                            if let rustc_middle::ty::TermKind::Ty(ty) =
-                                p.term.unpack()
-                            {
-                                let eq_ty = vm.types.type_from_rustc(ty, &ctx);
-                                bounds.push(BoundKind::Projection(
-                                    assoc_ty, eq_ty,
-                                ));
-                            }
-                            // TODO CONSTS
-                        }
-                    }
-                }
-
-                // Build generics summary.
-                let rustc_generics = tcx.generics_of(impl_item.did);
-
-                let mut generics = GenericCounts::default();
-
-                for gp in &rustc_generics.params {
-                    use rustc_middle::ty::GenericParamDefKind;
-                    match gp.kind {
-                        GenericParamDefKind::Lifetime => {
-                            generics.lifetimes += 1
-                        }
-                        GenericParamDefKind::Type { .. } => generics.types += 1,
-                        GenericParamDefKind::Const { .. } => {
-                            generics.consts += 1
-                        }
-                    }
-                }
-
-                let trait_item = if let Some(trait_item) =
-                    items.find_by_did(trait_did)
-                {
-                    trait_item
-                } else {
-                    let trait_path =
-                        path_from_rustc(&tcx.def_path(trait_did), vm);
-                    let trait_crate_id =
-                        ctx.items.find_crate_id(tcx, trait_did.krate);
-                    let trait_crate_items = vm.get_crate_items(trait_crate_id);
-
-                    trait_crate_items
-                        .find_by_path(&trait_path)
-                        .expect("couldn't find trait")
-                };
-
-                let for_types =
-                    vm.types.subs_from_rustc(trait_ref.substs, &ctx);
-
-                trait_item.add_trait_impl(TraitImpl {
-                    crate_id: this_crate,
-                    for_types,
-                    assoc_values: impl_item.assoc_values.into_iter().collect(),
-                    assoc_tys,
-                    bounds,
-                    generics,
-                });
-            }
-        }
-    }
-
-    if worker_config.is_core {
-        let lang_items = tcx.lang_items();
-        {
-            let lang_trait = lang_items.sized_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::Sized);
-        }
-        {
-            let lang_trait = lang_items.tuple_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::Tuple);
-        }
-        {
-            let lang_trait = lang_items.discriminant_kind_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::DiscriminantKind);
-        }
-        {
-            let lang_trait = lang_items.fn_once_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::FnOnce);
-        }
-        {
-            let lang_trait = lang_items.fn_mut_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::FnMut);
-        }
-        {
-            let lang_trait = lang_items.fn_trait().unwrap();
-            let lang_trait = items.find_by_did(lang_trait).unwrap();
-            lang_trait.trait_set_builtin(BuiltinTrait::Fn);
-        }
-    }
-
-    if is_verbose {
-        println!("item aggregation took {:?}", t.elapsed());
-        println!("n = {}", items.count());
-    }
-
-    if worker_config.save {
-        println!("generating ir for all bodies");
-        for item in ctx.items.all() {
-            //if item.is_meh() {
-            let did = item.did.unwrap();
-            let has_body = hir.maybe_body_owned_by(did).is_some();
-            if has_body {
-                println!("go {:?}", did);
-                //let (thir, root) = ctx.tcx.thir_body(did).unwrap();
-                //let ir = IRFunctionBuilder::build(ctx.clone(), did, root, &thir.borrow());
-                println!("done");
-            }
-            //}
-        }
-    }
-
-    loop {
-        let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
-        cmd.call(RustCContext { items, tcx, vm });
-    }*/
 
     fn call<T, F>(&self, func: F) -> Arc<WorkerResult<T>>
     where
@@ -649,48 +190,6 @@ impl<'vm> RustCWorker<'vm> {
             res.wait()
         })
     }
-
-    /*fn init_item(&self, item_id: ItemId, def_id: LocalDefId) -> &'vm Item<'vm> {
-        let res = self.call(move |ctx| {
-            let hir = ctx.tcx.hir();
-
-            let item_source = hir.expect_item(def_id);
-
-            let kind = match item_source.kind {
-                HirItemKind::Fn(..) => {
-                    ItemKind::new_function()
-                }
-                _ => panic!("todo init {:?}",item_source)
-            };
-
-            let item = Item::new(self.vm, self.crate_id, item_id, path, kind);
-        });
-        res.wait()
-    }*/
-
-    /*pub fn build_function_ir(&self, item_id: ItemId) {
-        let res = self.call(move |ctx| {
-            let item = ctx.items.get(item_id);
-            let did = item.did.unwrap();
-
-            let hir = ctx.tcx.hir();
-
-            let body_id = hir.body_owned_by(did);
-            let body = hir.body(body_id);
-
-            let types = ctx.tcx.typeck(did);
-
-            let is_constant = !item.is_function();
-
-            let ir = IRFunctionConverter::run(ctx, did, body, types, is_constant);
-            item.set_ir(ir);
-        });
-        res.wait();
-    }
-
-    pub fn wait_for_setup(&self) -> Arc<WorkerResult<()>> {
-        self.call(|_ctx| {})
-    }*/
 }
 
 impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
@@ -728,6 +227,11 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         });
         res.wait()
     }
+
+    fn fill_inherent_impls(&self, ty: Type<'vm>) {
+        // All we need to do is wait for initialization.
+        self.call(|ctx| {}).wait();
+    }
 }
 
 pub struct RustCContext<'vm, 'tcx> {
@@ -735,11 +239,20 @@ pub struct RustCContext<'vm, 'tcx> {
     pub tcx: TyCtxt<'tcx>,
 
     items: Arc<RustCItems<'vm>>,
+
+    extern_crates: Vec<ExternCrate>,
+    extern_crate_id_cache: Mutex<AHashMap<rustc_span::def_id::CrateNum, CrateId>>,
 }
 
 impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
-    pub fn new(vm: &'vm VM<'vm>, tcx: TyCtxt<'tcx>, crate_id: CrateId) -> Self {
-        let mut items = RustCItems::default();
+    pub fn new(
+        vm: &'vm VM<'vm>,
+        tcx: TyCtxt<'tcx>,
+        this_crate: CrateId,
+        extern_crates: Vec<ExternCrate>,
+        is_core: bool,
+    ) -> Self {
+        let mut items = RustCItems::new(this_crate);
 
         let hir = tcx.hir();
 
@@ -751,6 +264,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
         // ADT fields are deferred until all items are aggregated
         let mut adt_ids = Vec::new();
+        let mut impl_items = Vec::new();
 
         for item_id in hir_items {
             let item = hir.item(item_id);
@@ -770,20 +284,23 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     let item_path = path_from_rustc(&hir.def_path(local_id), vm);
                     let kind = ItemKind::new_function();
 
-                    items.index_item(kind, item_path, local_id, vm, crate_id);
+                    items.index_item(kind, item_path, local_id, vm);
                 }
                 HirItemKind::Const(..) => {
                     let item_path = path_from_rustc(&hir.def_path(local_id), vm);
                     let kind = ItemKind::new_const();
 
-                    items.index_item(kind, item_path, local_id, vm, crate_id);
+                    items.index_item(kind, item_path, local_id, vm);
+                }
+                HirItemKind::Static(..) => {
+                    // todo
                 }
                 HirItemKind::Struct(variant, _) | HirItemKind::Union(variant, _) => {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
                         let kind = ItemKind::new_adt();
 
-                        items.index_item(kind, item_path, local_id, vm, crate_id)
+                        items.index_item(kind, item_path, local_id, vm)
                     };
                     adt_ids.push(adt_id);
 
@@ -791,7 +308,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     if let Some((kind, item_path, local_id)) =
                         Self::ctor_params(&variant, adt_id, 0, vm, &hir)
                     {
-                        items.index_item(kind, item_path, local_id, vm, crate_id);
+                        items.index_item(kind, item_path, local_id, vm);
                     }
                 }
                 HirItemKind::Enum(enum_def, _) => {
@@ -799,7 +316,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
                         let kind = ItemKind::new_adt();
 
-                        items.index_item(kind, item_path, local_id, vm, crate_id)
+                        items.index_item(kind, item_path, local_id, vm)
                     };
                     adt_ids.push(adt_id);
 
@@ -808,7 +325,122 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         if let Some((kind, item_path, local_id)) =
                             Self::ctor_params(&variant.data, adt_id, index as u32, vm, &hir)
                         {
-                            items.index_item(kind, item_path, local_id, vm, crate_id);
+                            items.index_item(kind, item_path, local_id, vm);
+                        }
+                    }
+                }
+                // non-trivial items which contain other items
+                HirItemKind::Trait(_is_auto, _safety, _generics, _bounds, child_items) => {
+                    // trait item
+                    let trait_id = {
+                        let local_id = item.owner_id.def_id;
+                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+
+                        let kind = ItemKind::new_trait();
+
+                        items.index_item(kind, item_path, local_id, vm)
+                    };
+
+                    for item in child_items {
+                        let local_id = item.id.owner_id.def_id;
+                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+
+                        let ident = item.ident.as_str().to_owned();
+
+                        let kind = match item.kind {
+                            AssocItemKind::Fn { .. } => {
+                                ItemKind::new_function_virtual(trait_id, ident)
+                            }
+                            AssocItemKind::Type => ItemKind::new_associated_type(trait_id, ident),
+                            AssocItemKind::Const => ItemKind::new_const_virtual(trait_id, ident),
+                        };
+                        items.index_item(kind, item_path, local_id, vm);
+                    }
+                }
+                HirItemKind::Impl(impl_info) => {
+                    let impl_id = item.owner_id.def_id;
+
+                    let subject = tcx.impl_subject(impl_id.into()).skip_binder();
+
+                    let base_path = match subject {
+                        rustc_middle::ty::ImplSubject::Trait(x) => format!("{:?}", x),
+                        rustc_middle::ty::ImplSubject::Inherent(x) => format!("{:?}", x),
+                    };
+
+                    let mut assoc_values: Vec<(String, AssocValue<'vm>)> = Vec::new();
+                    let mut assoc_tys: Vec<(String, LocalDefId)> = Vec::new();
+
+                    for item in impl_info.items {
+                        let local_id = item.id.owner_id.def_id;
+
+                        let item_name = item.ident.as_str().to_owned();
+
+                        match item.kind {
+                            AssocItemKind::Fn { .. } => {
+                                let item_path = ItemPath::new_debug(
+                                    &format!("{}::{}", base_path, item.ident),
+                                    vm,
+                                );
+
+                                let kind = ItemKind::new_function();
+                                let item_id = items.index_item(kind, item_path, local_id, vm);
+
+                                assoc_values.push((item_name, AssocValue::Item(item_id)));
+                            }
+                            AssocItemKind::Const => {
+                                let item_path = ItemPath::new_debug(
+                                    &format!("{}::{}", base_path, item.ident),
+                                    vm,
+                                );
+
+                                let kind = ItemKind::new_const();
+                                let item_id = items.index_item(kind, item_path, local_id, vm);
+
+                                assoc_values.push((item_name, AssocValue::Item(item_id)));
+                            }
+                            AssocItemKind::Type => {
+                                assoc_tys.push((item_name, local_id));
+                            }
+                        }
+                    }
+
+                    impl_items.push(ImplItem {
+                        did: impl_id,
+                        subject,
+                        assoc_values,
+                        assoc_tys,
+                    });
+                }
+                HirItemKind::ForeignMod {
+                    abi,
+                    items: mod_items,
+                } => {
+                    //let local_id = item.owner_id.def_id;
+                    //let item_path = hir.def_path(local_id).to_string_no_crate_verbose();
+                    for item in mod_items {
+                        // only statics and functions are permitted according to ref
+                        let local_id = item.id.owner_id.def_id;
+                        let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+
+                        let item = hir.foreign_item(item.id);
+
+                        use rustc_hir::ForeignItemKind;
+                        match item.kind {
+                            ForeignItemKind::Fn(..) => {
+                                let kind = if abi == rustc_target::spec::abi::Abi::RustIntrinsic {
+                                    let ident = item.ident.as_str().to_owned();
+                                    let abi = FunctionAbi::RustIntrinsic;
+                                    ItemKind::new_function_extern(abi, ident)
+                                } else {
+                                    ItemKind::new_function()
+                                };
+
+                                items.index_item(kind, item_path, local_id, vm);
+                            }
+                            ForeignItemKind::Type => {
+                                // opaque types, eww
+                            }
+                            _ => panic!("todo foreign item {:?}", item_path),
                         }
                     }
                 }
@@ -820,6 +452,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             vm,
             tcx,
             items: Arc::new(items),
+            extern_crates,
+            extern_crate_id_cache: Default::default(),
         };
 
         // fill ADT fields
@@ -854,6 +488,155 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 variant_fields,
                 kind,
             });
+        }
+
+        let mut inherent_impls: AHashMap<Type<'vm>, AHashMap<String, (CrateId, AssocValue<'vm>)>> =
+            Default::default();
+
+        // fill impls
+        for impl_item in impl_items {
+            match impl_item.subject {
+                ImplSubject::Inherent(ty) => {
+                    assert!(impl_item.assoc_tys.len() == 0);
+                    let ty = vm.types.type_from_rustc(ty, &ctx);
+
+                    // Skip implementations on types which are not correctly implemented at the moment.
+                    if !ty.kind().is_dummy() {
+                        let table = inherent_impls.entry(ty).or_default();
+
+                        for (key, value) in impl_item.assoc_values {
+                            let old = table.insert(key.clone(), (this_crate, value));
+                            if !old.is_none() {
+                                panic!("duplicate def = {} {}", ty, key);
+                            }
+                        }
+                    }
+                }
+                ImplSubject::Trait(trait_ref) => {
+                    let assoc_tys: AHashMap<_, _> = impl_item
+                        .assoc_tys
+                        .into_iter()
+                        .map(|(name, local_id)| {
+                            let ty = tcx.type_of(local_id).skip_binder();
+                            let ty = vm.types.type_from_rustc(ty, &ctx);
+                            (name, ty)
+                        })
+                        .collect();
+
+                    let trait_did = trait_ref.def_id;
+
+                    // Convert bounds.
+                    let mut bounds: Vec<BoundKind> = Vec::new();
+                    let predicates = tcx.predicates_of(impl_item.did);
+                    for (p, _) in predicates.predicates {
+                        let p = p.kind().skip_binder();
+                        if let rustc_middle::ty::PredicateKind::Clause(p) = p {
+                            if let rustc_middle::ty::Clause::Trait(p) = p {
+                                if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
+                                    let trait_bound = vm.types.def_from_rustc(
+                                        p.trait_ref.def_id,
+                                        p.trait_ref.substs,
+                                        &ctx,
+                                    );
+                                    bounds.push(BoundKind::Trait(trait_bound));
+                                }
+                            } else if let rustc_middle::ty::Clause::Projection(p) = p {
+                                let assoc_ty = vm.types.def_from_rustc(
+                                    p.projection_ty.def_id,
+                                    p.projection_ty.substs,
+                                    &ctx,
+                                );
+                                if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
+                                    let eq_ty = vm.types.type_from_rustc(ty, &ctx);
+                                    bounds.push(BoundKind::Projection(assoc_ty, eq_ty));
+                                }
+                                // TODO CONSTS
+                            }
+                        }
+                    }
+
+                    // Build generics summary.
+                    let rustc_generics = tcx.generics_of(impl_item.did);
+
+                    let mut generics = GenericCounts::default();
+
+                    for gp in &rustc_generics.params {
+                        use rustc_middle::ty::GenericParamDefKind;
+                        match gp.kind {
+                            GenericParamDefKind::Lifetime => generics.lifetimes += 1,
+                            GenericParamDefKind::Type { .. } => generics.types += 1,
+                            GenericParamDefKind::Const { .. } => generics.consts += 1,
+                        }
+                    }
+
+                    let trait_item = if let Some(trait_item) = ctx.item_by_did(trait_did) {
+                        trait_item
+                    } else {
+                        let trait_path = path_from_rustc(&tcx.def_path(trait_did), vm);
+                        let trait_crate_id = ctx.find_crate_id(trait_did.krate);
+                        let trait_crate_items = vm.crate_provider(trait_crate_id);
+
+                        trait_crate_items
+                            .item_by_path(&trait_path)
+                            .expect("couldn't find trait")
+                    };
+
+                    let for_types = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
+
+                    trait_item.add_trait_impl(TraitImpl {
+                        crate_id: this_crate,
+                        for_types,
+                        assoc_values: impl_item.assoc_values.into_iter().collect(),
+                        assoc_tys,
+                        bounds,
+                        generics,
+                    });
+                }
+            }
+        }
+
+        // write the inherent impls we just gathered
+        for (ty, items) in inherent_impls {
+            ty.set_impl(items);
+        }
+
+        if is_core {
+            let lang_items = tcx.lang_items();
+            {
+                let lang_trait = lang_items.sized_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::Sized);
+            }
+            {
+                let lang_trait = lang_items.tuple_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::Tuple);
+            }
+            {
+                let lang_trait = lang_items.discriminant_kind_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::DiscriminantKind);
+            }
+            {
+                let lang_trait = lang_items.fn_once_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::FnOnce);
+            }
+            {
+                let lang_trait = lang_items.fn_mut_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::FnMut);
+            }
+            {
+                let lang_trait = lang_items.fn_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::Fn);
+            }
+        }
+
+        if vm.is_verbose {
+            println!("item aggregation took {:?}", t.elapsed());
+            println!("n = {}", ctx.items.items.len());
         }
 
         ctx
@@ -902,12 +685,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
     }
 
     pub fn find_crate_id(&self, crate_num: rustc_span::def_id::CrateNum) -> CrateId {
-        todo!()
-        /*let mut cache = self.extern_crate_id_cache.lock().unwrap();
+        let mut cache = self.extern_crate_id_cache.lock().unwrap();
 
         *cache.entry(crate_num).or_insert_with(|| {
-            let crate_name = tcx.crate_name(crate_num);
-            for entry in &self.extern_crate_list {
+            let crate_name = self.tcx.crate_name(crate_num);
+            for entry in &self.extern_crates {
                 if entry.name == crate_name.as_str() {
                     return entry.id;
                 }
@@ -917,12 +699,12 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 crate_num,
                 crate_name.as_str()
             );
-        })*/
+        })
     }
 }
 
-#[derive(Default)]
 struct RustCItems<'vm> {
+    crate_id: CrateId,
     items: Vec<RustCItem<'vm>>,
     map_paths: AHashMap<ItemPath<'vm>, ItemId>,
     map_defs: AHashMap<LocalDefId, ItemId>,
@@ -934,17 +716,25 @@ struct RustCItem<'vm> {
 }
 
 impl<'vm> RustCItems<'vm> {
+    fn new(crate_id: CrateId) -> Self {
+        RustCItems {
+            crate_id,
+            items: vec![],
+            map_paths: AHashMap::new(),
+            map_defs: AHashMap::new(),
+        }
+    }
+
     fn index_item(
         &mut self,
         kind: ItemKind<'vm>,
         path: ItemPath<'vm>,
         did: LocalDefId,
         vm: &'vm VM<'vm>,
-        crate_id: CrateId,
     ) -> ItemId {
         let item_id = ItemId::new(self.items.len() as u32);
 
-        let item = vm.alloc_item(Item::new(vm, crate_id, item_id, path, kind));
+        let item = vm.alloc_item(Item::new(vm, self.crate_id, item_id, path, kind));
 
         self.items.push(RustCItem { did, item });
 

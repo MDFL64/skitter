@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use crate::items::{AdtInfo, AdtKind, AssocValue, CrateId, Item};
+use ahash::AHashMap;
+
+use crate::items::{AdtInfo, AssocValue, CrateId, Item};
 
 use super::{
     layout::Layout,
@@ -226,22 +228,36 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn add_impl(&self, crate_id: CrateId, new_assoc_items: Vec<(String, AssocValue<'vm>)>) {
-        // This is used to skip implementations on types which are not correctly implemented at the moment.
-        if self.kind().is_dummy() {
-            return;
-        }
-
-        let mut assoc_values = self.0.assoc_values.write().unwrap();
-        for (name, item_id) in new_assoc_items {
-            let old = assoc_values.insert(name, (crate_id, item_id));
-            assert!(old.is_none());
-        }
+    pub fn set_impl(&self, new_assoc_items: AHashMap<String, (CrateId, AssocValue<'vm>)>) {
+        let res = self.0.assoc_values.set(new_assoc_items);
+        assert!(res.is_ok());
     }
 
     pub fn find_assoc_value(&self, name: &str) -> Option<(CrateId, AssocValue<'vm>)> {
-        let assoc_values = self.0.assoc_values.read().unwrap();
-        assoc_values.get(name).cloned()
+        if let Some(assoc_values) = self.0.assoc_values.get() {
+            assoc_values.get(name).cloned()
+        } else {
+            let impl_crate_id = self.find_impl_crate();
+            let impl_crate = self.1.crate_provider(impl_crate_id);
+
+            impl_crate.fill_inherent_impls(*self);
+
+            // Try one more time:
+            if let Some(assoc_values) = self.0.assoc_values.get() {
+                assoc_values.get(name).cloned()
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Find the crate that the type is defined in. Used to request inherent impl setup.
+    fn find_impl_crate(&self) -> CrateId {
+        match self.kind() {
+            // primitive types have impls in core
+            TypeKind::Int(..) => self.1.core_crate.unwrap(),
+            _ => panic!("find_impl_crate {:?}", self.kind()),
+        }
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
