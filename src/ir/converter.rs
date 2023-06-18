@@ -88,7 +88,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         let expr_kind = match expr.kind {
             hir::ExprKind::Lit(_) => self.expr_literal(expr, ty, false),
             hir::ExprKind::Cast(arg, _) => ExprKind::Cast(self.expr(arg)),
-            hir::ExprKind::AddrOf(_, _, arg) => ExprKind::Ref(self.expr(arg)),
+            hir::ExprKind::AddrOf(_, mutability, arg) => {
+                let mutability = match mutability {
+                    rustc_ast::Mutability::Mut => Mutability::Mut,
+                    rustc_ast::Mutability::Not => Mutability::Const,
+                };
+                ExprKind::Ref(self.expr(arg), mutability)
+            }
             hir::ExprKind::Unary(op, arg) => {
                 let arg = self.expr(arg);
 
@@ -436,7 +442,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         // for the deref to work
 
                         let arg = self.builder.add_expr(Expr {
-                            kind: ExprKind::Ref(expr_id),
+                            kind: ExprKind::Ref(expr_id, Mutability::Const),
                             ty: self.ctx.vm.ty_ref(adjust_ty_in, Mutability::Const),
                         });
 
@@ -454,7 +460,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 }
                 Adjust::Borrow(_) => {
                     expr_id = self.builder.add_expr(Expr {
-                        kind: ExprKind::Ref(expr_id),
+                        kind: ExprKind::Ref(expr_id, Mutability::Const),
                         ty: adjust_ty,
                     });
                 }

@@ -1,6 +1,6 @@
 use crate::{
     items::FunctionSig,
-    types::{ItemWithSubs, Type},
+    types::{ItemWithSubs, Mutability, Type},
 };
 
 #[derive(Default)]
@@ -177,7 +177,7 @@ pub enum ExprKind<'vm> {
 
     NamedConst(ItemWithSubs<'vm>),
     //Function(ItemWithSubs<'vm>),
-    Ref(ExprId),
+    Ref(ExprId, Mutability),
     DeRef(ExprId),
 
     Field {

@@ -744,16 +744,25 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
-        let (ir, new_subs) = self.ir(subs);
+        let ItemKind::Constant{mono_values,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
 
-        let bc = BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
+        let mut mono_values = mono_values.lock().unwrap();
+        let result_val = mono_values.entry(subs.clone()).or_insert_with(|| {
+            let (ir, new_subs) = self.ir(subs);
 
-        let const_thread = self.vm.make_thread();
-        const_thread.run_bytecode(&bc, 0);
-        let ty = ir.sig.output; // todo sub?
+            let bc = BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
 
-        let const_bytes = const_thread.copy_result(ty.layout().assert_size() as usize);
-        self.vm.alloc_constant(const_bytes)
+            let const_thread = self.vm.make_thread();
+            const_thread.run_bytecode(&bc, 0);
+            let ty = ir.sig.output; // todo sub?
+
+            let const_bytes = const_thread.copy_result(ty.layout().assert_size() as usize);
+            self.vm.alloc_constant(const_bytes)
+        });
+
+        result_val
     }
 
     pub fn ctor_info(&self) -> Option<(ItemId, u32)> {

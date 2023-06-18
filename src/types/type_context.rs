@@ -115,6 +115,7 @@ impl<'vm> TypeContext<'vm> {
                     TypeKind::AssociatedType(item_with_subs)
                 }
                 AliasKind::Opaque => TypeKind::Opaque,
+                AliasKind::Inherent => panic!("inherent alias?"),
             },
             TyKind::Foreign(_) => TypeKind::Foreign,
             TyKind::Dynamic(..) => TypeKind::Dynamic,
