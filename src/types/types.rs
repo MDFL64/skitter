@@ -228,6 +228,18 @@ impl<'vm> Type<'vm> {
         }
     }
 
+    pub fn is_interior_mut(&self, subs: &SubList<'vm>) -> bool {
+        match self.kind() {
+            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char => false,
+            TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut(subs)),
+            TypeKind::Array(child, _) => child.is_interior_mut(subs),
+            // assume refs are never interior mut, this is how explicit constants work
+            // for const promotion, the types will be checked
+            TypeKind::Ref(..) => false,
+            _ => panic!("can_const_promote? {}", self),
+        }
+    }
+
     pub fn set_impl(&self, new_assoc_items: AHashMap<String, (CrateId, AssocValue<'vm>)>) {
         let res = self.0.assoc_values.set(new_assoc_items);
         assert!(res.is_ok());

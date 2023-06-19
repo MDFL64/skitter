@@ -1,6 +1,7 @@
 use crate::abi::POINTER_SIZE;
 use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
+use crate::ir::const_util::ConstStatus;
 use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, Pattern,
     PatternId, PatternKind, PointerCast, Stmt,
@@ -489,7 +490,16 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot.unwrap_or(Slot::DUMMY)
             }
             ExprKind::Ref(arg, ref_mutability) => {
-                let place = self.expr_to_place(*arg);
+                let arg_ty = self.expr_ty(*arg);
+
+                let const_promote = *ref_mutability == Mutability::Const
+                    && self.const_status(*arg) == ConstStatus::CanPromote;
+
+                let place = if const_promote {
+                    panic!("please const promote")
+                } else {
+                    self.expr_to_place(*arg)
+                };
 
                 match place {
                     Place::Local(src_slot) => {
@@ -499,12 +509,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         dst_slot
                     }
                     Place::Ptr(src_slot, offset) => {
-                        let copy_alloc =
-                            *ref_mutability == Mutability::Mut && self.in_func.is_const_alloc(*arg);
+                        let is_mut = *ref_mutability == Mutability::Mut || arg_ty.is_interior_mut(self.in_func_subs);
+                        let copy_alloc = is_mut && self.in_func.is_const_alloc(*arg);
 
                         if copy_alloc {
                             // We are mutably referencing a const allocation. It must be copied!
-                            let arg_ty = self.expr_ty(*arg);
+
+                            // these two things should be mutually exclusive
+                            assert!(!const_promote);
+
                             let copy_slot = self.stack.alloc(arg_ty);
 
                             if let Some(copy_bc) =
@@ -516,7 +529,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                             self.out_bc.push(Instr::SlotAddr(dst_slot, copy_slot));
-                            
+
                             dst_slot
                         } else {
                             let ref_size = expr_ty.layout().assert_size();
@@ -817,6 +830,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 Place::Local(res)
             }
             _ => panic!("expr_to_place {:?}", expr.kind),
+        }
+    }
+
+    fn const_status(&self, id: ExprId) -> ConstStatus {
+        let expr = self.in_func.expr(id);
+        match expr.kind {
+            ExprKind::VarRef(_) => ConstStatus::Not,
+            ExprKind::LiteralValue(_) => ConstStatus::CanPromote,
+            _ => panic!("const_status {:?}", expr.kind),
         }
     }
 
