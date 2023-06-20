@@ -234,9 +234,10 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut(subs)),
             TypeKind::Array(child, _) => child.is_interior_mut(subs),
             // assume refs are never interior mut, this is how explicit constants work
-            // for const promotion, the types will be checked
             TypeKind::Ref(..) => false,
-            _ => panic!("can_const_promote? {}", self),
+            // how would we even handle this? assume not
+            TypeKind::Slice(..) => false,
+            _ => panic!("is_interior_mut? {}", self),
         }
     }
 

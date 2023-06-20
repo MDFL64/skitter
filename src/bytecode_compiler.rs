@@ -493,7 +493,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let arg_ty = self.expr_ty(*arg);
 
                 let const_promote = *ref_mutability == Mutability::Const
-                    && self.const_status(*arg) == ConstStatus::CanPromote;
+                    && self.in_func.const_status(*arg) == ConstStatus::CanPromote;
 
                 let place = if const_promote {
                     panic!("please const promote")
@@ -515,7 +515,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         if copy_alloc {
                             // We are mutably referencing a const allocation. It must be copied!
 
-                            // these two things should be mutually exclusive
+                            // allocation copying and const promotion should be mutually exclusive
                             assert!(!const_promote);
 
                             let copy_slot = self.stack.alloc(arg_ty);
@@ -830,15 +830,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 Place::Local(res)
             }
             _ => panic!("expr_to_place {:?}", expr.kind),
-        }
-    }
-
-    fn const_status(&self, id: ExprId) -> ConstStatus {
-        let expr = self.in_func.expr(id);
-        match expr.kind {
-            ExprKind::VarRef(_) => ConstStatus::Not,
-            ExprKind::LiteralValue(_) => ConstStatus::CanPromote,
-            _ => panic!("const_status {:?}", expr.kind),
         }
     }
 
