@@ -76,10 +76,69 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             for (i, bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}", i, bc);
             }
+            println!("<-");
         }
 
         //println!("{:?}",compiler.out_bc);
         compiler.out_bc
+    }
+
+    pub fn compile_promoted_const(
+        vm: &'vm vm::VM<'vm>,
+        ir: &'f IRFunction<'vm>,
+        subs: &'f SubList<'vm>,
+        root_expr: ExprId
+    ) -> (usize,Option<usize>) {
+        if vm.is_verbose {
+            println!("compiling promoted const");
+        }
+
+        let mut compiler = BytecodeCompiler {
+            in_func_subs: subs,
+            in_func: &ir,
+            out_bc: Vec::new(),
+            vm,
+            stack: Default::default(),
+            locals: Vec::new(),
+            loops: Vec::new(),
+            loop_breaks: Vec::new(),
+        };
+
+        let place = compiler.expr_to_place(root_expr);
+        compiler.out_bc.push(Instr::Return);
+
+        if compiler.vm.is_verbose {
+            for (i, bc) in compiler.out_bc.iter().enumerate() {
+                println!("  {} {:?}", i, bc);
+            }
+            println!("<-");
+        }
+
+        let const_thread = vm.make_thread();
+        const_thread.run_bytecode(&compiler.out_bc, 0);
+
+        match place {
+            Place::Local(slot) => {
+                let size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
+                let data = const_thread.copy_result(slot.index(), size);
+                let ptr = vm.alloc_constant(data).as_ptr() as usize;
+                (ptr,None)
+            }
+            Place::Ptr(slot,offset) => {
+                assert!(offset == 0);
+
+                let ptr = const_thread.copy_ptr(slot);
+                let meta = if compiler.expr_ty(root_expr).is_sized() {
+                    None
+                } else {
+                    Some(const_thread.copy_ptr(slot.offset_by(POINTER_SIZE.bytes())))
+                };
+                
+                (ptr,meta)
+            }
+        }
+        //println!("=> {:?}",res);
+
     }
 
     fn debug<S: Into<String>>(&mut self, f: impl Fn() -> S) {
@@ -496,7 +555,20 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     && self.in_func.const_status(*arg) == ConstStatus::CanPromote;
 
                 let place = if const_promote {
-                    panic!("please const promote")
+
+                    let (ptr,ptr_meta) = BytecodeCompiler::compile_promoted_const(self.vm, self.in_func, self.in_func_subs, *arg);
+
+                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                    let ptr_size = POINTER_SIZE.bytes();
+
+                    self.out_bc.push(bytecode_select::literal(ptr as _, ptr_size, dst_slot));
+
+                    if let Some(ptr_meta) = ptr_meta {
+                        self.out_bc.push(bytecode_select::literal(ptr_meta as _, ptr_size, dst_slot.offset_by(ptr_size)));
+                    }
+
+                    return dst_slot;
                 } else {
                     self.expr_to_place(*arg)
                 };
@@ -509,7 +581,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         dst_slot
                     }
                     Place::Ptr(src_slot, offset) => {
-                        let is_mut = *ref_mutability == Mutability::Mut || arg_ty.is_interior_mut(self.in_func_subs);
+                        let is_mut = *ref_mutability == Mutability::Mut || arg_ty.is_interior_mut();
                         let copy_alloc = is_mut && self.in_func.is_const_alloc(*arg);
 
                         if copy_alloc {
@@ -601,6 +673,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             ptr_size,
                             dst_slot.offset_by(ptr_size),
                         ));
+
+                        dst_slot
                     }
                     PointerCast::MutToConstPointer => {
                         // a simple copy
@@ -610,11 +684,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         self.out_bc
                             .push(bytecode_select::copy(dst_slot, src_slot, expr_ty).unwrap());
+
+                        dst_slot
                     }
                     _ => panic!("todo ptr cast {:?}", cast),
                 }
-
-                self.lower_expr(*source, dst_slot)
             }
             ExprKind::Tuple(fields) => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));

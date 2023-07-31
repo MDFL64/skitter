@@ -1,0 +1,13 @@
+Interior mutability check needs to detect UnsafeCell.
+
+Const promotion must ignore block statements!
+
+Const promotion needs to support unsized types!
+
+```
+fn f() -> &'static [i32] {
+    &[10,20,30]
+}
+```
+
+Probably trait objects as well?

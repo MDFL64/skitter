@@ -758,7 +758,7 @@ impl<'vm> Item<'vm> {
             const_thread.run_bytecode(&bc, 0);
             let ty = ir.sig.output; // todo sub?
 
-            let const_bytes = const_thread.copy_result(ty.layout().assert_size() as usize);
+            let const_bytes = const_thread.copy_result(0,ty.layout().assert_size() as usize);
             self.vm.alloc_constant(const_bytes)
         });
 

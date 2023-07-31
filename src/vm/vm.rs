@@ -3,6 +3,8 @@ use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::crate_provider::CrateProvider;
+use crate::ir::ExprId;
+use crate::ir::IRFunction;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::rustc_worker::RustCWorker;
@@ -74,10 +76,16 @@ impl<'vm> VMThread<'vm> {
         }
     }
 
-    pub fn copy_result(&self, size: usize) -> Vec<u8> {
+    pub fn copy_result(&self, offset: usize, size: usize) -> Vec<u8> {
         let ptr = self.stack.as_ptr() as *mut u8;
-        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+        let slice = unsafe { std::slice::from_raw_parts(ptr.offset(offset as isize), size) };
         slice.to_vec()
+    }
+
+    pub fn copy_ptr(&self, slot: Slot) -> usize {
+        unsafe{
+            read_stack(self.stack.as_ptr() as _, slot)
+        }
     }
 }
 

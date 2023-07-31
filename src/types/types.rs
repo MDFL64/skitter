@@ -228,11 +228,27 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn is_interior_mut(&self, subs: &SubList<'vm>) -> bool {
+    pub fn is_interior_mut(&self) -> bool {
         match self.kind() {
-            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char => false,
-            TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut(subs)),
-            TypeKind::Array(child, _) => child.is_interior_mut(subs),
+            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char | TypeKind::StringSlice |
+            TypeKind::FunctionDef(_) => false,
+            TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut()),
+            TypeKind::Array(child, _) => child.is_interior_mut(),
+            TypeKind::Adt(adt) => {
+                // TODO check unsafecell
+                //let new_subs = adt.subs.sub(subs);
+                let adt_info = adt.item.adt_info();
+
+                for variant in &adt_info.variant_fields {
+                    for ty in variant {
+                        if ty.sub(&adt.subs).is_interior_mut() {
+                            return true;
+                        }
+                    }
+                }
+
+                false
+            }
             // assume refs are never interior mut, this is how explicit constants work
             TypeKind::Ref(..) => false,
             // how would we even handle this? assume not

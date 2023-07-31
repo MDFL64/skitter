@@ -42,6 +42,8 @@ impl<'vm> IRFunction<'vm> {
             ExprKind::VarRef(_) => ConstStatus::Not,
             ExprKind::LiteralValue(_) => ConstStatus::CanPromote,
 
+            ExprKind::LiteralBytes(_) => ConstStatus::Explicit,
+
             ExprKind::Ref(child, mutability) => {
                 if mutability == Mutability::Const && self.const_status(child).is_const() {
                     ConstStatus::CanPromote
@@ -61,7 +63,8 @@ impl<'vm> IRFunction<'vm> {
                     ConstStatus::Not
                 }
             }
-            ExprKind::Tuple(ref fields) => {
+            ExprKind::Tuple(ref fields) |
+            ExprKind::Array(ref fields) => {
                 let all_const = fields.iter().all(|id| self.const_status(*id).is_const() );
 
                 if all_const {
@@ -90,6 +93,8 @@ impl<'vm> IRFunction<'vm> {
                     ConstStatus::Not
                 }
             }
+
+            ExprKind::Call{ .. } => ConstStatus::Not,
 
             ExprKind::Block(ref block) => {
                 if let Some(res) = block.result {
