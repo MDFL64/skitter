@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Barrier, Mutex, OnceLock},
-    time::Instant,
+    time::Instant, path::PathBuf, str::FromStr,
 };
 
 use ahash::AHashMap;
@@ -76,11 +76,11 @@ struct ImplItem<'tcx, 'vm> {
     assoc_tys: Vec<(String, LocalDefId)>,
 }
 
-pub struct RustCWorkerConfig<'a> {
-    pub source_root: &'a str,
+pub struct RustCWorkerConfig {
+    pub source_root: String,
     pub extern_crates: Vec<ExternCrate>,
     pub is_core: bool,
-    pub save: bool,
+    pub save_file: Option<String>,
 }
 
 impl<'vm> RustCWorker<'vm> {
@@ -103,6 +103,8 @@ impl<'vm> RustCWorker<'vm> {
             None
         };
 
+        let source_root = PathBuf::from_str(&worker_config.source_root).expect("bad source path");
+
         let config = rustc_interface::Config {
             opts: config::Options {
                 crate_name,
@@ -118,7 +120,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(worker_config.source_root.into()),
+            input: config::Input::File(source_root),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -142,8 +144,7 @@ impl<'vm> RustCWorker<'vm> {
                             vm,
                             tcx,
                             this_crate,
-                            worker_config.extern_crates,
-                            worker_config.is_core,
+                            worker_config
                         );
 
                         loop {
@@ -228,9 +229,9 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         res.wait()
     }
 
-    fn fill_inherent_impls(&self, ty: Type<'vm>) {
+    fn fill_inherent_impls(&self, _: Type<'vm>) {
         // All we need to do is wait for initialization.
-        self.call(|ctx| {}).wait();
+        self.call(|_| {}).wait();
     }
 }
 
@@ -249,8 +250,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         vm: &'vm VM<'vm>,
         tcx: TyCtxt<'tcx>,
         this_crate: CrateId,
-        extern_crates: Vec<ExternCrate>,
-        is_core: bool,
+        config: RustCWorkerConfig
     ) -> Self {
         let mut items = RustCItems::new(this_crate);
 
@@ -452,7 +452,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             vm,
             tcx,
             items: Arc::new(items),
-            extern_crates,
+            extern_crates: config.extern_crates,
             extern_crate_id_cache: Default::default(),
         };
 
@@ -600,7 +600,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             ty.set_impl(items);
         }
 
-        if is_core {
+        if config.is_core {
             let lang_items = tcx.lang_items();
             {
                 let lang_trait = lang_items.sized_trait().unwrap();
@@ -637,6 +637,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         if vm.is_verbose {
             println!("item aggregation took {:?}", t.elapsed());
             println!("n = {}", ctx.items.items.len());
+        }
+
+        if let Some(save_file) = config.save_file {
+            panic!("save {}",save_file);
         }
 
         ctx

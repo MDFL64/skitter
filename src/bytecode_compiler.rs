@@ -666,7 +666,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         // copy base
                         let ptr_size = POINTER_SIZE.bytes();
                         self.out_bc.push(
-                            bytecode_select::copy(dst_slot, src_slot, self.vm.ty_usize()).unwrap(),
+                            bytecode_select::copy(dst_slot, src_slot, self.vm.common_types().usize).unwrap(),
                         );
                         self.out_bc.push(bytecode_select::literal(
                             meta as i128,
@@ -760,7 +760,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 self.lower_expr(*arg, Some(arg_slot));
 
                 // the bool pattern match result slot
-                let bool_ty = self.vm.ty_bool();
+                let bool_ty = self.vm.common_types().bool;
                 let match_result_slot = self.stack.alloc(bool_ty);
 
                 let mut jump_gaps = Vec::new();

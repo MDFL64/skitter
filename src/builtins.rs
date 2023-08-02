@@ -247,15 +247,17 @@ pub fn compile_rust_intrinsic<'vm>(
 
                 let ptr_size = POINTER_SIZE.bytes();
 
+                let ty_usize = vm.common_types().usize;
+
                 let byte_slice_size = || {
-                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), vm.ty_usize())
+                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), ty_usize)
                         .unwrap()
                 };
 
                 match arg_ty.kind() {
                     TypeKind::Slice(child_ty) => {
                         let (mul_ctor, _) =
-                            bytecode_select::binary(crate::ir::BinaryOp::Mul, vm.ty_usize());
+                            bytecode_select::binary(crate::ir::BinaryOp::Mul, ty_usize);
 
                         let elem_size = child_ty.layout().assert_size();
 
@@ -387,8 +389,10 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(subs.list.len() == 0);
             assert!(arg_slots.len() == 1);
 
+            let ty_bool = vm.common_types().bool;
+
             // copying here isn't so great, ideally we could make the res slot optional like in the main compiler
-            let copy = bytecode_select::copy(out_slot, arg_slots[0], vm.ty_bool()).unwrap();
+            let copy = bytecode_select::copy(out_slot, arg_slots[0], ty_bool).unwrap();
             out_bc.push(copy);
         }
         "write_bytes" => {

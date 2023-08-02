@@ -59,8 +59,7 @@ fn main() {
         test::test(&args.file_name);
     }
 
-    let vm: &mut VM = Box::leak(Box::new(VM::new(args.core)));
-    vm.is_verbose = args.verbose;
+    let vm: &VM = Box::leak(Box::new(VM::new(args.core,args.verbose)));
 
     {
         let mut extern_crates = Vec::new();
@@ -104,10 +103,10 @@ fn main() {
             assert!(std::path::Path::new(&core_root).exists());
 
             let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
-                source_root: &core_root,
+                source_root: core_root,
                 extern_crates: vec![],
                 is_core: true,
-                save: false,
+                save_file: None,
             });
 
             assert!(Some(core_crate) == vm.core_crate);
@@ -119,10 +118,10 @@ fn main() {
         }
 
         let main_crate = vm.add_rustc_provider(RustCWorkerConfig {
-            source_root: &args.file_name,
+            source_root: args.file_name,
             extern_crates,
             is_core: false,
-            save: false,
+            save_file: args.save,
         });
 
         let main_path = ItemPath::main();

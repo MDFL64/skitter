@@ -36,7 +36,7 @@ impl<'vm> PersistWriteContext<'vm> {
     }
 
     /// Start a nested sub-block that can be skipped over and parsed later.
-    pub fn push_writer(&mut self) {
+    /*pub fn push_writer(&mut self) {
         let parent = std::mem::take(&mut self.output);
         self.stack.push(parent);
     }
@@ -46,7 +46,7 @@ impl<'vm> PersistWriteContext<'vm> {
 
         let child = std::mem::replace(&mut self.output, parent);
         child
-    }
+    }*/
 
     pub fn flip(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.output)

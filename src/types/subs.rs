@@ -60,7 +60,7 @@ impl<'vm> SubList<'vm> {
             list.push(Sub::Lifetime);
         }
         for _ in 0..summary.types {
-            let ty = vm.ty_unknown();
+            let ty = vm.common_types().unknown;
 
             list.push(Sub::Type(ty));
         }

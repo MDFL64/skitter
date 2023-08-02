@@ -69,6 +69,8 @@ fn prepare_child_types<'vm>(ty_kind: &TypeKind<'vm>, write_ctx: &mut PersistWrit
 }
 
 impl<'vm> Persist<'vm> for TypeKind<'vm> {
+
+
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         match self {
             TypeKind::Int(IntWidth::I8, IntSign::Signed) => write_ctx.write_byte(0),

@@ -3,14 +3,11 @@ use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::crate_provider::CrateProvider;
-use crate::ir::ExprId;
-use crate::ir::IRFunction;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
-use crate::types::IntSign;
-use crate::types::IntWidth;
+use crate::types::CommonTypes;
 use crate::types::ItemWithSubs;
 use crate::types::Mutability;
 use crate::types::SubList;
@@ -18,6 +15,7 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
+use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -30,6 +28,7 @@ pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
     pub core_crate: Option<CrateId>,
+    common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
 
     arena_crates: Arena<Box<dyn CrateProvider<'vm>>>,
@@ -90,7 +89,7 @@ impl<'vm> VMThread<'vm> {
 }
 
 impl<'vm> VM<'vm> {
-    pub fn new(has_core: bool) -> Self {
+    pub fn new(has_core: bool, is_verbose: bool) -> Self {
         let core_crate = if has_core {
             Some(CrateId::new(0))
         } else {
@@ -100,8 +99,9 @@ impl<'vm> VM<'vm> {
         Self {
             core_crate,
             types: TypeContext::new(),
-            is_verbose: false,
+            is_verbose,
             crates: Default::default(),
+            common_types: OnceLock::new(),
 
             arena_crates: Arena::new(),
             arena_items: Arena::new(),
@@ -112,6 +112,10 @@ impl<'vm> VM<'vm> {
 
             map_paths: Default::default(),
         }
+    }
+
+    pub fn setup_common_types() {
+        //vm.common_types = Some(CommonTypes::new(&vm));
     }
 
     pub fn make_thread(&'vm self) -> VMThread<'vm> {
@@ -193,13 +197,10 @@ impl<'vm> VM<'vm> {
         }
     }
 
-    pub fn ty_usize(&'vm self) -> Type<'vm> {
-        self.types
-            .intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned), self)
-    }
-
-    pub fn ty_bool(&'vm self) -> Type<'vm> {
-        self.types.intern(TypeKind::Bool, self)
+    pub fn common_types(&'vm self) -> &CommonTypes<'vm> {
+        self.common_types.get_or_init(|| {
+            CommonTypes::new(self)
+        })
     }
 
     pub fn ty_func_def(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
@@ -208,10 +209,6 @@ impl<'vm> VM<'vm> {
 
     pub fn ty_adt(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {
         self.types.intern(TypeKind::Adt(def), self)
-    }
-
-    pub fn ty_unknown(&'vm self) -> Type<'vm> {
-        self.types.intern(TypeKind::Unknown, self)
     }
 
     pub fn ty_tuple(&'vm self, children: Vec<Type<'vm>>) -> Type<'vm> {

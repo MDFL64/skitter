@@ -23,7 +23,7 @@ pub struct CliArgs {
     #[clap(long)]
     pub core: bool,
 
-    /// Save core IR
+    /// Save IR to file
     #[clap(long)]
-    pub save_core: bool,
+    pub save: Option<String>,
 }
