@@ -16,6 +16,10 @@ rustc_private = true
 
 [dependencies]
 
+build_id = "0.2.1"
+md5 = "0.7.0"
+base64 = "0.21.2"
+
 colored = "2.0.0"
 clap = { version = "4.2.4", features = ["derive"] }
 colosseum = "0.2.2"

@@ -29,6 +29,7 @@ mod crate_provider;
 mod ir;
 mod items;
 mod lazy_collections;
+mod persist_header;
 mod persist;
 mod rustc_worker;
 mod test;
@@ -106,7 +107,7 @@ fn main() {
                 source_root: core_root,
                 extern_crates: vec![],
                 is_core: true,
-                save_file: None,
+                save_file: false,
             });
 
             assert!(Some(core_crate) == vm.core_crate);

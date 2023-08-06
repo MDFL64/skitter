@@ -216,4 +216,21 @@ impl<'vm> TypeContext<'vm> {
             })
             .clone()
     }
+
+    pub fn intern_with_persist_id(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>, persist_id: u32) -> Type<'vm> {
+        let mut inner = self.table.lock().unwrap();
+        let entry = inner.entry(kind.clone());
+
+        entry
+            .or_insert_with(|| {
+                let intern_ref = self.arena.alloc(InternedType {
+                    kind,
+                    layout: Default::default(),
+                    assoc_values: Default::default(),
+                    persist_id: persist_id.into(),
+                });
+                Type(intern_ref, vm)
+            })
+            .clone()
+    }
 }

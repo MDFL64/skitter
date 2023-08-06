@@ -21,7 +21,7 @@ use crate::{
         FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
-    vm::VM,
+    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{PersistWriteContext, Persist}, lazy_collections::LazyArray,
 };
 
 /////////////////////////
@@ -80,7 +80,7 @@ pub struct RustCWorkerConfig {
     pub source_root: String,
     pub extern_crates: Vec<ExternCrate>,
     pub is_core: bool,
-    pub save_file: Option<String>,
+    pub save_file: bool,
 }
 
 impl<'vm> RustCWorker<'vm> {
@@ -216,15 +216,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         let is_constant = !item_info.item.is_function();
 
         let res = self.call(move |ctx| {
-            let hir = ctx.tcx.hir();
-
-            let body_id = hir.body_owned_by(did);
-            let body = hir.body(body_id);
-
-            let types = ctx.tcx.typeck(did);
-
-            let ir = IRFunctionConverter::run(ctx, did, body, types, is_constant);
-            Arc::new(ir)
+            build_ir(ctx,did,is_constant)
         });
         res.wait()
     }
@@ -233,6 +225,17 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         // All we need to do is wait for initialization.
         self.call(|_| {}).wait();
     }
+}
+
+fn build_ir<'vm,'tcx>(ctx: &RustCContext<'vm,'tcx>, did: LocalDefId, is_constant: bool) -> Arc<IRFunction<'vm>> {
+    let hir = ctx.tcx.hir();
+
+    let body_id = hir.body_owned_by(did);
+    let body = hir.body(body_id);
+
+    let types = ctx.tcx.typeck(did);
+
+    Arc::new(IRFunctionConverter::run(ctx, did, body, types, is_constant))
 }
 
 pub struct RustCContext<'vm, 'tcx> {
@@ -639,8 +642,40 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             println!("n = {}", ctx.items.items.len());
         }
 
-        if let Some(save_file) = config.save_file {
-            panic!("save {}",save_file);
+        if config.save_file {
+
+            // force-generate all available IR
+            for item in &ctx.items.items {
+                // HACK: skip builtins
+                let path = item.item.path.as_string();
+                if path.starts_with("::_builtin::") {
+                    continue;
+                }
+                println!("gen ir {}",item.item.path.as_string());
+
+                let is_constant = !item.item.is_function();
+                let ir = build_ir(&ctx,item.did,is_constant);
+
+                item.item.set_raw_ir(ir);
+            }
+
+            let crate_header = PersistCrateHeader::from_rustc(ctx.tcx).expect("failed to build header");
+            // TODO validate header by checking that none of the files were mutated after this executable started.
+            // we could create two headers and compare them but, that would require knowing about all the source files
+            // before rustc parses them
+
+            let mut write_ctx = PersistWriteContext::new(this_crate);
+            persist_header_write(&mut write_ctx);
+            crate_header.persist_write(&mut write_ctx);
+
+            let cache_path = format!("./cache/{}",crate_header.cache_file_name());
+
+            let items = ctx.items.items.iter().map(|item| item.item);
+
+            LazyArray::write(&mut write_ctx, items);
+
+            std::fs::write(cache_path, write_ctx.flip()).expect("save failed");
+            panic!("save");
         }
 
         ctx

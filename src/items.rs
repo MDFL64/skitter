@@ -264,8 +264,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 virtual_info.persist_write(write_ctx);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
                 extern_name.persist_write(write_ctx);
-                let ir = self.raw_ir();
-                println!("has ir? {}", ir.is_some());
+
+                let ir_block = self.raw_ir().map(|ir| {
+                    let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
+                    ir.persist_write(&mut write_ctx);
+                    write_ctx.flip()
+                });
+
+                println!("has ir? {:?}",ir_block);
             }
             ItemKind::Constant {
                 virtual_info,
@@ -275,8 +281,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 write_ctx.write_byte('c' as u8);
                 virtual_info.persist_write(write_ctx);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
-                let ir = self.raw_ir();
-                println!("has ir? {}", ir.is_some());
+
+                let ir_block = self.raw_ir().map(|ir| {
+                    let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
+                    ir.persist_write(&mut write_ctx);
+                    write_ctx.flip()
+                });
+
+                println!("has ir? {:?}",ir_block);
             }
             ItemKind::AssociatedType { virtual_info } => {
                 write_ctx.write_byte('y' as u8);
@@ -304,7 +316,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
         // todo actual kind
         let kind_c = read_ctx.read_byte() as char;
-        let (kind, persist_data) = match kind_c {
+        let kind = match kind_c {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
                 let ctor_for =
@@ -317,7 +329,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     extern_name,
                     ctor_for,
                 };
-                (kind, None)
+                kind
             }
             'c' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
@@ -329,21 +341,22 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     virtual_info,
                     ctor_for,
                 };
-                (kind, None)
+                kind
             }
             'y' => {
                 let virtual_info = VirtualInfo::persist_read(read_ctx);
                 let kind = ItemKind::AssociatedType { virtual_info };
-                (kind, None)
+                kind
             }
             'a' => {
-                let adt_info_block = read_ctx.read_block();
-                let kind = ItemKind::new_adt();
-                (kind, Some(adt_info_block))
+                panic!();
+                //let adt_info_block = read_ctx.read_block();
+                //let kind = ItemKind::new_adt();
+                //(kind, Some(adt_info_block))
             }
             't' => {
                 let kind = ItemKind::new_trait();
-                (kind, None)
+                kind
             }
             _ => panic!(),
         };
@@ -371,11 +384,11 @@ pub enum FunctionAbi {
 impl<'vm> Persist<'vm> for (FunctionAbi, String) {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         assert!(self.0 == FunctionAbi::RustIntrinsic);
-        write_ctx.write_str(&self.1);
+        self.1.persist_write(write_ctx);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let ident = read_ctx.read_str().to_owned();
+        let ident = String::persist_read(read_ctx);
         (FunctionAbi::RustIntrinsic, ident)
     }
 }
@@ -505,12 +518,12 @@ pub struct VirtualInfo {
 impl<'vm> Persist<'vm> for VirtualInfo {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         self.trait_id.index().persist_write(write_ctx);
-        write_ctx.write_str(self.ident.as_ref());
+        self.ident.persist_write(write_ctx);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
         let trait_id = ItemId(u32::persist_read(read_ctx));
-        let ident = read_ctx.read_str().to_owned();
+        let ident = String::persist_read(read_ctx);
         Self { trait_id, ident }
     }
 }
@@ -741,6 +754,18 @@ impl<'vm> Item<'vm> {
         let ir = ir.lock().unwrap();
 
         ir.clone()
+    }
+
+    pub fn set_raw_ir(&self, new_ir: Arc<IRFunction<'vm>>) {
+        let ir = match &self.kind {
+            ItemKind::Function { ir, .. } => ir,
+            ItemKind::Constant { ir, .. } => ir,
+            _ => panic!("item kind mismatch"),
+        };
+
+        let mut ir = ir.lock().unwrap();
+
+        *ir = Some(new_ir);
     }
 
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {

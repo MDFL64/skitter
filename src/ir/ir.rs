@@ -1,6 +1,8 @@
+use base64::write;
+
 use crate::{
     items::FunctionSig,
-    types::{ItemWithSubs, Mutability, Type},
+    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReadContext, PersistWriteContext},
 };
 
 #[derive(Default)]
@@ -290,4 +292,123 @@ pub struct MatchArm {
     pub pattern: PatternId,
     pub body: ExprId,
     pub has_guard: bool,
+}
+
+// Persistence!
+
+impl<'vm> Persist<'vm> for IRFunction<'vm> {
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        panic!();
+    }
+
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.sig.inputs.persist_write(write_ctx);
+        self.sig.output.persist_write(write_ctx);
+
+        self.is_constant.persist_write(write_ctx);
+
+        self.root_expr.persist_write(write_ctx);
+        self.params.persist_write(write_ctx);
+
+        self.exprs.persist_write(write_ctx);
+        self.patterns.persist_write(write_ctx);
+    }
+}
+
+impl<'vm> Persist<'vm> for ExprId {
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        Self(u32::persist_read(read_ctx))
+    }
+
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.0.persist_write(write_ctx)
+    }
+}
+
+impl<'vm> Persist<'vm> for PatternId {
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        Self(u32::persist_read(read_ctx))
+    }
+
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.0.persist_write(write_ctx)
+    }
+}
+
+impl<'vm> Persist<'vm> for Expr<'vm> {
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        panic!()
+    }
+
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        self.ty.persist_write(write_ctx);
+        match self.kind {
+            ExprKind::LiteralValue(x) => {
+                write_ctx.write_byte(b'n');
+                x.persist_write(write_ctx);
+            }
+            ExprKind::LiteralVoid => {
+                write_ctx.write_byte(b'0');
+            }
+            ExprKind::VarRef(n) => {
+                write_ctx.write_byte(b'v');
+                n.persist_write(write_ctx);
+            }
+            ExprKind::Unary(op,e) => {
+                write_ctx.write_byte(b'u');
+                match op {
+                    UnaryOp::Not => write_ctx.write_byte(b'!'),
+                    UnaryOp::Neg => write_ctx.write_byte(b'-'),
+                }
+                e.persist_write(write_ctx);
+            }
+            ExprKind::Binary(op,lhs,rhs) => {
+                write_ctx.write_byte(b'b');
+                match op {
+                    BinaryOp::Add => write_ctx.write_byte(b'+'),
+                    BinaryOp::Sub => write_ctx.write_byte(b'-'),
+                    BinaryOp::Mul => write_ctx.write_byte(b'*'),
+                    BinaryOp::Div => write_ctx.write_byte(b'/'),
+                    BinaryOp::Rem => write_ctx.write_byte(b'%'),
+
+                    BinaryOp::BitAnd => write_ctx.write_byte(b'&'),
+                    BinaryOp::BitOr => write_ctx.write_byte(b'|'),
+                    BinaryOp::BitXor => write_ctx.write_byte(b'^'),
+
+                    BinaryOp::ShiftL => write_ctx.write_byte(b'L'),
+                    BinaryOp::ShiftR => write_ctx.write_byte(b'R'),
+
+                    BinaryOp::Eq => write_ctx.write_byte(b'='),
+                    BinaryOp::NotEq => write_ctx.write_byte(b'!'),
+
+                    BinaryOp::Lt => write_ctx.write_byte(b'<'),
+                    BinaryOp::Gt => write_ctx.write_byte(b'>'),
+                    BinaryOp::LtEq => write_ctx.write_byte(b'l'),
+                    BinaryOp::GtEq => write_ctx.write_byte(b'g')
+                }
+                lhs.persist_write(write_ctx);
+                rhs.persist_write(write_ctx);
+            }
+            ExprKind::Cast(e) => {
+                write_ctx.write_byte(b'@');
+                e.persist_write(write_ctx);
+            }
+            ExprKind::Call{ func, ref args } => {
+                write_ctx.write_byte(b'c');
+                func.persist_write(write_ctx);
+                args.persist_write(write_ctx);
+            }
+            _ => panic!("todo persist expr {:?}",self.kind)
+        }
+    }
+}
+
+impl<'vm> Persist<'vm> for Pattern<'vm> {
+    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+        panic!()
+    }
+
+    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+        panic!()
+    }
 }

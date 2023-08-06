@@ -6,7 +6,7 @@ use crate::{
     vm::VM,
 };
 
-/// A sorted array which is lazily parsed.
+/// An array which is lazily parsed
 pub struct LazyArray<'vm, T> {
     /// offset of every item in data
     item_indices: Vec<u32>,
@@ -14,19 +14,24 @@ pub struct LazyArray<'vm, T> {
     array_ty: PhantomData<T>,
 }
 
+// serialized form:
+// entry count
+// count * u32 entry offsets
+// data length
+// data
+
 impl<'vm, T> LazyArray<'vm, T>
 where
-    T: Persist<'vm> + Ord + std::fmt::Debug,
+    T: Persist<'vm> + std::fmt::Debug + 'vm,
 {
-    /// Input must already be sorted!
-    pub fn write(this_crate: CrateId, items: Vec<T>) -> Vec<u8> {
-        let mut write_ctx = PersistWriteContext::new(this_crate);
+    pub fn write(out_ctx: &mut PersistWriteContext, items: impl ExactSizeIterator<Item = &'vm T>) {
+        let mut data_ctx = PersistWriteContext::new(out_ctx.this_crate);
 
         let mut item_indices = Vec::<u32>::new();
 
-        for item in &items {
-            let offset = write_ctx.offset();
-            item.persist_write(&mut write_ctx);
+        for item in items {
+            let offset = data_ctx.offset();
+            item.persist_write(&mut data_ctx);
             item_indices.push(offset);
         }
 
@@ -34,16 +39,15 @@ where
         let index_bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(item_indices.as_ptr() as _, num_bytes) };
 
-        let data = write_ctx.flip();
+        let data = data_ctx.flip();
 
         // write final result
-        item_indices.len().persist_write(&mut write_ctx);
-        write_ctx.write_bytes(index_bytes);
+        item_indices.len().persist_write(out_ctx);
+        out_ctx.write_bytes(index_bytes);
 
-        data.len().persist_write(&mut write_ctx);
-        write_ctx.write_bytes(&data);
+        data.len().persist_write(out_ctx);
+        out_ctx.write_bytes(&data);
 
-        write_ctx.flip()
     }
 
     pub fn read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -70,20 +74,5 @@ where
             data,
             array_ty: PhantomData,
         }
-    }
-
-    pub fn find(&self, val: &T, vm: &'vm VM<'vm>) -> usize {
-        let mut read_ctx = PersistReadContext::new(&[], vm, CrateId::new(0));
-
-        self.item_indices
-            .binary_search_by(|index| {
-                let data = &self.data[*index as usize..];
-                read_ctx.reset(data);
-
-                let candidate = T::persist_read(&mut read_ctx);
-
-                candidate.cmp(val)
-            })
-            .unwrap()
     }
 }

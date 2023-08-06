@@ -5,12 +5,14 @@ use super::{
     TypeKind,
 };
 
+const TYPE_ID_OFFSET: usize = 100;
+
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
         let type_id = self.0.persist_id.get_or_init(|| {
-            prepare_child_types(self.kind(), write_ctx);
+            //prepare_child_types(self.kind(), write_ctx);
 
-            let i = write_ctx.types.len();
+            let i = TYPE_ID_OFFSET + write_ctx.types.len();
             write_ctx.types.push(*self);
             i as u32
         });
@@ -23,6 +25,7 @@ impl<'vm> Persist<'vm> for Type<'vm> {
     }
 }
 
+/*
 /// Child types must live at lower indices when serialized.
 ///
 /// This does not include types in ADTs, which are not needed
@@ -66,7 +69,7 @@ fn prepare_child_types<'vm>(ty_kind: &TypeKind<'vm>, write_ctx: &mut PersistWrit
 
         _ => panic!("todo children {:?}", ty_kind),
     }
-}
+}*/
 
 impl<'vm> Persist<'vm> for TypeKind<'vm> {
 
