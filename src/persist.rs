@@ -28,9 +28,13 @@ impl<'vm> PersistWriteContext<'vm> {
         self.output.extend_from_slice(bytes);
     }
 
+    pub fn write_byte_slice(&mut self, bytes: &[u8]) {
+        bytes.len().persist_write(self);
+        self.write_bytes(bytes);
+    }
+
     pub fn write_str(&mut self, string: &str) {
-        string.len().persist_write(self);
-        self.write_bytes(string.as_bytes());
+        self.write_byte_slice(string.as_bytes());
     }
 
     pub fn flip(&mut self) -> Vec<u8> {
@@ -147,7 +151,7 @@ macro_rules! persist_sint {
         impl<'vm> Persist<'vm> for $ty {
             fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
                 let n = if *self < 0 {
-                    panic!("neg")
+                    ((-self) << 1) | 1
                 } else {
                     *self << 1
                 };

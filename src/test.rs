@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub fn test(dir_name: &str) -> ! {
+pub fn test(dir_name: &str, global_args: &[&str]) -> ! {
     use colored::Colorize;
 
     let mut test_files = Vec::new();
@@ -15,7 +15,7 @@ pub fn test(dir_name: &str) -> ! {
     let count_total = test_files.len();
     let mut time_skitter_total: Duration = Default::default();
     for file in test_files {
-        let res = run_test(&file, bin_name);
+        let res = run_test(&file, bin_name,global_args);
         let res_str: String = match res {
             Err(msg) => format!("{}", format!("FAIL: {}", msg).red()),
             Ok(res) => {
@@ -116,7 +116,7 @@ struct TestResult {
 
 const ERROR_CHARS: usize = 80;
 
-fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String> {
+fn run_test(test_info: &TestInfo, bin_name: &Path, global_args: &[&str]) -> Result<TestResult, String> {
     use std::process::Command;
 
     // Rust compile
@@ -169,6 +169,10 @@ fn run_test(test_info: &TestInfo, bin_name: &Path) -> Result<TestResult, String>
 
         let mut cmd = Command::new(program);
         cmd.arg(&test_info.file);
+
+        for arg in global_args {
+            cmd.arg(arg);
+        }
 
         for arg in test_info.args.iter() {
             cmd.arg(arg);

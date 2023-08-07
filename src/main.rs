@@ -57,7 +57,11 @@ fn main() {
     let args = cli::CliArgs::parse();
 
     if args.test {
-        test::test(&args.file_name);
+        let mut global_args = Vec::new();
+        if args.save {
+            global_args.push("--save");
+        }
+        test::test(&args.file_name,&global_args);
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.core,args.verbose)));

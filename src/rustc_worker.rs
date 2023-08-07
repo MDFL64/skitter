@@ -216,7 +216,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         let is_constant = !item_info.item.is_function();
 
         let res = self.call(move |ctx| {
-            build_ir(ctx,did,is_constant)
+            build_ir(ctx,did,is_constant).expect("build_ir: no ir available")
         });
         res.wait()
     }
@@ -227,15 +227,18 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
     }
 }
 
-fn build_ir<'vm,'tcx>(ctx: &RustCContext<'vm,'tcx>, did: LocalDefId, is_constant: bool) -> Arc<IRFunction<'vm>> {
+fn build_ir<'vm,'tcx>(ctx: &RustCContext<'vm,'tcx>, did: LocalDefId, is_constant: bool) -> Option<Arc<IRFunction<'vm>>> {
     let hir = ctx.tcx.hir();
 
-    let body_id = hir.body_owned_by(did);
-    let body = hir.body(body_id);
-
-    let types = ctx.tcx.typeck(did);
-
-    Arc::new(IRFunctionConverter::run(ctx, did, body, types, is_constant))
+    if let Some(body_id) = hir.maybe_body_owned_by(did) {
+        let body = hir.body(body_id);
+    
+        let types = ctx.tcx.typeck(did);
+    
+        Some(Arc::new(IRFunctionConverter::run(ctx, did, body, types, is_constant)))
+    } else {
+        None
+    }
 }
 
 pub struct RustCContext<'vm, 'tcx> {
@@ -651,12 +654,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 if path.starts_with("::_builtin::") {
                     continue;
                 }
-                println!("gen ir {}",item.item.path.as_string());
 
                 let is_constant = !item.item.is_function();
-                let ir = build_ir(&ctx,item.did,is_constant);
-
-                item.item.set_raw_ir(ir);
+                if let Some(ir) = build_ir(&ctx,item.did,is_constant) {
+                    item.item.set_raw_ir(ir);
+                }
             }
 
             let crate_header = PersistCrateHeader::from_rustc(ctx.tcx).expect("failed to build header");
@@ -675,7 +677,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             LazyArray::write(&mut write_ctx, items);
 
             std::fs::write(cache_path, write_ctx.flip()).expect("save failed");
-            panic!("save");
         }
 
         ctx

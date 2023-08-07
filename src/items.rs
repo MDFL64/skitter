@@ -269,9 +269,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
                     ir.persist_write(&mut write_ctx);
                     write_ctx.flip()
-                });
+                }).unwrap_or_else(|| Vec::new());
 
-                println!("has ir? {:?}",ir_block);
+                write_ctx.write_byte_slice(&ir_block);
             }
             ItemKind::Constant {
                 virtual_info,
@@ -286,9 +286,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
                     ir.persist_write(&mut write_ctx);
                     write_ctx.flip()
-                });
+                }).unwrap_or_else(|| Vec::new());
 
-                println!("has ir? {:?}",ir_block);
+                write_ctx.write_byte_slice(&ir_block);
             }
             ItemKind::AssociatedType { virtual_info } => {
                 write_ctx.write_byte('y' as u8);
