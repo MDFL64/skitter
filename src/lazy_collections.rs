@@ -1,10 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{
-    items::CrateId,
-    persist::{Persist, PersistReadContext, PersistWriteContext},
-    vm::VM,
-};
+use crate::persist::{Persist, PersistReadContext, PersistWriter};
 
 /// An array which is lazily parsed
 pub struct LazyArray<'vm, T> {
@@ -24,14 +20,14 @@ impl<'vm, T> LazyArray<'vm, T>
 where
     T: Persist<'vm> + std::fmt::Debug + 'vm,
 {
-    pub fn write(out_ctx: &mut PersistWriteContext, items: impl ExactSizeIterator<Item = &'vm T>) {
-        let mut data_ctx = PersistWriteContext::new(out_ctx.this_crate);
+    pub fn write(out_writer: &mut PersistWriter<'vm>, items: impl ExactSizeIterator<Item = &'vm T>) {
+        let mut data_writer = out_writer.new_child_context();
 
         let mut item_indices = Vec::<u32>::new();
 
         for item in items {
-            let offset = data_ctx.offset();
-            item.persist_write(&mut data_ctx);
+            let offset = data_writer.offset();
+            item.persist_write(&mut data_writer);
             item_indices.push(offset);
         }
 
@@ -39,14 +35,14 @@ where
         let index_bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(item_indices.as_ptr() as _, num_bytes) };
 
-        let data = data_ctx.flip();
+        let data = data_writer.flip();
 
         // write final result
-        item_indices.len().persist_write(out_ctx);
-        out_ctx.write_bytes(index_bytes);
+        item_indices.len().persist_write(out_writer);
+        out_writer.write_bytes(index_bytes);
 
-        data.len().persist_write(out_ctx);
-        out_ctx.write_bytes(&data);
+        data.len().persist_write(out_writer);
+        out_writer.write_bytes(&data);
 
     }
 

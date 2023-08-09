@@ -1,6 +1,6 @@
 use crate::{
     items::FunctionSig,
-    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReadContext, PersistWriteContext},
+    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReadContext, PersistWriteContext, PersistWriter},
 };
 
 #[derive(Default)]
@@ -299,17 +299,17 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         panic!();
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.sig.inputs.persist_write(write_ctx);
-        self.sig.output.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.sig.inputs.persist_write(writer);
+        self.sig.output.persist_write(writer);
 
-        self.is_constant.persist_write(write_ctx);
+        self.is_constant.persist_write(writer);
 
-        self.root_expr.persist_write(write_ctx);
-        self.params.persist_write(write_ctx);
+        self.root_expr.persist_write(writer);
+        self.params.persist_write(writer);
 
-        self.exprs.persist_write(write_ctx);
-        self.patterns.persist_write(write_ctx);
+        self.exprs.persist_write(writer);
+        self.patterns.persist_write(writer);
     }
 }
 
@@ -318,8 +318,8 @@ impl<'vm> Persist<'vm> for ExprId {
         Self(u32::persist_read(read_ctx))
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.0.persist_write(write_ctx)
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer)
     }
 }
 
@@ -328,8 +328,8 @@ impl<'vm> Persist<'vm> for PatternId {
         Self(u32::persist_read(read_ctx))
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.0.persist_write(write_ctx)
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer)
     }
 }
 
@@ -338,9 +338,9 @@ impl<'vm> Persist<'vm> for Block {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.stmts.persist_write(write_ctx);
-        self.result.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.stmts.persist_write(writer);
+        self.result.persist_write(writer);
     }
 }
 
@@ -349,21 +349,21 @@ impl<'vm> Persist<'vm> for Stmt {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
             Stmt::Expr(e) => {
-                write_ctx.write_byte(b'E');
-                e.persist_write(write_ctx);
+                writer.write_byte(b'E');
+                e.persist_write(writer);
             }
             Stmt::Let{
                 pattern,
                 init,
                 else_block
             } => {
-                write_ctx.write_byte(b'L');
-                pattern.persist_write(write_ctx);
-                init.persist_write(write_ctx);
-                else_block.persist_write(write_ctx);
+                writer.write_byte(b'L');
+                pattern.persist_write(writer);
+                init.persist_write(writer);
+                else_block.persist_write(writer);
             }
         }
     }
@@ -374,106 +374,106 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.ty.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.ty.persist_write(writer);
         match self.kind {
             ExprKind::LiteralVoid => {
-                write_ctx.write_byte(b'0');
+                writer.write_byte(b'0');
             }
             ExprKind::AssignOp(op,lhs,rhs) => {
-                write_ctx.write_byte(b'a');
-                op.persist_write(write_ctx);
-                lhs.persist_write(write_ctx);
-                rhs.persist_write(write_ctx);
+                writer.write_byte(b'a');
+                op.persist_write(writer);
+                lhs.persist_write(writer);
+                rhs.persist_write(writer);
             }
             ExprKind::Binary(op,lhs,rhs) => {
-                write_ctx.write_byte(b'b');
-                op.persist_write(write_ctx);
-                lhs.persist_write(write_ctx);
-                rhs.persist_write(write_ctx);
+                writer.write_byte(b'b');
+                op.persist_write(writer);
+                lhs.persist_write(writer);
+                rhs.persist_write(writer);
             }
             ExprKind::Call{ func, ref args } => {
-                write_ctx.write_byte(b'c');
-                func.persist_write(write_ctx);
-                args.persist_write(write_ctx);
+                writer.write_byte(b'c');
+                func.persist_write(writer);
+                args.persist_write(writer);
             }
             ExprKind::LiteralValue(x) => {
-                write_ctx.write_byte(b'n');
-                x.persist_write(write_ctx);
+                writer.write_byte(b'n');
+                x.persist_write(writer);
             }
             ExprKind::Unary(op,e) => {
-                write_ctx.write_byte(b'u');
+                writer.write_byte(b'u');
                 match op {
-                    UnaryOp::Not => write_ctx.write_byte(b'!'),
-                    UnaryOp::Neg => write_ctx.write_byte(b'-'),
+                    UnaryOp::Not => writer.write_byte(b'!'),
+                    UnaryOp::Neg => writer.write_byte(b'-'),
                 }
-                e.persist_write(write_ctx);
+                e.persist_write(writer);
             }
             ExprKind::VarRef(n) => {
-                write_ctx.write_byte(b'v');
-                n.persist_write(write_ctx);
+                writer.write_byte(b'v');
+                n.persist_write(writer);
             }
             ExprKind::Break{loop_id,value} => {
-                write_ctx.write_byte(b'B');
-                loop_id.0.persist_write(write_ctx);
-                value.persist_write(write_ctx);
+                writer.write_byte(b'B');
+                loop_id.0.persist_write(writer);
+                value.persist_write(writer);
             }
             ExprKind::LogicOp(op,lhs,rhs) => {
-                write_ctx.write_byte(b'G');
+                writer.write_byte(b'G');
                 match op {
-                    LogicOp::And => write_ctx.write_byte(b'&'),
-                    LogicOp::Or => write_ctx.write_byte(b'|'),
+                    LogicOp::And => writer.write_byte(b'&'),
+                    LogicOp::Or => writer.write_byte(b'|'),
                 }
-                lhs.persist_write(write_ctx);
-                rhs.persist_write(write_ctx);
+                lhs.persist_write(writer);
+                rhs.persist_write(writer);
             }
             ExprKind::Loop(ref block,loop_id) => {
-                write_ctx.write_byte(b'L');
-                block.persist_write(write_ctx);
-                loop_id.0.persist_write(write_ctx);
+                writer.write_byte(b'L');
+                block.persist_write(writer);
+                loop_id.0.persist_write(writer);
             }
             ExprKind::Return(value) => {
-                write_ctx.write_byte(b'R');
-                value.persist_write(write_ctx);
+                writer.write_byte(b'R');
+                value.persist_write(writer);
             }
             ExprKind::Assign(lhs,rhs) => {
-                write_ctx.write_byte(b'=');
-                lhs.persist_write(write_ctx);
-                rhs.persist_write(write_ctx);
+                writer.write_byte(b'=');
+                lhs.persist_write(writer);
+                rhs.persist_write(writer);
             }
             ExprKind::If{cond,then,else_opt} => {
-                write_ctx.write_byte(b'?');
-                cond.persist_write(write_ctx);
-                then.persist_write(write_ctx);
-                else_opt.persist_write(write_ctx);
+                writer.write_byte(b'?');
+                cond.persist_write(writer);
+                then.persist_write(writer);
+                else_opt.persist_write(writer);
             }
             ExprKind::Cast(e) => {
-                write_ctx.write_byte(b'@');
-                e.persist_write(write_ctx);
+                writer.write_byte(b'@');
+                e.persist_write(writer);
             }
             ExprKind::Dummy(e) => {
-                write_ctx.write_byte(b',');
-                e.persist_write(write_ctx);
+                writer.write_byte(b',');
+                e.persist_write(writer);
             }
             ExprKind::DeRef(e) => {
-                write_ctx.write_byte(b'*');
-                e.persist_write(write_ctx);
+                writer.write_byte(b'*');
+                e.persist_write(writer);
             }
             ExprKind::Ref(e,mutability) => {
-                write_ctx.write_byte(b'&');
+                writer.write_byte(b'&');
                 match mutability {
-                    Mutability::Const => write_ctx.write_byte(b'c'),
-                    Mutability::Mut =>   write_ctx.write_byte(b'm'),
+                    Mutability::Const => writer.write_byte(b'c'),
+                    Mutability::Mut =>   writer.write_byte(b'm'),
                 }
-                e.persist_write(write_ctx);
+                e.persist_write(writer);
             }
             ExprKind::Block(ref block) => {
-                write_ctx.write_byte(b'{');
-                block.persist_write(write_ctx);
+                writer.write_byte(b'{');
+                block.persist_write(writer);
             }
             ExprKind::Tuple(ref args) => {
-                write_ctx.write_byte(b'(');
-                args.persist_write(write_ctx);
+                writer.write_byte(b'(');
+                args.persist_write(writer);
             }
             _ => panic!("todo persist expr {:?}",self.kind)
         }
@@ -485,17 +485,17 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.ty.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.ty.persist_write(writer);
         match self.kind {
             PatternKind::LocalBinding { local_id, mode, sub_pattern } => {
-                write_ctx.write_byte(b'L');
-                local_id.persist_write(write_ctx);
+                writer.write_byte(b'L');
+                local_id.persist_write(writer);
                 match mode {
-                    BindingMode::Value => write_ctx.write_byte(b'V'),
-                    BindingMode::Ref => write_ctx.write_byte(b'R'),
+                    BindingMode::Value => writer.write_byte(b'V'),
+                    BindingMode::Ref => writer.write_byte(b'R'),
                 }
-                sub_pattern.persist_write(write_ctx);
+                sub_pattern.persist_write(writer);
             }
             _ => panic!("todo persist pattern {:?}",self.kind)
         }
@@ -507,28 +507,28 @@ impl<'vm> Persist<'vm> for BinaryOp {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
-            BinaryOp::Add => write_ctx.write_byte(b'+'),
-            BinaryOp::Sub => write_ctx.write_byte(b'-'),
-            BinaryOp::Mul => write_ctx.write_byte(b'*'),
-            BinaryOp::Div => write_ctx.write_byte(b'/'),
-            BinaryOp::Rem => write_ctx.write_byte(b'%'),
+            BinaryOp::Add => writer.write_byte(b'+'),
+            BinaryOp::Sub => writer.write_byte(b'-'),
+            BinaryOp::Mul => writer.write_byte(b'*'),
+            BinaryOp::Div => writer.write_byte(b'/'),
+            BinaryOp::Rem => writer.write_byte(b'%'),
 
-            BinaryOp::BitAnd => write_ctx.write_byte(b'&'),
-            BinaryOp::BitOr => write_ctx.write_byte(b'|'),
-            BinaryOp::BitXor => write_ctx.write_byte(b'^'),
+            BinaryOp::BitAnd => writer.write_byte(b'&'),
+            BinaryOp::BitOr => writer.write_byte(b'|'),
+            BinaryOp::BitXor => writer.write_byte(b'^'),
 
-            BinaryOp::ShiftL => write_ctx.write_byte(b'U'),
-            BinaryOp::ShiftR => write_ctx.write_byte(b'D'),
+            BinaryOp::ShiftL => writer.write_byte(b'U'),
+            BinaryOp::ShiftR => writer.write_byte(b'D'),
 
-            BinaryOp::Eq => write_ctx.write_byte(b'='),
-            BinaryOp::NotEq => write_ctx.write_byte(b'!'),
+            BinaryOp::Eq => writer.write_byte(b'='),
+            BinaryOp::NotEq => writer.write_byte(b'!'),
 
-            BinaryOp::Lt => write_ctx.write_byte(b'<'),
-            BinaryOp::Gt => write_ctx.write_byte(b'>'),
-            BinaryOp::LtEq => write_ctx.write_byte(b'L'),
-            BinaryOp::GtEq => write_ctx.write_byte(b'G')
+            BinaryOp::Lt => writer.write_byte(b'<'),
+            BinaryOp::Gt => writer.write_byte(b'>'),
+            BinaryOp::LtEq => writer.write_byte(b'L'),
+            BinaryOp::GtEq => writer.write_byte(b'G')
         }
     }
 }

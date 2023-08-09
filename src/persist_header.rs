@@ -3,14 +3,14 @@ use std::{path::{PathBuf, Path}, error::Error, os::unix::prelude::OsStrExt};
 use base64::Engine;
 use rustc_middle::ty::TyCtxt;
 
-use crate::persist::{Persist, PersistReadContext, PersistWriteContext};
+use crate::persist::{Persist, PersistReadContext, PersistWriter};
 
 const MAGIC: &str = "SKITTER-CRATE\n";
 const BUILD_ID: &str = include!(concat!(env!("OUT_DIR"), "/build_id.rs"));
 
-pub fn persist_header_write(write_ctx: &mut PersistWriteContext) {
-    write_ctx.write_bytes(MAGIC.as_bytes());
-    write_ctx.write_str(BUILD_ID);
+pub fn persist_header_write(writer: &mut PersistWriter) {
+    writer.write_bytes(MAGIC.as_bytes());
+    writer.write_str(BUILD_ID);
 }
 
 #[derive(Debug,PartialEq)]
@@ -77,9 +77,9 @@ impl<'vm> Persist<'vm> for PersistCrateHeader {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.crate_name.persist_write(write_ctx);
-        self.files.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.crate_name.persist_write(writer);
+        self.files.persist_write(writer);
     }
 }
 
@@ -88,13 +88,13 @@ impl<'vm> Persist<'vm> for FileVersionEntry {
         panic!()
     }
 
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         let path_bytes = self.path.as_os_str().as_bytes();
-        path_bytes.len().persist_write(write_ctx);
-        write_ctx.write_bytes(path_bytes);
+        path_bytes.len().persist_write(writer);
+        writer.write_bytes(path_bytes);
 
-        self.size.persist_write(write_ctx);
-        self.time.persist_write(write_ctx);
+        self.size.persist_write(writer);
+        self.time.persist_write(writer);
     }
 }
 

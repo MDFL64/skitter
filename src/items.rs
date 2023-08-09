@@ -9,7 +9,7 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
-    persist::{Persist, PersistReadContext, PersistWriteContext},
+    persist::{Persist, PersistReadContext, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
     vm::{Function, VM},
@@ -20,106 +20,6 @@ pub struct ExternCrate {
     pub name: String,
     pub id: CrateId,
 }
-
-/*pub fn new_deprecated(crate_id: CrateId, extern_crate_list: Vec<ExternCrate>) -> Self {
-    Self {
-        crate_id,
-        items: Default::default(),
-        map_path_to_item: Default::default(),
-        map_did_to_item: Default::default(),
-        extern_crate_list,
-        extern_crate_id_cache: Default::default(),
-    }
-}
-
-pub fn save_items(&self, file_name: &str) {
-    let mut write_ctx = PersistWriteContext::new(self.crate_id);
-    self.items.persist_write(&mut write_ctx);
-
-    // write types
-    {
-        let type_count = write_ctx.types.len();
-        println!("types = {}", type_count);
-        type_count.persist_write(&mut write_ctx);
-
-        for i in 0..type_count {
-            let ty = write_ctx.types[i];
-            ty.kind().persist_write(&mut write_ctx);
-        }
-
-        // ensure no more types were added, if they
-        // are it indicates a bug in `prepare_child_types`
-        assert!(type_count == write_ctx.types.len());
-    }
-
-    write_ctx.save(file_name);
-}
-
-pub fn index_bench(&self, vm: &'vm VM<'vm>) {
-    // LINEAR SCAN (LMAO)
-    let t = std::time::Instant::now();
-    for item in &self.items {
-        let res = self.items.iter().find(|x| x.path == item.path);
-    }
-    println!("linear scan = {:?}",t.elapsed());
-
-    // HASH LOOKUP
-    let t = std::time::Instant::now();
-    for item in &self.items {
-        let res = self.map_path_to_item.get(&item.path);
-    }
-    println!("hash lookup = {:?}",t.elapsed());
-
-    // STD HASH LOOKUP
-    let h2: HashMap<_,_> = self.map_path_to_item.iter().collect();
-
-    let t = std::time::Instant::now();
-    for item in &self.items {
-        let res = h2.get(&item.path);
-    }
-    println!("std hash lookup = {:?}",t.elapsed());
-
-
-    // SORTED ARRAY
-    let mut sorted_array: Vec<_> = self.items.iter().map(|x| x.path.clone()).collect();
-    sorted_array.sort();
-
-    let t = std::time::Instant::now();
-    for item in &self.items {
-        let res = sorted_array.binary_search(&item.path);
-    }
-    println!("binary search = {:?}",t.elapsed());
-
-    let written: &'static [u8] = lazy_collections::LazyArray::write(self.crate_id, sorted_array).leak();
-    let mut read_ctx = PersistReadContext::new(written, vm, self.crate_id);
-
-    let t = std::time::Instant::now();
-    let lazy_list = lazy_collections::LazyArray::<ItemPath>::read(&mut read_ctx);
-    println!("~ build list = {:?}",t.elapsed());
-
-    let t = std::time::Instant::now();
-    for item in &self.items {
-        let res = lazy_list.find(&item.path, vm);
-    }
-    println!("lazy list = {:?}",t.elapsed());
-}
-
-pub fn load_items(file_name: &str, vm: &'vm VM<'vm>, crate_id: CrateId) {
-    let data: &'static [u8] = std::fs::read(file_name)
-        .expect("failed to read data")
-        .leak();
-    let mut read = PersistReadContext::new(&data, vm, crate_id);
-
-    let items: Vec<Item<'vm>> = Persist::persist_read(&mut read);
-
-    let mut map_path_to_item = AHashMap::<ItemPath<'vm>, ItemId>::new();
-    for item in items.iter() {
-        if item.path.can_find() {
-            let old = map_path_to_item.insert(item.path.clone(), item.item_id);
-            assert!(old.is_none());
-        }
-    }
-}*/
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord)]
 pub struct ItemPath<'vm>(NameSpace, &'vm str);
@@ -143,13 +43,13 @@ impl<'vm> ItemPath<'vm> {
 }
 
 impl<'vm> Persist<'vm> for ItemPath<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self.0 {
-            NameSpace::Type => write_ctx.write_byte('t' as u8),
-            NameSpace::Value => write_ctx.write_byte('v' as u8),
-            NameSpace::DebugOnly => write_ctx.write_byte('d' as u8),
+            NameSpace::Type => writer.write_byte('t' as u8),
+            NameSpace::Value => writer.write_byte('v' as u8),
+            NameSpace::DebugOnly => writer.write_byte('d' as u8),
         }
-        write_ctx.write_str(self.1);
+        writer.write_str(self.1);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -251,8 +151,8 @@ impl<'vm> Hash for Item<'vm> {
 }
 
 impl<'vm> Persist<'vm> for Item<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.path.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.path.persist_write(writer);
         match &self.kind {
             ItemKind::Function {
                 virtual_info,
@@ -260,52 +160,52 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 ctor_for,
                 ..
             } => {
-                write_ctx.write_byte('f' as u8);
-                virtual_info.persist_write(write_ctx);
-                ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
-                extern_name.persist_write(write_ctx);
+                writer.write_byte('f' as u8);
+                virtual_info.persist_write(writer);
+                ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
+                extern_name.persist_write(writer);
 
                 let ir_block = self.raw_ir().map(|ir| {
-                    let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
-                    ir.persist_write(&mut write_ctx);
-                    write_ctx.flip()
+                    let mut writer = writer.new_child_context();
+                    ir.persist_write(&mut writer);
+                    writer.flip()
                 }).unwrap_or_else(|| Vec::new());
 
-                write_ctx.write_byte_slice(&ir_block);
+                writer.write_byte_slice(&ir_block);
             }
             ItemKind::Constant {
                 virtual_info,
                 ctor_for,
                 ..
             } => {
-                write_ctx.write_byte('c' as u8);
-                virtual_info.persist_write(write_ctx);
-                ctor_for.map(|(x, y)| (x.0, y)).persist_write(write_ctx);
+                writer.write_byte('c' as u8);
+                virtual_info.persist_write(writer);
+                ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
 
                 let ir_block = self.raw_ir().map(|ir| {
-                    let mut write_ctx = PersistWriteContext::new(write_ctx.this_crate);
-                    ir.persist_write(&mut write_ctx);
-                    write_ctx.flip()
+                    let mut writer = writer.new_child_context();
+                    ir.persist_write(&mut writer);
+                    writer.flip()
                 }).unwrap_or_else(|| Vec::new());
 
-                write_ctx.write_byte_slice(&ir_block);
+                writer.write_byte_slice(&ir_block);
             }
             ItemKind::AssociatedType { virtual_info } => {
-                write_ctx.write_byte('y' as u8);
-                virtual_info.persist_write(write_ctx);
+                writer.write_byte('y' as u8);
+                virtual_info.persist_write(writer);
             }
             ItemKind::Adt { info } => {
-                write_ctx.write_byte('a' as u8);
+                writer.write_byte('a' as u8);
                 // TODO just parse normally? the new scheme should parse all items
                 // after types
 
                 // adt info must be filled after parsing types
-                /*write_ctx.start_block();
-                info.get().unwrap().persist_write(write_ctx);
-                write_ctx.end_block();*/
+                /*writer.start_block();
+                info.get().unwrap().persist_write(writer);
+                writer.end_block();*/
             }
             ItemKind::Trait { .. } => {
-                write_ctx.write_byte('t' as u8);
+                writer.write_byte('t' as u8);
                 // todo builtin ONLY, handle impls separately
             }
         }
@@ -382,9 +282,9 @@ pub enum FunctionAbi {
 }
 
 impl<'vm> Persist<'vm> for (FunctionAbi, String) {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         assert!(self.0 == FunctionAbi::RustIntrinsic);
-        self.1.persist_write(write_ctx);
+        self.1.persist_write(writer);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -481,19 +381,19 @@ impl<'vm> AdtInfo<'vm> {
 }
 
 impl<'vm> Persist<'vm> for AdtInfo<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.variant_fields.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.variant_fields.persist_write(writer);
 
         match self.kind {
             AdtKind::Struct => {
-                write_ctx.write_byte(0);
+                writer.write_byte(0);
             }
             AdtKind::EnumWithDiscriminant(ty) => {
-                write_ctx.write_byte(1);
-                ty.persist_write(write_ctx);
+                writer.write_byte(1);
+                ty.persist_write(writer);
             }
             AdtKind::EnumNonZero => {
-                write_ctx.write_byte(2);
+                writer.write_byte(2);
             }
         }
     }
@@ -516,9 +416,9 @@ pub struct VirtualInfo {
 }
 
 impl<'vm> Persist<'vm> for VirtualInfo {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.trait_id.index().persist_write(write_ctx);
-        self.ident.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.trait_id.index().persist_write(writer);
+        self.ident.persist_write(writer);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {

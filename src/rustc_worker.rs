@@ -21,7 +21,7 @@ use crate::{
         FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
-    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{PersistWriteContext, Persist}, lazy_collections::LazyArray,
+    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{Persist, PersistWriter}, lazy_collections::LazyArray,
 };
 
 /////////////////////////
@@ -666,17 +666,19 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             // we could create two headers and compare them but, that would require knowing about all the source files
             // before rustc parses them
 
-            let mut write_ctx = PersistWriteContext::new(this_crate);
-            persist_header_write(&mut write_ctx);
-            crate_header.persist_write(&mut write_ctx);
+            let mut writer = PersistWriter::new(this_crate);
+            persist_header_write(&mut writer);
+            crate_header.persist_write(&mut writer);
 
             let cache_path = format!("./cache/{}",crate_header.cache_file_name());
 
             let items = ctx.items.items.iter().map(|item| item.item);
 
-            LazyArray::write(&mut write_ctx, items);
+            LazyArray::write(&mut writer, items);
 
-            std::fs::write(cache_path, write_ctx.flip()).expect("save failed");
+            panic!("types = {}",writer.context.types.borrow().len());
+
+            std::fs::write(cache_path, writer.flip()).expect("save failed");
         }
 
         ctx

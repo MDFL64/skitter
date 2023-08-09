@@ -1,18 +1,33 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{items::CrateId, vm::VM, types::Type};
 
 pub struct PersistWriteContext<'vm> {
-    output: Vec<u8>,
-
     pub this_crate: CrateId,
-    pub types: Vec<Type<'vm>>,
+    pub types: RefCell<Vec<Type<'vm>>>,
 }
 
-impl<'vm> PersistWriteContext<'vm> {
+pub struct PersistWriter<'vm> {
+    output: Vec<u8>,
+
+    pub context: Rc<PersistWriteContext<'vm>>
+}
+
+impl<'vm> PersistWriter<'vm> {
     pub fn new(this_crate: CrateId) -> Self {
         Self {
             output: vec![],
-            this_crate,
-            types: vec![],
+            context: Rc::new(PersistWriteContext{
+                this_crate,
+                types: Default::default()
+            })
+        }
+    }
+
+    pub fn new_child_context(&self) -> Self {
+        Self {
+            output: vec![],
+            context: self.context.clone()
         }
     }
 
@@ -93,7 +108,7 @@ impl<'vm> PersistReadContext<'vm> {
 }
 
 pub trait Persist<'vm> {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>);
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self;
 }
@@ -101,25 +116,25 @@ pub trait Persist<'vm> {
 macro_rules! persist_uint {
     ($ty:ty) => {
         impl<'vm> Persist<'vm> for $ty {
-            fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+            fn persist_write(&self, writer: &mut PersistWriter) {
                 let n = *self as u128;
                 if n < 251 {
-                    write_ctx.write_byte(n as u8);
+                    writer.write_byte(n as u8);
                 } else if n < 256 {
-                    write_ctx.write_byte(251);
-                    write_ctx.write_byte(n as u8);
+                    writer.write_byte(251);
+                    writer.write_byte(n as u8);
                 } else if n < 65536 {
-                    write_ctx.write_byte(252);
-                    write_ctx.write_bytes(&(n as u16).to_le_bytes());
+                    writer.write_byte(252);
+                    writer.write_bytes(&(n as u16).to_le_bytes());
                 } else if n < 4294967296 {
-                    write_ctx.write_byte(253);
-                    write_ctx.write_bytes(&(n as u32).to_le_bytes());
+                    writer.write_byte(253);
+                    writer.write_bytes(&(n as u32).to_le_bytes());
                 } else if n < 18446744073709551616 {
-                    write_ctx.write_byte(254);
-                    write_ctx.write_bytes(&(n as u32).to_le_bytes());
+                    writer.write_byte(254);
+                    writer.write_bytes(&(n as u32).to_le_bytes());
                 } else {
-                    write_ctx.write_byte(255);
-                    write_ctx.write_bytes(&(n as u64).to_le_bytes());
+                    writer.write_byte(255);
+                    writer.write_bytes(&(n as u64).to_le_bytes());
                 }
             }
 
@@ -149,13 +164,13 @@ macro_rules! persist_uint {
 macro_rules! persist_sint {
     ($ty:ty,$uty:ty) => {
         impl<'vm> Persist<'vm> for $ty {
-            fn persist_write(&self, write_ctx: &mut PersistWriteContext) {
+            fn persist_write(&self, writer: &mut PersistWriter) {
                 let n = if *self < 0 {
                     ((-self) << 1) | 1
                 } else {
                     *self << 1
                 };
-                (n as $uty).persist_write(write_ctx);
+                (n as $uty).persist_write(writer);
             }
 
             fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
@@ -173,8 +188,8 @@ persist_uint!(usize);
 persist_sint!(i128,u128);
 
 impl<'vm> Persist<'vm> for bool {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        write_ctx.write_byte(*self as u8);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        writer.write_byte(*self as u8);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -183,8 +198,8 @@ impl<'vm> Persist<'vm> for bool {
 }
 
 impl<'vm> Persist<'vm> for String {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        write_ctx.write_str(&self);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        writer.write_str(&self);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
@@ -196,10 +211,10 @@ impl<'vm, T> Persist<'vm> for Vec<T>
 where
     T: Persist<'vm>,
 {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.len().persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.len().persist_write(writer);
         for item in self {
-            item.persist_write(write_ctx);
+            item.persist_write(writer);
         }
     }
 
@@ -217,14 +232,14 @@ impl<'vm, T> Persist<'vm> for Option<T>
 where
     T: Persist<'vm>,
 {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
             Option::None => {
-                write_ctx.write_byte(0);
+                writer.write_byte(0);
             }
             Option::Some(val) => {
-                write_ctx.write_byte(1);
-                val.persist_write(write_ctx);
+                writer.write_byte(1);
+                val.persist_write(writer);
             }
         }
     }
@@ -245,9 +260,9 @@ where
     A: Persist<'vm>,
     B: Persist<'vm>,
 {
-    fn persist_write(&self, write_ctx: &mut PersistWriteContext<'vm>) {
-        self.0.persist_write(write_ctx);
-        self.1.persist_write(write_ctx);
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer);
+        self.1.persist_write(writer);
     }
 
     fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
