@@ -16,7 +16,6 @@ rustc_private = true
 
 [dependencies]
 
-build_id = "0.2.1"
 md5 = "0.7.0"
 base64 = "0.21.2"
 

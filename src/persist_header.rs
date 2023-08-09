@@ -6,10 +6,11 @@ use rustc_middle::ty::TyCtxt;
 use crate::persist::{Persist, PersistReadContext, PersistWriteContext};
 
 const MAGIC: &str = "SKITTER-CRATE\n";
+const BUILD_ID: &str = include!(concat!(env!("OUT_DIR"), "/build_id.rs"));
 
 pub fn persist_header_write(write_ctx: &mut PersistWriteContext) {
     write_ctx.write_bytes(MAGIC.as_bytes());
-    build_id::get().to_string().persist_write(write_ctx);
+    write_ctx.write_str(BUILD_ID);
 }
 
 #[derive(Debug,PartialEq)]

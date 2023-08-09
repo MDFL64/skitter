@@ -448,4 +448,11 @@ fn write_exec_match() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     std::fs::write(format!("{out_dir}/exec_match.rs"), source).unwrap();
+
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap()
+        .as_nanos();
+    let build_id = format!("\"T={}\"",t);
+
+    std::fs::write(format!("{out_dir}/build_id.rs"), build_id).unwrap();
 }

@@ -1,5 +1,3 @@
-use base64::write;
-
 use crate::{
     items::FunctionSig,
     types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReadContext, PersistWriteContext},
@@ -271,7 +269,7 @@ pub enum BinaryOp {
     GtEq,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone,Copy)]
 pub enum LogicOp {
     And,
     Or,
@@ -420,10 +418,23 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 loop_id.0.persist_write(write_ctx);
                 value.persist_write(write_ctx);
             }
+            ExprKind::LogicOp(op,lhs,rhs) => {
+                write_ctx.write_byte(b'G');
+                match op {
+                    LogicOp::And => write_ctx.write_byte(b'&'),
+                    LogicOp::Or => write_ctx.write_byte(b'|'),
+                }
+                lhs.persist_write(write_ctx);
+                rhs.persist_write(write_ctx);
+            }
             ExprKind::Loop(ref block,loop_id) => {
                 write_ctx.write_byte(b'L');
                 block.persist_write(write_ctx);
                 loop_id.0.persist_write(write_ctx);
+            }
+            ExprKind::Return(value) => {
+                write_ctx.write_byte(b'R');
+                value.persist_write(write_ctx);
             }
             ExprKind::Assign(lhs,rhs) => {
                 write_ctx.write_byte(b'=');
