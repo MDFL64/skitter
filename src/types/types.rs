@@ -101,7 +101,7 @@ impl ArraySize {
 }
 
 impl<'vm> Type<'vm> {
-    pub fn kind(&self) -> &TypeKind<'vm> {
+    pub fn kind(&self) -> &'vm TypeKind<'vm> {
         &self.0.kind
     }
 

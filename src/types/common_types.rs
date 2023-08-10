@@ -31,40 +31,40 @@ impl<'vm> CommonTypes<'vm> {
         Self {
             unknown: vm.types.intern(TypeKind::Unknown, vm),
 
-            never: vm.types.intern_with_persist_id(TypeKind::Never, vm, 0),
-            bool: vm.types.intern_with_persist_id(TypeKind::Bool, vm, 1),
-            char: vm.types.intern_with_persist_id(TypeKind::Char, vm, 2),
+            never: vm.types.intern(TypeKind::Never, vm),
+            bool: vm.types.intern(TypeKind::Bool, vm),
+            char: vm.types.intern(TypeKind::Char, vm),
 
             u8: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I8, IntSign::Unsigned), vm, 3),
+                .intern(TypeKind::Int(IntWidth::I8, IntSign::Unsigned), vm),
             u16: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I16, IntSign::Unsigned), vm, 4),
+                .intern(TypeKind::Int(IntWidth::I16, IntSign::Unsigned), vm),
             u32: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I32, IntSign::Unsigned), vm, 5),
+                .intern(TypeKind::Int(IntWidth::I32, IntSign::Unsigned), vm),
             u64: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I64, IntSign::Unsigned), vm, 6),
+                .intern(TypeKind::Int(IntWidth::I64, IntSign::Unsigned), vm),
             u128: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I128, IntSign::Unsigned), vm, 7),
+                .intern(TypeKind::Int(IntWidth::I128, IntSign::Unsigned), vm),
             usize: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned), vm, 8),
+                .intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned), vm),
 
             i8: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I8, IntSign::Signed), vm, 9),
+                .intern(TypeKind::Int(IntWidth::I8, IntSign::Signed), vm),
             i16: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I16, IntSign::Signed), vm, 10),
+                .intern(TypeKind::Int(IntWidth::I16, IntSign::Signed), vm),
             i32: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I32, IntSign::Signed), vm, 11),
+                .intern(TypeKind::Int(IntWidth::I32, IntSign::Signed), vm),
             i64: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I64, IntSign::Signed), vm, 12),
+                .intern(TypeKind::Int(IntWidth::I64, IntSign::Signed), vm),
             i128: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::I128, IntSign::Signed), vm, 13),
+                .intern(TypeKind::Int(IntWidth::I128, IntSign::Signed), vm),
             isize: vm.types
-                .intern_with_persist_id(TypeKind::Int(IntWidth::ISize, IntSign::Signed), vm, 14),
+                .intern(TypeKind::Int(IntWidth::ISize, IntSign::Signed), vm),
 
             f32: vm.types
-                .intern_with_persist_id(TypeKind::Float(FloatWidth::F32), vm, 15),
+                .intern(TypeKind::Float(FloatWidth::F32), vm),
             f64: vm.types
-                .intern_with_persist_id(TypeKind::Float(FloatWidth::F64), vm, 16),
+                .intern(TypeKind::Float(FloatWidth::F64), vm),
         }
     }
 }

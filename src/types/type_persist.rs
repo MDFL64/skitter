@@ -1,8 +1,8 @@
-use crate::persist::{Persist, PersistReadContext, PersistWriter};
+use crate::{persist::{Persist, PersistReadContext, PersistWriter}, types::{IntWidth, IntSign}};
 
 use super::{
     ArraySize, ItemWithSubs, Mutability, Sub, SubList, Type,
-    TypeKind,
+    TypeKind, FloatWidth,
 };
 
 const TYPE_ID_OFFSET: usize = 100;
@@ -31,15 +31,78 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
+            TypeKind::Int(IntWidth::I8, IntSign::Signed) => {
+                writer.write_byte(0);
+            }
+            TypeKind::Int(IntWidth::I16, IntSign::Signed) => {
+                writer.write_byte(1);
+            }
+            TypeKind::Int(IntWidth::I32, IntSign::Signed) => {
+                writer.write_byte(2);
+            }
+            TypeKind::Int(IntWidth::I64, IntSign::Signed) => {
+                writer.write_byte(3);
+            }
+            TypeKind::Int(IntWidth::I128, IntSign::Signed) => {
+                writer.write_byte(4);
+            }
+            TypeKind::Int(IntWidth::ISize, IntSign::Signed) => {
+                writer.write_byte(5);
+            }
+            TypeKind::Int(IntWidth::I8, IntSign::Unsigned) => {
+                writer.write_byte(6);
+            }
+            TypeKind::Int(IntWidth::I16, IntSign::Unsigned) => {
+                writer.write_byte(7);
+            }
+            TypeKind::Int(IntWidth::I32, IntSign::Unsigned) => {
+                writer.write_byte(8);
+            }
+            TypeKind::Int(IntWidth::I64, IntSign::Unsigned) => {
+                writer.write_byte(9);
+            }
+            TypeKind::Int(IntWidth::I128, IntSign::Unsigned) => {
+                writer.write_byte(10);
+            }
+            TypeKind::Int(IntWidth::ISize, IntSign::Unsigned) => {
+                writer.write_byte(11);
+            }
+            TypeKind::Float(FloatWidth::F32) => {
+                writer.write_byte(12);
+            }
+            TypeKind::Float(FloatWidth::F64) => {
+                writer.write_byte(13);
+            }
+            TypeKind::Bool => {
+                writer.write_byte(14);
+            }
+            TypeKind::Char => {
+                writer.write_byte(15);
+            }
+            TypeKind::Never => {
+                writer.write_byte(16);
+            }
 
             TypeKind::Ref(child, Mutability::Const) => {
-                writer.write_byte(16);
+                writer.write_byte(20);
                 child.persist_write(writer);
             }
             TypeKind::Ref(child, Mutability::Mut) => {
-                writer.write_byte(17);
+                writer.write_byte(21);
                 child.persist_write(writer);
             }
+
+            TypeKind::Tuple(children) => {
+                writer.write_byte(22);
+                children.persist_write(writer);
+            }
+
+            TypeKind::FunctionDef(item_with_subs) => {
+                writer.write_byte(30);
+                item_with_subs.persist_write(writer);
+            }
+
+            /*
             TypeKind::Ptr(child, Mutability::Const) => {
                 writer.write_byte(18);
                 child.persist_write(writer);
@@ -96,7 +159,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             }
             TypeKind::FunctionPointer => {
                 writer.write_byte(32);
-            }
+            }*/
 
             _ => panic!("write type {:?}", self),
         }

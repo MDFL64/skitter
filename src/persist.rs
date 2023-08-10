@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{items::CrateId, vm::VM, types::Type};
+use crate::{items::CrateId, vm::VM, types::{Type, TypeKind}};
 
 pub struct PersistWriteContext<'vm> {
     pub this_crate: CrateId,
@@ -27,6 +27,13 @@ impl<'vm> PersistWriter<'vm> {
     pub fn new_child_context(&self) -> Self {
         Self {
             output: vec![],
+            context: self.context.clone()
+        }
+    }
+
+    pub fn iter_types(&self) -> WriterTypes<'vm> {
+        WriterTypes{
+            index: 0,
             context: self.context.clone()
         }
     }
@@ -269,5 +276,21 @@ where
         let a = A::persist_read(read_ctx);
         let b = B::persist_read(read_ctx);
         (a, b)
+    }
+}
+
+pub struct WriterTypes<'vm> {
+    context: Rc<PersistWriteContext<'vm>>,
+    index: usize
+}
+
+impl<'vm> Iterator for WriterTypes<'vm> {
+    type Item = &'vm TypeKind<'vm>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let types = self.context.types.borrow();
+        let ty = types.get(self.index).copied();
+        self.index += 1;
+        ty.map(|ty| ty.kind())
     }
 }

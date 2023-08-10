@@ -25,5 +25,9 @@ pub struct CliArgs {
 
     /// Save IR to a cache file
     #[clap(long)]
-    pub save: bool
+    pub save: bool,
+
+    /// Load IR from a cache file instead of compiling from source
+    #[clap(long)]
+    pub load: bool
 }

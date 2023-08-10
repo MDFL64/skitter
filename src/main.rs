@@ -65,84 +65,56 @@ fn main() {
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.core,args.verbose)));
+    // HACK: this must be initialized ASAP so common types have correct persist IDs
+    vm.common_types();
 
-    {
-        let mut extern_crates = Vec::new();
+    
+    let mut extern_crates = Vec::new();
 
-        /*if args.save_core {
-            let sysroot = get_sysroot();
-            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
+    if args.core {
+        let sysroot = get_sysroot();
+        let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
 
-            // make sure core root exists
-            assert!(std::path::Path::new(&core_root).exists());
+        // make sure core root exists
+        assert!(std::path::Path::new(&core_root).exists());
 
-            let core_crate = vm.add_rustc_provider(
-                RustCWorkerConfig {
-                    source_root: &core_root,
-                    extern_crates: vec![],
-                    is_core: true,
-                    save: true,
-                },
-                scope,
-            );
+        let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
+            source_root: core_root,
+            extern_crates: vec![],
+            is_core: true,
+            save_file: false,
+        });
 
-            let core_items = vm.crate_provider(core_crate);
-            /*core_items.save_items("core.bin");
-            println!("Saved core IR.");
-            {
-                println!("Loading...");
-                let t = Instant::now();
-                CrateItems::load_items("core.bin", &vm, CrateId::new(7));
-                println!("{:?}", t.elapsed());
-            }*/
-            //core_items.index_bench(&vm);
+        assert!(Some(core_crate) == vm.core_crate);
 
-            process::exit(0);
-        }*/
+        extern_crates.push(ExternCrate {
+            id: core_crate,
+            name: "core".to_owned(),
+        });
+    }
 
-        if args.core {
-            let sysroot = get_sysroot();
-            let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
-
-            // make sure core root exists
-            assert!(std::path::Path::new(&core_root).exists());
-
-            let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
-                source_root: core_root,
-                extern_crates: vec![],
-                is_core: true,
-                save_file: false,
-            });
-
-            assert!(Some(core_crate) == vm.core_crate);
-
-            extern_crates.push(ExternCrate {
-                id: core_crate,
-                name: "core".to_owned(),
-            });
-        }
-
-        let main_crate = vm.add_rustc_provider(RustCWorkerConfig {
+    let main_crate = if args.load {
+        panic!("todo load");
+    } else {
+        vm.add_rustc_provider(RustCWorkerConfig {
             source_root: args.file_name,
             extern_crates,
             is_core: false,
             save_file: args.save,
-        });
+        })
+    };
 
-        let main_path = ItemPath::main();
+    let main_path = ItemPath::main();
 
-        let main_item = vm
-            .crate_provider(main_crate)
-            .item_by_path(&main_path)
-            .expect("no main found");
+    let main_item = vm
+        .crate_provider(main_crate)
+        .item_by_path(&main_path)
+        .expect("no main found");
 
-        let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
+    let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
 
-        let thread = vm.make_thread();
-        thread.call(&main_fn, 0);
-
-        process::exit(0)
-    }
+    let thread = vm.make_thread();
+    thread.call(&main_fn, 0);
 }
 
 /// When any thread panics, close the process.

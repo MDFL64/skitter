@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, borrow::Borrow};
 
 use crate::persist::{Persist, PersistReadContext, PersistWriter};
 
@@ -20,7 +20,7 @@ impl<'vm, T> LazyArray<'vm, T>
 where
     T: Persist<'vm> + std::fmt::Debug + 'vm,
 {
-    pub fn write(out_writer: &mut PersistWriter<'vm>, items: impl ExactSizeIterator<Item = &'vm T>) {
+    pub fn write(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'vm T>) {
         let mut data_writer = out_writer.new_child_context();
 
         let mut item_indices = Vec::<u32>::new();
