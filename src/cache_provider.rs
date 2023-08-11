@@ -4,9 +4,7 @@ use crate::{items::{CrateId, ItemId, Item, ItemPath}, vm::VM, crate_provider::Cr
 
 
 pub struct CacheProvider<'vm> {
-    //crate_id: CrateId
-    read_context: Arc<PersistReadContext<'vm>>,
-    items: LazyTable<'vm,&'vm Item<'vm>>,
+    read_context: Arc<PersistReadContext<'vm>>
 }
 
 impl<'vm> CacheProvider<'vm> {
@@ -17,7 +15,8 @@ impl<'vm> CacheProvider<'vm> {
         let read_context = Arc::new(PersistReadContext{
             this_crate,
             vm,
-            types: OnceLock::new()
+            types: OnceLock::new(),
+            items: OnceLock::new()
         });
 
         let mut reader = PersistReader::new(bytes, read_context.clone());
@@ -27,13 +26,13 @@ impl<'vm> CacheProvider<'vm> {
         crate_header.validate()?;
 
         let items = LazyTable::read(&mut reader);
+        assert!(read_context.items.set(items).is_ok());
 
         let types = LazyArray::read(&mut reader);
         assert!(read_context.types.set(types).is_ok());
 
         Ok(Self{
-            read_context,
-            items
+            read_context
         })
     }
 }
@@ -44,11 +43,13 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
     }
 
     fn item_by_path(&self, path: &ItemPath<'vm>) -> Option<&'vm Item<'vm>> {
-        Some(self.items.get(path))
+        let items = self.read_context.items.get().unwrap();
+        Some(items.get(path))
     }
 
     fn build_ir(&self, id: ItemId) -> Arc<IRFunction<'vm>> {
-        let item = self.items.array.get(id.index());
+        let items = self.read_context.items.get().unwrap();
+        let item = items.array.get(id.index());
 
         if let Some(saved_ir) = item.saved_ir {
             let mut reader = PersistReader::new(saved_ir, self.read_context.clone());

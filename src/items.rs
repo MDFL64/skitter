@@ -12,7 +12,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM}, lazy_collections::TablePair,
+    vm::{Function, VM}, lazy_collections::{LazyKey, LazyItem}
 };
 use ahash::AHashMap;
 
@@ -152,15 +152,27 @@ impl<'vm> Hash for Item<'vm> {
     }
 }
 
-impl<'vm> TablePair for &'vm Item<'vm> {
-    type Key = ItemPath<'vm>;
+impl<'vm> LazyItem<'vm> for &'vm Item<'vm> {
+    type Input = Item<'vm>;
 
-    fn key(&self) -> &Self::Key {
-        &self.path
+    fn input(&self) -> &Self::Input {
+        self
+    }
+
+    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+        vm.alloc_item(input)
     }
 }
 
-impl<'vm> Persist<'vm> for &'vm Item<'vm> {
+impl<'vm> LazyKey<'vm> for &'vm Item<'vm> {
+    type Key = ItemPath<'vm>;
+
+    fn key(input: &Self::Input) -> &Self::Key {
+        &input.path
+    }
+}
+
+impl<'vm> Persist<'vm> for Item<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.item_id.0.persist_write(writer);
         self.path.persist_write(writer);
@@ -284,16 +296,14 @@ impl<'vm> Persist<'vm> for &'vm Item<'vm> {
             None
         };
 
-        let item = Item {
+        Item {
             vm: reader.context.vm,
             crate_id: reader.context.this_crate,
             item_id,
             path,
             kind,
             saved_ir
-        };
-
-        reader.context.vm.alloc_item(item)
+        }
     }
 }
 

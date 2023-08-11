@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc, sync::{Arc, OnceLock}};
 
-use crate::{items::CrateId, vm::VM, types::{Type, TypeKind}, lazy_collections::LazyArray};
+use crate::{items::{CrateId, Item}, vm::VM, types::{Type, TypeKind}, lazy_collections::{LazyArray, LazyTable}};
 
 pub struct PersistWriteContext<'vm> {
     pub this_crate: CrateId,
@@ -71,7 +71,8 @@ impl<'vm> PersistWriter<'vm> {
 pub struct PersistReadContext<'vm> {
     pub this_crate: CrateId,
     pub vm: &'vm VM<'vm>,
-    pub types: OnceLock<LazyArray<'vm,TypeKind<'vm>>>
+    pub types: OnceLock<LazyArray<'vm,Type<'vm>>>,
+    pub items: OnceLock<LazyTable<'vm,&'vm Item<'vm>>>,
 }
 
 pub struct PersistReader<'vm> {
@@ -208,7 +209,13 @@ macro_rules! persist_sint {
             }
 
             fn persist_read(reader: &mut PersistReader) -> Self {
-                panic!();
+                let n = <$uty>::persist_read(reader);
+                let neg = (n & 1) != 0;
+                if neg {
+                    panic!("neg");
+                } else {
+                    (n >> 1) as _
+                }
             }
         }
     };

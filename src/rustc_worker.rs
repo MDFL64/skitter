@@ -672,11 +672,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             let cache_path = format!("./cache/{}",crate_header.cache_file_name());
 
-            let items = ctx.items.items.iter().map(|item| &item.item);
-            LazyTable::write(&mut writer, items);
+            let items = ctx.items.items.iter().map(|item| item.item);
+            LazyTable::<&Item>::write(&mut writer, items);
 
             let types = writer.iter_types();
-            LazyArray::write(&mut writer, types);
+            LazyArray::<Type>::write(&mut writer, types);
 
             std::fs::write(cache_path, writer.flip()).expect("save failed");
         }

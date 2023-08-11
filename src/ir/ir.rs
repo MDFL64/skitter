@@ -299,11 +299,25 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         let sig_inputs = Persist::persist_read(reader);
         let sig_output = Persist::persist_read(reader);
 
-        let sig = FunctionSig{
-            inputs: sig_inputs,
-            output: sig_output
-        };
-        panic!()
+        let is_constant = Persist::persist_read(reader);
+        let root_expr = Persist::persist_read(reader);
+
+        let params = Persist::persist_read(reader);
+        let exprs = Persist::persist_read(reader);
+        let patterns = Persist::persist_read(reader);
+
+        IRFunction{
+            sig: FunctionSig{
+                inputs: sig_inputs,
+                output: sig_output
+            },
+            is_constant,
+            root_expr,
+
+            params,
+            exprs,
+            patterns
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -342,7 +356,13 @@ impl<'vm> Persist<'vm> for PatternId {
 
 impl<'vm> Persist<'vm> for Block {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!()
+        let stmts = Persist::persist_read(reader);
+        let result = Persist::persist_read(reader);
+
+        Block{
+            stmts,
+            result
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -353,13 +373,31 @@ impl<'vm> Persist<'vm> for Block {
 
 impl<'vm> Persist<'vm> for Stmt {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!()
+        let n = reader.read_byte();
+        match n {
+            0 => {
+                let expr = Persist::persist_read(reader);
+                Stmt::Expr(expr)
+            }
+            1 => {
+                let pattern = Persist::persist_read(reader);
+                let init = Persist::persist_read(reader);
+                let else_block = Persist::persist_read(reader);
+
+                Stmt::Let{
+                    pattern,
+                    init,
+                    else_block
+                }
+            }
+            _ => panic!("{}",n)
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
             Stmt::Expr(e) => {
-                writer.write_byte(b'E');
+                writer.write_byte(0);
                 e.persist_write(writer);
             }
             Stmt::Let{
@@ -367,7 +405,7 @@ impl<'vm> Persist<'vm> for Stmt {
                 init,
                 else_block
             } => {
-                writer.write_byte(b'L');
+                writer.write_byte(1);
                 pattern.persist_write(writer);
                 init.persist_write(writer);
                 else_block.persist_write(writer);
@@ -378,7 +416,43 @@ impl<'vm> Persist<'vm> for Stmt {
 
 impl<'vm> Persist<'vm> for Expr<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!()
+        let ty = Type::persist_read(reader);
+        let c = reader.read_byte() as char;
+        let kind = match c {
+            '0' => {
+                ExprKind::LiteralVoid
+            }
+            'c' => {
+                let func = Persist::persist_read(reader);
+                let args = Persist::persist_read(reader);
+                ExprKind::Call{
+                    func,
+                    args
+                }
+            }
+            'n' => {
+                let n = Persist::persist_read(reader);
+                ExprKind::LiteralValue(n)
+            }
+            'u' => {
+                let op = match reader.read_byte() as char {
+                    '!' => UnaryOp::Not,
+                    '-' => UnaryOp::Neg,
+                    _ => panic!()
+                };
+                let arg = Persist::persist_read(reader);
+                ExprKind::Unary(op, arg)
+            }
+            '{' => {
+                let block = Persist::persist_read(reader);
+                ExprKind::Block(block)
+            }
+            _ => panic!("todo persist read expr '{}'",c)
+        };
+        Expr{
+            kind,
+            ty
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -482,14 +556,36 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'(');
                 args.persist_write(writer);
             }
-            _ => panic!("todo persist expr {:?}",self.kind)
+            _ => panic!("todo persist write expr {:?}",self.kind)
         }
     }
 }
 
 impl<'vm> Persist<'vm> for Pattern<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!()
+        let ty = Type::persist_read(reader);
+        let c = reader.read_byte() as char;
+        let kind = match c {
+            'L' => {
+                let local_id = Persist::persist_read(reader);
+                let mode = match reader.read_byte() {
+                    0 => BindingMode::Value,
+                    1 => BindingMode::Ref,
+                    _ => panic!()
+                };
+                let sub_pattern = Persist::persist_read(reader);
+                PatternKind::LocalBinding {
+                    local_id,
+                    mode,
+                    sub_pattern
+                }
+            }
+            _ => panic!("todo persist read pattern '{}'",c)
+        };
+        Pattern{
+            kind,
+            ty
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -499,12 +595,12 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 writer.write_byte(b'L');
                 local_id.persist_write(writer);
                 match mode {
-                    BindingMode::Value => writer.write_byte(b'V'),
-                    BindingMode::Ref => writer.write_byte(b'R'),
+                    BindingMode::Value => writer.write_byte(0),
+                    BindingMode::Ref => writer.write_byte(1),
                 }
                 sub_pattern.persist_write(writer);
             }
-            _ => panic!("todo persist pattern {:?}",self.kind)
+            _ => panic!("todo persist write pattern {:?}",self.kind)
         }
     }
 }

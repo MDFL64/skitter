@@ -1,8 +1,23 @@
-use std::{marker::PhantomData, hash::{BuildHasher, Hash, Hasher}, sync::{Arc, OnceLock}, borrow::Borrow};
+use std::{marker::PhantomData, hash::{BuildHasher, Hash, Hasher}, sync::{Arc, OnceLock}};
 
 use ahash::AHasher;
 
-use crate::persist::{Persist, PersistReader, PersistWriter, PersistReadContext};
+use crate::{persist::{Persist, PersistReader, PersistWriter, PersistReadContext}, vm::VM};
+
+/// Items stored in lazy arrays generally need interned in the VM. This trait handles that process.
+pub trait LazyItem<'vm> {
+    type Input;
+
+    fn input(&self) -> &Self::Input;
+
+    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self;
+}
+
+pub trait LazyKey<'vm>: LazyItem<'vm> {
+    type Key;
+
+    fn key(input: &Self::Input) -> &Self::Key;
+}
 
 /// An array which is lazily parsed
 pub struct LazyArray<'vm, T> {
@@ -23,10 +38,11 @@ pub struct LazyArray<'vm, T> {
 
 impl<'vm, T> LazyArray<'vm, T>
 where
-    T: Persist<'vm> + std::fmt::Debug + 'vm,
+    T: LazyItem<'vm>,
+    T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
 {
     /// Returns the item count.
-    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T>) where 'vm: 'a {
+    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>) where 'vm: 'a {
         let mut data_writer = out_writer.new_child_context();
 
         let mut item_indices = Vec::<u32>::new();
@@ -82,7 +98,8 @@ where
 
             let mut reader = PersistReader::new(data, self.read_context.clone());
 
-            T::persist_read(&mut reader)
+            let input = T::Input::persist_read(&mut reader);
+            LazyItem::build(input,self.read_context.vm)
         })
     }
 }
@@ -96,11 +113,6 @@ pub struct LazyTable<'vm, T> {
     table_2: Vec<i32>
 }
 
-pub trait TablePair {
-    type Key;
-    fn key(&self) -> &Self::Key;
-}
-
 // SERIALIZED FORM
 // ---------------
 // LazyArray: keys and values
@@ -111,15 +123,17 @@ const TABLE_SLOT_INVALID: i32 = std::i32::MAX;
 
 impl<'vm, T> LazyTable<'vm, T>
 where
-    T: Persist<'vm> + std::fmt::Debug + 'vm + TablePair,
+    T: LazyItem<'vm> + LazyKey<'vm>,
+    T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
     T::Key: Hash + PartialEq + std::fmt::Debug
 {
-    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T>) where 'vm: 'a {
+    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>) where 'vm: 'a {
 
         let mut keys = Vec::new();
 
         let items = items.enumerate().map(|(i,item)| {
-            keys.push((item.key(),i));
+            let key = <T as LazyKey>::key(item);
+            keys.push((key,i));
             
             item
         });
@@ -213,7 +227,8 @@ where
             // fast path
             let item = self.array.get(t1_index as usize);
 
-            assert!(item.key() == key);
+            let item_key = <T as LazyKey>::key(item.input());
+            assert!(item_key == key);
 
             item
         } else {

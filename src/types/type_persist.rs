@@ -1,9 +1,21 @@
-use crate::{persist::{Persist, PersistReader, PersistWriter}, types::{IntWidth, IntSign}};
+use crate::{persist::{Persist, PersistReader, PersistWriter}, types::{IntWidth, IntSign}, lazy_collections::LazyItem};
 
 use super::{
     ItemWithSubs, Mutability, Sub, SubList, Type,
     TypeKind, FloatWidth,
 };
+
+impl<'vm> LazyItem<'vm> for Type<'vm> {
+    type Input = TypeKind<'vm>;
+
+    fn input(&self) -> &Self::Input {
+        self.kind()
+    }
+
+    fn build(input: Self::Input, vm: &'vm crate::vm::VM<'vm>) -> Self {
+        vm.types.intern(input, vm)
+    }
+}
 
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -20,13 +32,10 @@ impl<'vm> Persist<'vm> for Type<'vm> {
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let type_id = u32::persist_read(reader);
-        println!("get type {}",type_id);
 
         let types = reader.context.types.get().unwrap();
 
-        let kind = types.get(type_id as usize);
-        println!("ty kind = {:?}",kind);
-        panic!()
+        types.get(type_id as usize).clone()
     }
 }
 
@@ -172,6 +181,35 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let n = reader.read_byte();
         match n {
+            0 => TypeKind::Int(IntWidth::I8, IntSign::Signed),
+            1 => TypeKind::Int(IntWidth::I16, IntSign::Signed),
+            2 => TypeKind::Int(IntWidth::I32, IntSign::Signed),
+            3 => TypeKind::Int(IntWidth::I64, IntSign::Signed),
+            4 => TypeKind::Int(IntWidth::I128, IntSign::Signed),
+            5 => TypeKind::Int(IntWidth::ISize, IntSign::Signed),
+
+            6 => TypeKind::Int(IntWidth::I8, IntSign::Unsigned),
+            7 => TypeKind::Int(IntWidth::I16, IntSign::Unsigned),
+            8 => TypeKind::Int(IntWidth::I32, IntSign::Unsigned),
+            9 => TypeKind::Int(IntWidth::I64, IntSign::Unsigned),
+            10 => TypeKind::Int(IntWidth::I128, IntSign::Unsigned),
+            11 => TypeKind::Int(IntWidth::ISize, IntSign::Unsigned),
+
+            12 => TypeKind::Float(FloatWidth::F32),
+            13 => TypeKind::Float(FloatWidth::F64),
+
+            14 => TypeKind::Bool,
+            15 => TypeKind::Char,
+
+            22 => {
+                let children = Persist::persist_read(reader);
+                TypeKind::Tuple(children)
+            }
+
+            30 => {
+                let item = Persist::persist_read(reader);
+                TypeKind::FunctionDef(item)
+            }
             _ => panic!("read type {:?}", n),
         }
     }
@@ -230,6 +268,22 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        todo!()
+
+        let item = match reader.read_byte() {
+            0 => {
+                let index = usize::persist_read(reader);
+                let items = reader.context.items.get().unwrap();
+
+                *items.array.get(index)
+            }
+            _ => todo!()
+        };
+
+        let subs = Persist::persist_read(reader);
+
+        ItemWithSubs{
+            item,
+            subs
+        }
     }
 }
