@@ -21,7 +21,7 @@ use crate::{
         FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     types::{IntSign, IntWidth, Type, TypeKind},
-    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{Persist, PersistWriter}, lazy_collections::LazyArray,
+    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{Persist, PersistWriter}, lazy_collections::{LazyArray, LazyTable},
 };
 
 /////////////////////////
@@ -672,8 +672,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             let cache_path = format!("./cache/{}",crate_header.cache_file_name());
 
-            let items = ctx.items.items.iter().map(|item| item.item);
-            LazyArray::<Item>::write(&mut writer, items);
+            let items = ctx.items.items.iter().map(|item| &item.item);
+            LazyTable::write(&mut writer, items);
 
             let types = writer.iter_types();
             LazyArray::write(&mut writer, types);

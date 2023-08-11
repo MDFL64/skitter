@@ -2,6 +2,7 @@ use ahash::AHashSet;
 use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
+use crate::cache_provider::CacheProvider;
 use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
 use crate::items::Item;
@@ -127,7 +128,7 @@ impl<'vm> VM<'vm> {
     }
 
     /// I tried for so long to get this to work with scoped threads.
-    /// Got it working, and then had it break again when
+    /// Got it working, and then had it break again when transitioning off THIR.
     ///
     /// To hell with it. Just require a static VM to use a rustc worker.
     pub fn add_rustc_provider(&'static self, worker_config: RustCWorkerConfig) -> CrateId {
@@ -135,6 +136,18 @@ impl<'vm> VM<'vm> {
         let crate_id = CrateId::new(crates.len() as u32);
 
         let worker = Box::new(RustCWorker::new(worker_config, self, crate_id));
+
+        let worker_ref = self.arena_crates.alloc(worker);
+        crates.push(worker_ref);
+
+        crate_id
+    }
+
+    pub fn add_cache_provider(&'vm self, path: &str) -> CrateId {
+        let mut crates = self.crates.write().unwrap();
+        let crate_id = CrateId::new(crates.len() as u32);
+
+        let worker = Box::new(CacheProvider::new(path, self, crate_id).expect("failed to load cached crate"));
 
         let worker_ref = self.arena_crates.alloc(worker);
         crates.push(worker_ref);

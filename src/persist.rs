@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::{items::CrateId, vm::VM, types::{Type, TypeKind}};
 
@@ -69,23 +69,23 @@ impl<'vm> PersistWriter<'vm> {
 }
 
 pub struct PersistReadContext<'vm> {
+    pub this_crate: CrateId,
     pub vm: &'vm VM<'vm>,
-    pub crate_id: CrateId,
-    pub next_item_id: u32,
-
-    index: usize,
-    data: &'vm [u8],
 }
 
-impl<'vm> PersistReadContext<'vm> {
-    pub fn new(data: &'vm [u8], vm: &'vm VM<'vm>, crate_id: CrateId) -> Self {
-        Self {
-            vm,
-            crate_id,
-            next_item_id: 0,
+pub struct PersistReader<'vm> {
+    index: usize,
+    data: &'vm [u8],
 
+    pub context: Arc<PersistReadContext<'vm>>
+}
+
+impl<'vm> PersistReader<'vm> {
+    pub fn new(data: &'vm [u8], context: Arc<PersistReadContext<'vm>>) -> Self {
+        Self {
             index: 0,
             data,
+            context
         }
     }
 
@@ -102,10 +102,32 @@ impl<'vm> PersistReadContext<'vm> {
         &self.data[start..end]
     }
 
+    pub fn read_byte_slice(&mut self) -> &'vm [u8] {
+        let n = usize::persist_read(self);
+        self.read_bytes(n)
+    }
+
     pub fn read_str(&mut self) -> &'vm str {
-        let len = usize::persist_read(self);
-        let data = self.read_bytes(len);
+        let data = self.read_byte_slice();
         std::str::from_utf8(data).unwrap()
+    }
+
+    pub unsafe fn read_raw_array<T>(&mut self, n: usize) -> Vec<T> {
+        let num_bytes = n * std::mem::size_of::<T>();
+        let bytes = self.read_bytes(num_bytes);
+
+        let mut result = Vec::<T>::with_capacity(n);
+
+        let src = bytes.as_ptr();
+        let dst = result.as_mut_ptr() as *mut u8;
+
+        unsafe {
+            std::ptr::copy(src, dst, num_bytes);
+        }
+
+        result.set_len(n);
+
+        result
     }
 
     pub fn reset(&mut self, data: &'vm [u8]) {
@@ -117,7 +139,7 @@ impl<'vm> PersistReadContext<'vm> {
 pub trait Persist<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>);
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self;
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self;
 }
 
 macro_rules! persist_uint {
@@ -138,27 +160,31 @@ macro_rules! persist_uint {
                     writer.write_bytes(&(n as u32).to_le_bytes());
                 } else if n < 18446744073709551616 {
                     writer.write_byte(254);
-                    writer.write_bytes(&(n as u32).to_le_bytes());
+                    writer.write_bytes(&(n as u64).to_le_bytes());
                 } else {
                     writer.write_byte(255);
-                    writer.write_bytes(&(n as u64).to_le_bytes());
+                    writer.write_bytes(&(n as u128).to_le_bytes());
                 }
             }
 
-            fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
-                let n = read_ctx.read_byte();
+            fn persist_read(reader: &mut PersistReader) -> Self {
+                let n = reader.read_byte();
                 match n {
-                    255 | 254 => panic!(),
+                    255 => panic!("big read"),
+                    254 => {
+                        let bs = reader.read_bytes(8);
+                        u64::from_le_bytes(bs.try_into().unwrap()) as _
+                    }
                     253 => {
-                        let bs = read_ctx.read_bytes(4);
+                        let bs = reader.read_bytes(4);
                         u32::from_le_bytes(bs.try_into().unwrap()) as _
                     }
                     252 => {
-                        let bs = read_ctx.read_bytes(2);
+                        let bs = reader.read_bytes(2);
                         u16::from_le_bytes(bs.try_into().unwrap()) as _
                     }
                     251 => {
-                        let b = read_ctx.read_byte();
+                        let b = reader.read_byte();
                         b as _
                     }
                     _ => n as _,
@@ -180,7 +206,7 @@ macro_rules! persist_sint {
                 (n as $uty).persist_write(writer);
             }
 
-            fn persist_read(read_ctx: &mut PersistReadContext) -> Self {
+            fn persist_read(reader: &mut PersistReader) -> Self {
                 panic!();
             }
         }
@@ -199,8 +225,8 @@ impl<'vm> Persist<'vm> for bool {
         writer.write_byte(*self as u8);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        read_ctx.read_byte() != 0
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        reader.read_byte() != 0
     }
 }
 
@@ -209,8 +235,8 @@ impl<'vm> Persist<'vm> for String {
         writer.write_str(&self);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        read_ctx.read_str().to_owned()
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        reader.read_str().to_owned()
     }
 }
 
@@ -225,11 +251,11 @@ where
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let len = usize::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let len = usize::persist_read(reader);
         let mut result = Vec::with_capacity(len);
         for _ in 0..len {
-            result.push(T::persist_read(read_ctx));
+            result.push(T::persist_read(reader));
         }
         result
     }
@@ -251,11 +277,11 @@ where
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let is_present = read_ctx.read_byte() != 0;
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let is_present = reader.read_byte() != 0;
 
         if is_present {
-            Some(T::persist_read(read_ctx))
+            Some(T::persist_read(reader))
         } else {
             None
         }
@@ -272,9 +298,9 @@ where
         self.1.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let a = A::persist_read(read_ctx);
-        let b = B::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let a = A::persist_read(reader);
+        let b = B::persist_read(reader);
         (a, b)
     }
 }

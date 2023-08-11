@@ -1,7 +1,7 @@
-use crate::{persist::{Persist, PersistReadContext, PersistWriter}, types::{IntWidth, IntSign}};
+use crate::{persist::{Persist, PersistReader, PersistWriter}, types::{IntWidth, IntSign}};
 
 use super::{
-    ArraySize, ItemWithSubs, Mutability, Sub, SubList, Type,
+    ItemWithSubs, Mutability, Sub, SubList, Type,
     TypeKind, FloatWidth,
 };
 
@@ -10,7 +10,6 @@ const TYPE_ID_OFFSET: usize = 100;
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         let type_id = self.0.persist_id.get_or_init(|| {
-            //prepare_child_types(self.kind(), writer);
             let mut writer_types = writer.context.types.borrow_mut();
 
             let i = TYPE_ID_OFFSET + writer_types.len();
@@ -21,7 +20,7 @@ impl<'vm> Persist<'vm> for Type<'vm> {
         type_id.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         todo!()
     }
 }
@@ -165,7 +164,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         todo!()
     }
 }
@@ -186,10 +185,10 @@ impl<'vm> Persist<'vm> for Sub<'vm> {
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let c = read_ctx.read_byte() as char;
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let c = reader.read_byte() as char;
         match c {
-            'T' => Sub::Type(Type::persist_read(read_ctx)),
+            'T' => Sub::Type(Type::persist_read(reader)),
             'C' => Sub::Const,
             'L' => Sub::Lifetime,
             _ => panic!(),
@@ -202,9 +201,9 @@ impl<'vm> Persist<'vm> for SubList<'vm> {
         self.list.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         SubList {
-            list: Vec::<Sub>::persist_read(read_ctx),
+            list: Vec::<Sub>::persist_read(reader),
         }
     }
 }
@@ -222,7 +221,7 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
         self.subs.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         todo!()
     }
 }

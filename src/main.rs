@@ -34,6 +34,7 @@ mod persist;
 mod rustc_worker;
 mod test;
 mod types;
+mod cache_provider;
 
 use std::process;
 
@@ -94,7 +95,7 @@ fn main() {
     }
 
     let main_crate = if args.load {
-        panic!("todo load");
+        vm.add_cache_provider(&args.file_name)
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
             source_root: args.file_name,

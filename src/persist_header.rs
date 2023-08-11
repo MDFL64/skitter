@@ -1,16 +1,30 @@
-use std::{path::{PathBuf, Path}, error::Error, os::unix::prelude::OsStrExt};
+use std::{path::{PathBuf, Path}, error::Error, os::unix::prelude::OsStrExt, ffi::OsStr};
 
 use base64::Engine;
 use rustc_middle::ty::TyCtxt;
 
-use crate::persist::{Persist, PersistReadContext, PersistWriter};
+use crate::persist::{Persist, PersistReader, PersistWriter};
 
 const MAGIC: &str = "SKITTER-CRATE\n";
-const BUILD_ID: &str = include!(concat!(env!("OUT_DIR"), "/build_id.rs"));
+const BUILD_ID: &str = "TODO";//include!(concat!(env!("OUT_DIR"), "/build_id.rs"));
 
 pub fn persist_header_write(writer: &mut PersistWriter) {
     writer.write_bytes(MAGIC.as_bytes());
     writer.write_str(BUILD_ID);
+}
+
+pub fn persist_header_read(reader: &mut PersistReader) -> Result<(),String> {
+    let magic = reader.read_bytes(MAGIC.len());
+    if magic != MAGIC.as_bytes() {
+        return Err("bad cache header -- incorrect magic".to_owned());
+    }
+
+    let build_id = reader.read_str();
+    if build_id != BUILD_ID {
+        return Err("bad cache header -- bad build id".to_owned());
+    }
+
+    Ok(())
 }
 
 #[derive(Debug,PartialEq)]
@@ -70,11 +84,34 @@ impl PersistCrateHeader {
     pub fn cache_file_name(&self) -> String {
         cache_file_name(&self.crate_name, &self.files[0].path)
     }
+
+    pub fn validate(&self) -> Result<(),Box<dyn Error>> {
+        for file in &self.files {
+            let meta = std::fs::metadata(&file.path)?;
+
+            let size = meta.len();
+
+            let time: u64 = meta.modified()?
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis().try_into()?;
+
+            if size != file.size || time != file.time {
+                return Err(format!("file {:?} was modified",file.path).into());
+            }
+        }
+        Ok(())
+    } 
 }
 
 impl<'vm> Persist<'vm> for PersistCrateHeader {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        panic!()
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let crate_name = Persist::persist_read(reader);
+        let files = Persist::persist_read(reader);
+
+        Self{
+            crate_name,
+            files
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -84,14 +121,21 @@ impl<'vm> Persist<'vm> for PersistCrateHeader {
 }
 
 impl<'vm> Persist<'vm> for FileVersionEntry {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        panic!()
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let path: PathBuf = Path::new(OsStr::from_bytes(reader.read_byte_slice())).to_owned(); //reader.read_byte_slice().into();
+        let size = Persist::persist_read(reader);
+        let time = Persist::persist_read(reader);
+
+        Self{
+            path,
+            size,
+            time
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         let path_bytes = self.path.as_os_str().as_bytes();
-        path_bytes.len().persist_write(writer);
-        writer.write_bytes(path_bytes);
+        writer.write_byte_slice(path_bytes);
 
         self.size.persist_write(writer);
         self.time.persist_write(writer);

@@ -1,6 +1,6 @@
 use crate::{
     items::FunctionSig,
-    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReadContext, PersistWriteContext, PersistWriter},
+    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReader, PersistWriter},
 };
 
 #[derive(Default)]
@@ -295,7 +295,7 @@ pub struct MatchArm {
 // Persistence!
 
 impl<'vm> Persist<'vm> for IRFunction<'vm> {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!();
     }
 
@@ -314,8 +314,8 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
 }
 
 impl<'vm> Persist<'vm> for ExprId {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        Self(u32::persist_read(read_ctx))
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        Self(u32::persist_read(reader))
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -324,8 +324,8 @@ impl<'vm> Persist<'vm> for ExprId {
 }
 
 impl<'vm> Persist<'vm> for PatternId {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        Self(u32::persist_read(read_ctx))
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        Self(u32::persist_read(reader))
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -334,7 +334,7 @@ impl<'vm> Persist<'vm> for PatternId {
 }
 
 impl<'vm> Persist<'vm> for Block {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!()
     }
 
@@ -345,7 +345,7 @@ impl<'vm> Persist<'vm> for Block {
 }
 
 impl<'vm> Persist<'vm> for Stmt {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!()
     }
 
@@ -370,7 +370,7 @@ impl<'vm> Persist<'vm> for Stmt {
 }
 
 impl<'vm> Persist<'vm> for Expr<'vm> {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!()
     }
 
@@ -481,7 +481,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
 }
 
 impl<'vm> Persist<'vm> for Pattern<'vm> {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!()
     }
 
@@ -503,7 +503,7 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
 }
 
 impl<'vm> Persist<'vm> for BinaryOp {
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         panic!()
     }
 

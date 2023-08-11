@@ -11,7 +11,7 @@ pub trait CrateProvider<'vm>: Send + Sync + 'vm {
     fn item_by_id(&self, id: ItemId) -> &'vm Item<'vm>;
 
     /// Find an item by path. Generally used for external items.
-    fn item_by_path(&self, path: &ItemPath) -> Option<&'vm Item<'vm>>;
+    fn item_by_path(&self, path: &ItemPath<'vm>) -> Option<&'vm Item<'vm>>;
 
     /// Retrieve the IR for a function OR constant.
     fn build_ir(&self, id: ItemId) -> Arc<IRFunction<'vm>>;

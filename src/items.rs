@@ -9,10 +9,10 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
-    persist::{Persist, PersistReadContext, PersistWriter},
+    persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM},
+    vm::{Function, VM}, lazy_collections::TablePair,
 };
 use ahash::AHashMap;
 
@@ -52,8 +52,8 @@ impl<'vm> Persist<'vm> for ItemPath<'vm> {
         writer.write_str(self.1);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let ns = read_ctx.read_byte() as char;
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let ns = reader.read_byte() as char;
         let ns = match ns {
             't' => NameSpace::Type,
             'v' => NameSpace::Value,
@@ -61,7 +61,7 @@ impl<'vm> Persist<'vm> for ItemPath<'vm> {
             _ => panic!(),
         };
 
-        let string = read_ctx.read_str();
+        let string = reader.read_str();
 
         Self(ns, string)
     }
@@ -150,8 +150,17 @@ impl<'vm> Hash for Item<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for Item<'vm> {
+impl<'vm> TablePair for &'vm Item<'vm> {
+    type Key = ItemPath<'vm>;
+
+    fn key(&self) -> &Self::Key {
+        &self.path
+    }
+}
+
+impl<'vm> Persist<'vm> for &'vm Item<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.item_id.0.persist_write(writer);
         self.path.persist_write(writer);
         match &self.kind {
             ItemKind::Function {
@@ -211,17 +220,18 @@ impl<'vm> Persist<'vm> for Item<'vm> {
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let path = ItemPath::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let item_id = ItemId(u32::persist_read(reader));
+        let path = ItemPath::persist_read(reader);
 
         // todo actual kind
-        let kind_c = read_ctx.read_byte() as char;
+        let kind_c = reader.read_byte() as char;
         let kind = match kind_c {
             'f' => {
-                let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
+                let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
-                    Option::<(u32, u32)>::persist_read(read_ctx).map(|(a, b)| (ItemId(a), b));
-                let extern_name = Option::<(FunctionAbi, String)>::persist_read(read_ctx);
+                    Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
+                let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
                 let kind = ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
@@ -229,28 +239,30 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     extern_name,
                     ctor_for,
                 };
+                let ir = reader.read_byte_slice();
                 kind
             }
             'c' => {
-                let virtual_info = Option::<VirtualInfo>::persist_read(read_ctx);
+                let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
-                    Option::<(u32, u32)>::persist_read(read_ctx).map(|(a, b)| (ItemId(a), b));
+                    Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
                 let kind = ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
                     virtual_info,
                     ctor_for,
                 };
+                let ir = reader.read_byte_slice();
                 kind
             }
             'y' => {
-                let virtual_info = VirtualInfo::persist_read(read_ctx);
+                let virtual_info = VirtualInfo::persist_read(reader);
                 let kind = ItemKind::AssociatedType { virtual_info };
                 kind
             }
             'a' => {
                 panic!();
-                //let adt_info_block = read_ctx.read_block();
+                //let adt_info_block = reader.read_block();
                 //let kind = ItemKind::new_adt();
                 //(kind, Some(adt_info_block))
             }
@@ -261,18 +273,15 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             _ => panic!(),
         };
 
-        let item_id = ItemId(read_ctx.next_item_id);
-        read_ctx.next_item_id += 1;
-
-        Self {
-            vm: read_ctx.vm,
-            crate_id: read_ctx.crate_id,
+        let item = Item {
+            vm: reader.context.vm,
+            crate_id: reader.context.this_crate,
             item_id,
             path,
-            //did: None,
             kind,
-            //persist_data,
-        }
+        };
+
+        reader.context.vm.alloc_item(item)
     }
 }
 
@@ -287,8 +296,8 @@ impl<'vm> Persist<'vm> for (FunctionAbi, String) {
         self.1.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let ident = String::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let ident = String::persist_read(reader);
         (FunctionAbi::RustIntrinsic, ident)
     }
 }
@@ -398,10 +407,10 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
         }
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(reader);
         panic!("fixme");
-        //let discriminator_ty = <Option<Type<'vm>>>::persist_read(read_ctx);
+        //let discriminator_ty = <Option<Type<'vm>>>::persist_read(reader);
         /*AdtInfo{
             variant_fields,
             discriminator_ty
@@ -421,9 +430,9 @@ impl<'vm> Persist<'vm> for VirtualInfo {
         self.ident.persist_write(writer);
     }
 
-    fn persist_read(read_ctx: &mut PersistReadContext<'vm>) -> Self {
-        let trait_id = ItemId(u32::persist_read(read_ctx));
-        let ident = String::persist_read(read_ctx);
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let trait_id = ItemId(u32::persist_read(reader));
+        let ident = String::persist_read(reader);
         Self { trait_id, ident }
     }
 }
