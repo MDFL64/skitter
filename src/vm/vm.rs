@@ -6,6 +6,7 @@ use crate::cache_provider::CacheProvider;
 use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
 use crate::items::Item;
+use crate::persist::PersistReadContext;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -16,9 +17,12 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
-use std::sync::OnceLock;
+use std::error::Error;
+use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::sync::RwLock;
 
 use std::sync::atomic::AtomicPtr;
@@ -83,9 +87,7 @@ impl<'vm> VMThread<'vm> {
     }
 
     pub fn copy_ptr(&self, slot: Slot) -> usize {
-        unsafe{
-            read_stack(self.stack.as_ptr() as _, slot)
-        }
+        unsafe { read_stack(self.stack.as_ptr() as _, slot) }
     }
 }
 
@@ -143,16 +145,18 @@ impl<'vm> VM<'vm> {
         crate_id
     }
 
-    pub fn add_cache_provider(&'vm self, path: &str) -> CrateId {
+    pub fn add_cache_provider(&'vm self, source_path: &Path, cache_path: &Path) -> Result<CrateId,Box<dyn Error>> {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
 
-        let worker = Box::new(CacheProvider::new(path, self, crate_id).expect("failed to load cached crate"));
+        let worker = Box::new(
+            CacheProvider::new(source_path,cache_path,self,crate_id)?
+        );
 
         let worker_ref = self.arena_crates.alloc(worker);
         crates.push(worker_ref);
 
-        crate_id
+        Ok(crate_id)
     }
 
     pub fn crate_provider(&self, crate_id: CrateId) -> &'vm Box<dyn CrateProvider<'vm>> {
@@ -211,9 +215,7 @@ impl<'vm> VM<'vm> {
     }
 
     pub fn common_types(&'vm self) -> &CommonTypes<'vm> {
-        self.common_types.get_or_init(|| {
-            CommonTypes::new(self)
-        })
+        self.common_types.get_or_init(|| CommonTypes::new(self))
     }
 
     pub fn ty_func_def(&'vm self, def: ItemWithSubs<'vm>) -> Type<'vm> {

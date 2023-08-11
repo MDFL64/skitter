@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub fn test(dir_name: &str, global_args: &[&str]) -> ! {
+pub fn test(dir_name: &Path, global_args: &[&str]) -> ! {
     use colored::Colorize;
 
     let mut test_files = Vec::new();
@@ -15,7 +15,7 @@ pub fn test(dir_name: &str, global_args: &[&str]) -> ! {
     let count_total = test_files.len();
     let mut time_skitter_total: Duration = Default::default();
     for file in test_files {
-        let res = run_test(&file, bin_name,global_args);
+        let res = run_test(&file, bin_name, global_args);
         let res_str: String = match res {
             Err(msg) => format!("{}", format!("FAIL: {}", msg).red()),
             Ok(res) => {
@@ -58,7 +58,7 @@ struct TestInfo {
     args: Vec<String>,
 }
 
-fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
+fn gather_tests(dir_name: &Path, files: &mut Vec<TestInfo>) {
     let dir_path = Path::new(dir_name);
 
     let args: Vec<String> = if let Result::Ok(data) = std::fs::read(dir_path.join("_args")) {
@@ -88,9 +88,7 @@ fn gather_tests(dir_name: &str, files: &mut Vec<TestInfo>) {
                 if let Ok(file_ty) = entry.file_type() {
                     if file_ty.is_dir() {
                         let sub_dir = dir_path.join(file_name);
-                        if let Some(sub_dir) = sub_dir.to_str() {
-                            gather_tests(sub_dir, files);
-                        }
+                        gather_tests(&sub_dir, files);
                     } else if file_ty.is_file() {
                         if file_name.ends_with(".rs") {
                             let file = dir_path.join(file_name);
@@ -116,7 +114,11 @@ struct TestResult {
 
 const ERROR_CHARS: usize = 80;
 
-fn run_test(test_info: &TestInfo, bin_name: &Path, global_args: &[&str]) -> Result<TestResult, String> {
+fn run_test(
+    test_info: &TestInfo,
+    bin_name: &Path,
+    global_args: &[&str],
+) -> Result<TestResult, String> {
     use std::process::Command;
 
     // Rust compile

@@ -9,10 +9,11 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     ir::{glue_builder::glue_for_ctor, IRFunction},
+    lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM}, lazy_collections::{LazyKey, LazyItem}
+    vm::{Function, VM},
 };
 use ahash::AHashMap;
 
@@ -188,11 +189,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
                 extern_name.persist_write(writer);
 
-                let ir_block = self.raw_ir().map(|ir| {
-                    let mut writer = writer.new_child_context();
-                    ir.persist_write(&mut writer);
-                    writer.flip()
-                }).unwrap_or_else(|| Vec::new());
+                let ir_block = self
+                    .raw_ir()
+                    .map(|ir| {
+                        let mut writer = writer.new_child_context();
+                        ir.persist_write(&mut writer);
+                        writer.flip()
+                    })
+                    .unwrap_or_else(|| Vec::new());
 
                 writer.write_byte_slice(&ir_block);
             }
@@ -205,11 +209,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
 
-                let ir_block = self.raw_ir().map(|ir| {
-                    let mut writer = writer.new_child_context();
-                    ir.persist_write(&mut writer);
-                    writer.flip()
-                }).unwrap_or_else(|| Vec::new());
+                let ir_block = self
+                    .raw_ir()
+                    .map(|ir| {
+                        let mut writer = writer.new_child_context();
+                        ir.persist_write(&mut writer);
+                        writer.flip()
+                    })
+                    .unwrap_or_else(|| Vec::new());
 
                 writer.write_byte_slice(&ir_block);
             }
@@ -290,11 +297,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             _ => panic!(),
         };
 
-        let saved_ir = if ir.len() > 0 {
-            Some(ir)
-        } else {
-            None
-        };
+        let saved_ir = if ir.len() > 0 { Some(ir) } else { None };
 
         Item {
             vm: reader.context.vm,
@@ -302,7 +305,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             item_id,
             path,
             kind,
-            saved_ir
+            saved_ir,
         }
     }
 }
@@ -714,7 +717,7 @@ impl<'vm> Item<'vm> {
             const_thread.run_bytecode(&bc, 0);
             let ty = ir.sig.output; // todo sub?
 
-            let const_bytes = const_thread.copy_result(0,ty.layout().assert_size() as usize);
+            let const_bytes = const_thread.copy_result(0, ty.layout().assert_size() as usize);
             self.vm.alloc_constant(const_bytes)
         });
 

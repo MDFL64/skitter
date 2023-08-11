@@ -1,39 +1,59 @@
-use std::{error::Error, sync::{Arc, OnceLock}, rc::Rc};
+use std::{
+    error::Error,
+    path::Path,
+    rc::Rc,
+    sync::{Arc, OnceLock},
+};
 
-use crate::{items::{CrateId, ItemId, Item, ItemPath}, vm::VM, crate_provider::CrateProvider, types::Type, ir::IRFunction, persist::{PersistReader, Persist, PersistReadContext}, persist_header::{persist_header_read, PersistCrateHeader}, lazy_collections::{LazyTable, LazyArray}};
-
+use crate::{
+    crate_provider::CrateProvider,
+    ir::IRFunction,
+    items::{CrateId, Item, ItemId, ItemPath},
+    lazy_collections::{LazyArray, LazyTable},
+    persist::{Persist, PersistReadContext, PersistReader},
+    persist_header::{persist_header_read, PersistCrateHeader},
+    types::Type,
+    vm::VM,
+};
 
 pub struct CacheProvider<'vm> {
-    read_context: Arc<PersistReadContext<'vm>>
+    read_context: Arc<PersistReadContext<'vm>>,
 }
 
 impl<'vm> CacheProvider<'vm> {
-    pub fn new(path: &str, vm: &'vm VM<'vm>, this_crate: CrateId) -> Result<Self,Box<dyn Error>> {
-        let bytes = std::fs::read(path)?;
+    pub fn new(
+        source_path: &Path,
+        cache_path: &Path,
+        vm: &'vm VM<'vm>,
+        this_crate: CrateId,
+    ) -> Result<Self, Box<dyn Error>> {
+        let bytes = std::fs::read(cache_path)?;
         let bytes = vm.alloc_constant(bytes);
-
-        let read_context = Arc::new(PersistReadContext{
+    
+        let read_context = Arc::new(PersistReadContext {
             this_crate,
             vm,
             types: OnceLock::new(),
-            items: OnceLock::new()
+            items: OnceLock::new(),
         });
-
+    
         let mut reader = PersistReader::new(bytes, read_context.clone());
         persist_header_read(&mut reader)?;
-
+    
         let crate_header = PersistCrateHeader::persist_read(&mut reader);
         crate_header.validate()?;
 
+        if crate_header.files[0].path != source_path {
+            return Err("cache file refers to incorrect source file".into());
+        }
+    
         let items = LazyTable::read(&mut reader);
-        assert!(read_context.items.set(items).is_ok());
-
+        read_context.items.set(items).map_err(|_| "double-assign to items")?;
+    
         let types = LazyArray::read(&mut reader);
-        assert!(read_context.types.set(types).is_ok());
-
-        Ok(Self{
-            read_context
-        })
+        read_context.types.set(types).map_err(|_| "double-assign to types")?;
+    
+        Ok(Self { read_context })
     }
 }
 
@@ -56,7 +76,7 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
             let ir = IRFunction::persist_read(&mut reader);
             Arc::new(ir)
         } else {
-            panic!("no ir available for {:?}",id);
+            panic!("no ir available for {:?}", id);
         }
     }
 

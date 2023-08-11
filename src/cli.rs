@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 /// Simple program to greet a person
@@ -5,7 +7,7 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct CliArgs {
     /// The rust file to run.
-    pub file_name: String,
+    pub file_name: PathBuf,
 
     /// Used to run tests. Pass a directory as file_name.
     #[clap(long)]
@@ -29,5 +31,5 @@ pub struct CliArgs {
 
     /// Load IR from a cache file instead of compiling from source
     #[clap(long)]
-    pub load: bool
+    pub load: bool,
 }

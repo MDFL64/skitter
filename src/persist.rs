@@ -1,6 +1,15 @@
-use std::{cell::RefCell, rc::Rc, sync::{Arc, OnceLock}};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{Arc, OnceLock},
+};
 
-use crate::{items::{CrateId, Item}, vm::VM, types::{Type, TypeKind}, lazy_collections::{LazyArray, LazyTable}};
+use crate::{
+    items::{CrateId, Item},
+    lazy_collections::{LazyArray, LazyTable},
+    types::{Type, TypeKind},
+    vm::VM,
+};
 
 pub struct PersistWriteContext<'vm> {
     pub this_crate: CrateId,
@@ -10,31 +19,31 @@ pub struct PersistWriteContext<'vm> {
 pub struct PersistWriter<'vm> {
     output: Vec<u8>,
 
-    pub context: Rc<PersistWriteContext<'vm>>
+    pub context: Rc<PersistWriteContext<'vm>>,
 }
 
 impl<'vm> PersistWriter<'vm> {
     pub fn new(this_crate: CrateId) -> Self {
         Self {
             output: vec![],
-            context: Rc::new(PersistWriteContext{
+            context: Rc::new(PersistWriteContext {
                 this_crate,
-                types: Default::default()
-            })
+                types: Default::default(),
+            }),
         }
     }
 
     pub fn new_child_context(&self) -> Self {
         Self {
             output: vec![],
-            context: self.context.clone()
+            context: self.context.clone(),
         }
     }
 
     pub fn iter_types(&self) -> WriterTypes<'vm> {
-        WriterTypes{
+        WriterTypes {
             index: 0,
-            context: self.context.clone()
+            context: self.context.clone(),
         }
     }
 
@@ -71,15 +80,15 @@ impl<'vm> PersistWriter<'vm> {
 pub struct PersistReadContext<'vm> {
     pub this_crate: CrateId,
     pub vm: &'vm VM<'vm>,
-    pub types: OnceLock<LazyArray<'vm,Type<'vm>>>,
-    pub items: OnceLock<LazyTable<'vm,&'vm Item<'vm>>>,
+    pub types: OnceLock<LazyArray<'vm, Type<'vm>>>,
+    pub items: OnceLock<LazyTable<'vm, &'vm Item<'vm>>>,
 }
 
 pub struct PersistReader<'vm> {
     index: usize,
     data: &'vm [u8],
 
-    pub context: Arc<PersistReadContext<'vm>>
+    pub context: Arc<PersistReadContext<'vm>>,
 }
 
 impl<'vm> PersistReader<'vm> {
@@ -87,7 +96,7 @@ impl<'vm> PersistReader<'vm> {
         Self {
             index: 0,
             data,
-            context
+            context,
         }
     }
 
@@ -172,7 +181,10 @@ macro_rules! persist_uint {
             fn persist_read(reader: &mut PersistReader) -> Self {
                 let n = reader.read_byte();
                 match n {
-                    255 => panic!("big read"),
+                    255 => {
+                        let bs = reader.read_bytes(16);
+                        u128::from_le_bytes(bs.try_into().unwrap()) as _
+                    }
                     254 => {
                         let bs = reader.read_bytes(8);
                         u64::from_le_bytes(bs.try_into().unwrap()) as _
@@ -212,7 +224,8 @@ macro_rules! persist_sint {
                 let n = <$uty>::persist_read(reader);
                 let neg = (n & 1) != 0;
                 if neg {
-                    panic!("neg");
+                    let tmp = (n >> 1) as $ty;
+                    -tmp
                 } else {
                     (n >> 1) as _
                 }
@@ -226,7 +239,7 @@ persist_uint!(u64);
 persist_uint!(u32);
 persist_uint!(usize);
 
-persist_sint!(i128,u128);
+persist_sint!(i128, u128);
 
 impl<'vm> Persist<'vm> for bool {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -315,7 +328,7 @@ where
 
 pub struct WriterTypes<'vm> {
     context: Rc<PersistWriteContext<'vm>>,
-    index: usize
+    index: usize,
 }
 
 impl<'vm> Iterator for WriterTypes<'vm> {

@@ -87,8 +87,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         vm: &'vm vm::VM<'vm>,
         ir: &'f IRFunction<'vm>,
         subs: &'f SubList<'vm>,
-        root_expr: ExprId
-    ) -> (usize,Option<usize>) {
+        root_expr: ExprId,
+    ) -> (usize, Option<usize>) {
         if vm.is_verbose {
             println!("compiling promoted const");
         }
@@ -122,9 +122,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
                 let data = const_thread.copy_result(slot.index(), size);
                 let ptr = vm.alloc_constant(data).as_ptr() as usize;
-                (ptr,None)
+                (ptr, None)
             }
-            Place::Ptr(slot,offset) => {
+            Place::Ptr(slot, offset) => {
                 assert!(offset == 0);
 
                 let ptr = const_thread.copy_ptr(slot);
@@ -133,12 +133,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 } else {
                     Some(const_thread.copy_ptr(slot.offset_by(POINTER_SIZE.bytes())))
                 };
-                
-                (ptr,meta)
+
+                (ptr, meta)
             }
         }
         //println!("=> {:?}",res);
-
     }
 
     fn debug<S: Into<String>>(&mut self, f: impl Fn() -> S) {
@@ -555,17 +554,26 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     && self.in_func.const_status(*arg) == ConstStatus::CanPromote;
 
                 let place = if const_promote {
-
-                    let (ptr,ptr_meta) = BytecodeCompiler::compile_promoted_const(self.vm, self.in_func, self.in_func_subs, *arg);
+                    let (ptr, ptr_meta) = BytecodeCompiler::compile_promoted_const(
+                        self.vm,
+                        self.in_func,
+                        self.in_func_subs,
+                        *arg,
+                    );
 
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     let ptr_size = POINTER_SIZE.bytes();
 
-                    self.out_bc.push(bytecode_select::literal(ptr as _, ptr_size, dst_slot));
+                    self.out_bc
+                        .push(bytecode_select::literal(ptr as _, ptr_size, dst_slot));
 
                     if let Some(ptr_meta) = ptr_meta {
-                        self.out_bc.push(bytecode_select::literal(ptr_meta as _, ptr_size, dst_slot.offset_by(ptr_size)));
+                        self.out_bc.push(bytecode_select::literal(
+                            ptr_meta as _,
+                            ptr_size,
+                            dst_slot.offset_by(ptr_size),
+                        ));
                     }
 
                     return dst_slot;
@@ -666,7 +674,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         // copy base
                         let ptr_size = POINTER_SIZE.bytes();
                         self.out_bc.push(
-                            bytecode_select::copy(dst_slot, src_slot, self.vm.common_types().usize).unwrap(),
+                            bytecode_select::copy(dst_slot, src_slot, self.vm.common_types().usize)
+                                .unwrap(),
                         );
                         self.out_bc.push(bytecode_select::literal(
                             meta as i128,

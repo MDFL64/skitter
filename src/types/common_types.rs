@@ -1,6 +1,6 @@
 use crate::vm::VM;
 
-use super::{Type, TypeKind, IntWidth, IntSign, FloatWidth};
+use super::{FloatWidth, IntSign, IntWidth, Type, TypeKind};
 
 pub struct CommonTypes<'vm> {
     pub unknown: Type<'vm>,
@@ -35,37 +35,46 @@ impl<'vm> CommonTypes<'vm> {
             bool: vm.types.intern(TypeKind::Bool, vm),
             char: vm.types.intern(TypeKind::Char, vm),
 
-            u8: vm.types
+            u8: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I8, IntSign::Unsigned), vm),
-            u16: vm.types
+            u16: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I16, IntSign::Unsigned), vm),
-            u32: vm.types
+            u32: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I32, IntSign::Unsigned), vm),
-            u64: vm.types
+            u64: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I64, IntSign::Unsigned), vm),
-            u128: vm.types
+            u128: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I128, IntSign::Unsigned), vm),
-            usize: vm.types
+            usize: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::ISize, IntSign::Unsigned), vm),
 
-            i8: vm.types
+            i8: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I8, IntSign::Signed), vm),
-            i16: vm.types
+            i16: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I16, IntSign::Signed), vm),
-            i32: vm.types
+            i32: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I32, IntSign::Signed), vm),
-            i64: vm.types
+            i64: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I64, IntSign::Signed), vm),
-            i128: vm.types
+            i128: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::I128, IntSign::Signed), vm),
-            isize: vm.types
+            isize: vm
+                .types
                 .intern(TypeKind::Int(IntWidth::ISize, IntSign::Signed), vm),
 
-            f32: vm.types
-                .intern(TypeKind::Float(FloatWidth::F32), vm),
-            f64: vm.types
-                .intern(TypeKind::Float(FloatWidth::F64), vm),
+            f32: vm.types.intern(TypeKind::Float(FloatWidth::F32), vm),
+            f64: vm.types.intern(TypeKind::Float(FloatWidth::F64), vm),
         }
     }
 }
-

@@ -24,19 +24,19 @@ mod abi;
 mod builtins;
 mod bytecode_compiler;
 mod bytecode_select;
+mod cache_provider;
 mod cli;
 mod crate_provider;
 mod ir;
 mod items;
 mod lazy_collections;
-mod persist_header;
 mod persist;
+mod persist_header;
 mod rustc_worker;
 mod test;
 mod types;
-mod cache_provider;
 
-use std::process;
+use std::{path::PathBuf, process};
 
 use clap::Parser;
 use types::SubList;
@@ -44,6 +44,7 @@ use vm::VM;
 
 use crate::{
     items::{ExternCrate, ItemPath},
+    persist_header::cache_file_path,
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -62,22 +63,27 @@ fn main() {
         if args.save {
             global_args.push("--save");
         }
-        test::test(&args.file_name,&global_args);
+        if args.load {
+            global_args.push("--load");
+        }
+        test::test(&args.file_name, &global_args);
     }
 
-    let vm: &VM = Box::leak(Box::new(VM::new(args.core,args.verbose)));
+    let vm: &VM = Box::leak(Box::new(VM::new(args.core, args.verbose)));
     // HACK: this must be initialized ASAP so common types have correct persist IDs
     vm.common_types();
 
-    
     let mut extern_crates = Vec::new();
 
     if args.core {
         let sysroot = get_sysroot();
-        let core_root = format!("{}/lib/rustlib/src/rust/library/core/src/lib.rs", sysroot);
+        let core_root = PathBuf::from(format!(
+            "{}/lib/rustlib/src/rust/library/core/src/lib.rs",
+            sysroot
+        ));
 
         // make sure core root exists
-        assert!(std::path::Path::new(&core_root).exists());
+        assert!(core_root.exists());
 
         let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
             source_root: core_root,
@@ -95,7 +101,12 @@ fn main() {
     }
 
     let main_crate = if args.load {
-        vm.add_cache_provider(&args.file_name)
+        let crate_name = args.file_name.file_stem().unwrap().to_str().unwrap();
+
+        let source_path = args.file_name.canonicalize().unwrap();
+        let cache_path = cache_file_path(crate_name, &source_path);
+
+        vm.add_cache_provider(&source_path, &cache_path).expect("cache load failed")
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
             source_root: args.file_name,

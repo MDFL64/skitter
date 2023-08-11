@@ -12,9 +12,8 @@ pub enum ConstStatus {
 impl ConstStatus {
     pub fn is_const(&self) -> bool {
         match self {
-            ConstStatus::Explicit |
-            ConstStatus::CanPromote => true,
-            ConstStatus::Not => false
+            ConstStatus::Explicit | ConstStatus::CanPromote => true,
+            ConstStatus::Not => false,
         }
     }
 }
@@ -54,8 +53,10 @@ impl<'vm> IRFunction<'vm> {
 
             ExprKind::NamedConst(_) => ConstStatus::Explicit,
 
-            ExprKind::Adt{ ref fields, .. } => {
-                let all_const = fields.iter().all(|(_,id)| self.const_status(*id).is_const() );
+            ExprKind::Adt { ref fields, .. } => {
+                let all_const = fields
+                    .iter()
+                    .all(|(_, id)| self.const_status(*id).is_const());
 
                 if all_const {
                     ConstStatus::CanPromote
@@ -63,9 +64,8 @@ impl<'vm> IRFunction<'vm> {
                     ConstStatus::Not
                 }
             }
-            ExprKind::Tuple(ref fields) |
-            ExprKind::Array(ref fields) => {
-                let all_const = fields.iter().all(|id| self.const_status(*id).is_const() );
+            ExprKind::Tuple(ref fields) | ExprKind::Array(ref fields) => {
+                let all_const = fields.iter().all(|id| self.const_status(*id).is_const());
 
                 if all_const {
                     ConstStatus::CanPromote
@@ -74,9 +74,7 @@ impl<'vm> IRFunction<'vm> {
                 }
             }
 
-            ExprKind::Field { lhs: child, .. } |
-            ExprKind::Cast(child) |
-            ExprKind::DeRef(child) => {
+            ExprKind::Field { lhs: child, .. } | ExprKind::Cast(child) | ExprKind::DeRef(child) => {
                 if self.const_status(child).is_const() {
                     ConstStatus::CanPromote
                 } else {
@@ -84,8 +82,9 @@ impl<'vm> IRFunction<'vm> {
                 }
             }
 
-            ExprKind::Binary(_,lhs,rhs) => {
-                let args_const = self.const_status(lhs).is_const() && self.const_status(rhs).is_const();
+            ExprKind::Binary(_, lhs, rhs) => {
+                let args_const =
+                    self.const_status(lhs).is_const() && self.const_status(rhs).is_const();
 
                 if args_const {
                     panic!("todo arg types must be primitive")
@@ -94,7 +93,7 @@ impl<'vm> IRFunction<'vm> {
                 }
             }
 
-            ExprKind::Call{ .. } => ConstStatus::Not,
+            ExprKind::Call { .. } => ConstStatus::Not,
 
             ExprKind::Block(ref block) => {
                 if let Some(res) = block.result {

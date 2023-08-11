@@ -1,9 +1,10 @@
-use crate::{persist::{Persist, PersistReader, PersistWriter}, types::{IntWidth, IntSign}, lazy_collections::LazyItem};
-
-use super::{
-    ItemWithSubs, Mutability, Sub, SubList, Type,
-    TypeKind, FloatWidth,
+use crate::{
+    lazy_collections::LazyItem,
+    persist::{Persist, PersistReader, PersistWriter},
+    types::{IntSign, IntWidth},
 };
+
+use super::{FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
 
 impl<'vm> LazyItem<'vm> for Type<'vm> {
     type Input = TypeKind<'vm>;
@@ -40,8 +41,6 @@ impl<'vm> Persist<'vm> for Type<'vm> {
 }
 
 impl<'vm> Persist<'vm> for TypeKind<'vm> {
-
-
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
             TypeKind::Int(IntWidth::I8, IntSign::Signed) => {
@@ -173,7 +172,6 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             TypeKind::FunctionPointer => {
                 writer.write_byte(32);
             }*/
-
             _ => panic!("write type {:?}", self),
         }
     }
@@ -200,6 +198,16 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
 
             14 => TypeKind::Bool,
             15 => TypeKind::Char,
+            16 => TypeKind::Never,
+
+            20 => {
+                let child = Persist::persist_read(reader);
+                TypeKind::Ref(child, Mutability::Const)
+            }
+            21 => {
+                let child = Persist::persist_read(reader);
+                TypeKind::Ref(child, Mutability::Mut)
+            }
 
             22 => {
                 let children = Persist::persist_read(reader);
@@ -268,7 +276,6 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-
         let item = match reader.read_byte() {
             0 => {
                 let index = usize::persist_read(reader);
@@ -276,14 +283,11 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
 
                 *items.array.get(index)
             }
-            _ => todo!()
+            _ => todo!(),
         };
 
         let subs = Persist::persist_read(reader);
 
-        ItemWithSubs{
-            item,
-            subs
-        }
+        ItemWithSubs { item, subs }
     }
 }

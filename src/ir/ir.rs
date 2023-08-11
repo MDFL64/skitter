@@ -1,6 +1,7 @@
 use crate::{
     items::FunctionSig,
-    types::{ItemWithSubs, Mutability, Type}, persist::{Persist, PersistReader, PersistWriter},
+    persist::{Persist, PersistReader, PersistWriter},
+    types::{ItemWithSubs, Mutability, Type},
 };
 
 #[derive(Default)]
@@ -229,7 +230,7 @@ pub enum PatternKind {
     Error,
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum BindingMode {
     Value,
     Ref,
@@ -269,7 +270,7 @@ pub enum BinaryOp {
     GtEq,
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum LogicOp {
     And,
     Or,
@@ -306,17 +307,17 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         let exprs = Persist::persist_read(reader);
         let patterns = Persist::persist_read(reader);
 
-        IRFunction{
-            sig: FunctionSig{
+        IRFunction {
+            sig: FunctionSig {
                 inputs: sig_inputs,
-                output: sig_output
+                output: sig_output,
             },
             is_constant,
             root_expr,
 
             params,
             exprs,
-            patterns
+            patterns,
         }
     }
 
@@ -359,10 +360,7 @@ impl<'vm> Persist<'vm> for Block {
         let stmts = Persist::persist_read(reader);
         let result = Persist::persist_read(reader);
 
-        Block{
-            stmts,
-            result
-        }
+        Block { stmts, result }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -384,13 +382,13 @@ impl<'vm> Persist<'vm> for Stmt {
                 let init = Persist::persist_read(reader);
                 let else_block = Persist::persist_read(reader);
 
-                Stmt::Let{
+                Stmt::Let {
                     pattern,
                     init,
-                    else_block
+                    else_block,
                 }
             }
-            _ => panic!("{}",n)
+            _ => panic!("{}", n),
         }
     }
 
@@ -400,10 +398,10 @@ impl<'vm> Persist<'vm> for Stmt {
                 writer.write_byte(0);
                 e.persist_write(writer);
             }
-            Stmt::Let{
+            Stmt::Let {
                 pattern,
                 init,
-                else_block
+                else_block,
             } => {
                 writer.write_byte(1);
                 pattern.persist_write(writer);
@@ -419,40 +417,99 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
         let ty = Type::persist_read(reader);
         let c = reader.read_byte() as char;
         let kind = match c {
-            '0' => {
-                ExprKind::LiteralVoid
+            '0' => ExprKind::LiteralVoid,
+            'a' => {
+                let bin_op = Persist::persist_read(reader);
+                let lhs = Persist::persist_read(reader);
+                let rhs = Persist::persist_read(reader);
+                ExprKind::AssignOp(bin_op, lhs, rhs)
+            }
+            'b' => {
+                let bin_op = Persist::persist_read(reader);
+                let lhs = Persist::persist_read(reader);
+                let rhs = Persist::persist_read(reader);
+                ExprKind::Binary(bin_op, lhs, rhs)
             }
             'c' => {
                 let func = Persist::persist_read(reader);
                 let args = Persist::persist_read(reader);
-                ExprKind::Call{
-                    func,
-                    args
-                }
+                ExprKind::Call { func, args }
             }
             'n' => {
                 let n = Persist::persist_read(reader);
                 ExprKind::LiteralValue(n)
             }
             'u' => {
-                let op = match reader.read_byte() as char {
-                    '!' => UnaryOp::Not,
-                    '-' => UnaryOp::Neg,
-                    _ => panic!()
+                let op = match reader.read_byte() {
+                    0 => UnaryOp::Not,
+                    1 => UnaryOp::Neg,
+                    _ => panic!(),
                 };
                 let arg = Persist::persist_read(reader);
                 ExprKind::Unary(op, arg)
+            }
+            'v' => {
+                let n = Persist::persist_read(reader);
+                ExprKind::VarRef(n)
+            }
+            'B' => {
+                let loop_id = LoopId(Persist::persist_read(reader));
+                let value = Persist::persist_read(reader);
+                ExprKind::Break{ loop_id, value }
+            }
+            'C' => {
+                let loop_id = LoopId(Persist::persist_read(reader));
+                ExprKind::Continue { loop_id }
+            }
+            'G' => {
+                let op = match reader.read_byte() {
+                    0 => LogicOp::And,
+                    1 => LogicOp::Or,
+                    _ => panic!()
+                };
+                let lhs = Persist::persist_read(reader);
+                let rhs = Persist::persist_read(reader);
+                ExprKind::LogicOp(op, lhs, rhs)
+            }
+            'L' => {
+                let block = Persist::persist_read(reader);
+                let loop_id = LoopId(Persist::persist_read(reader));
+                ExprKind::Loop(block, loop_id)
+            }
+            'R' => {
+                let e = Persist::persist_read(reader);
+                ExprKind::Return(e)
+            }
+            '=' => {
+                let lhs = Persist::persist_read(reader);
+                let rhs = Persist::persist_read(reader);
+                ExprKind::Assign(lhs, rhs)
+            }
+            '?' => {
+                let cond = Persist::persist_read(reader);
+                let then = Persist::persist_read(reader);
+                let else_opt = Persist::persist_read(reader);
+                ExprKind::If{ cond, then, else_opt }
+            }
+            '@' => {
+                let arg = Persist::persist_read(reader);
+                ExprKind::Cast(arg)
+            }
+            ',' => {
+                let arg = Persist::persist_read(reader);
+                ExprKind::Dummy(arg)
             }
             '{' => {
                 let block = Persist::persist_read(reader);
                 ExprKind::Block(block)
             }
-            _ => panic!("todo persist read expr '{}'",c)
+            '(' => {
+                let args = Persist::persist_read(reader);
+                ExprKind::Tuple(args)
+            }
+            _ => panic!("todo persist read expr '{}'", c),
         };
-        Expr{
-            kind,
-            ty
-        }
+        Expr { kind, ty }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -461,19 +518,19 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             ExprKind::LiteralVoid => {
                 writer.write_byte(b'0');
             }
-            ExprKind::AssignOp(op,lhs,rhs) => {
+            ExprKind::AssignOp(op, lhs, rhs) => {
                 writer.write_byte(b'a');
                 op.persist_write(writer);
                 lhs.persist_write(writer);
                 rhs.persist_write(writer);
             }
-            ExprKind::Binary(op,lhs,rhs) => {
+            ExprKind::Binary(op, lhs, rhs) => {
                 writer.write_byte(b'b');
                 op.persist_write(writer);
                 lhs.persist_write(writer);
                 rhs.persist_write(writer);
             }
-            ExprKind::Call{ func, ref args } => {
+            ExprKind::Call { func, ref args } => {
                 writer.write_byte(b'c');
                 func.persist_write(writer);
                 args.persist_write(writer);
@@ -482,11 +539,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'n');
                 x.persist_write(writer);
             }
-            ExprKind::Unary(op,e) => {
+            ExprKind::Unary(op, e) => {
                 writer.write_byte(b'u');
                 match op {
-                    UnaryOp::Not => writer.write_byte(b'!'),
-                    UnaryOp::Neg => writer.write_byte(b'-'),
+                    UnaryOp::Not => writer.write_byte(0),
+                    UnaryOp::Neg => writer.write_byte(1),
                 }
                 e.persist_write(writer);
             }
@@ -494,21 +551,25 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'v');
                 n.persist_write(writer);
             }
-            ExprKind::Break{loop_id,value} => {
+            ExprKind::Break { loop_id, value } => {
                 writer.write_byte(b'B');
                 loop_id.0.persist_write(writer);
                 value.persist_write(writer);
             }
-            ExprKind::LogicOp(op,lhs,rhs) => {
+            ExprKind::Continue { loop_id } => {
+                writer.write_byte(b'C');
+                loop_id.0.persist_write(writer);
+            }
+            ExprKind::LogicOp(op, lhs, rhs) => {
                 writer.write_byte(b'G');
                 match op {
-                    LogicOp::And => writer.write_byte(b'&'),
-                    LogicOp::Or => writer.write_byte(b'|'),
+                    LogicOp::And => writer.write_byte(0),
+                    LogicOp::Or => writer.write_byte(1),
                 }
                 lhs.persist_write(writer);
                 rhs.persist_write(writer);
             }
-            ExprKind::Loop(ref block,loop_id) => {
+            ExprKind::Loop(ref block, loop_id) => {
                 writer.write_byte(b'L');
                 block.persist_write(writer);
                 loop_id.0.persist_write(writer);
@@ -517,12 +578,16 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'R');
                 value.persist_write(writer);
             }
-            ExprKind::Assign(lhs,rhs) => {
+            ExprKind::Assign(lhs, rhs) => {
                 writer.write_byte(b'=');
                 lhs.persist_write(writer);
                 rhs.persist_write(writer);
             }
-            ExprKind::If{cond,then,else_opt} => {
+            ExprKind::If {
+                cond,
+                then,
+                else_opt,
+            } => {
                 writer.write_byte(b'?');
                 cond.persist_write(writer);
                 then.persist_write(writer);
@@ -536,17 +601,28 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b',');
                 e.persist_write(writer);
             }
+            ExprKind::Field{ lhs, variant, field } => {
+                writer.write_byte(b'.');
+                lhs.persist_write(writer);
+                variant.persist_write(writer);
+                field.persist_write(writer);
+            }
             ExprKind::DeRef(e) => {
                 writer.write_byte(b'*');
                 e.persist_write(writer);
             }
-            ExprKind::Ref(e,mutability) => {
+            ExprKind::Ref(e, mutability) => {
                 writer.write_byte(b'&');
                 match mutability {
                     Mutability::Const => writer.write_byte(b'c'),
-                    Mutability::Mut =>   writer.write_byte(b'm'),
+                    Mutability::Mut => writer.write_byte(b'm'),
                 }
                 e.persist_write(writer);
+            }
+            ExprKind::Match { arg, ref arms } => {
+                writer.write_byte(b':');
+                arg.persist_write(writer);
+                arms.persist_write(writer);
             }
             ExprKind::Block(ref block) => {
                 writer.write_byte(b'{');
@@ -556,7 +632,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'(');
                 args.persist_write(writer);
             }
-            _ => panic!("todo persist write expr {:?}",self.kind)
+            _ => panic!("todo persist write expr {:?}", self.kind),
         }
     }
 }
@@ -571,27 +647,28 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 let mode = match reader.read_byte() {
                     0 => BindingMode::Value,
                     1 => BindingMode::Ref,
-                    _ => panic!()
+                    _ => panic!(),
                 };
                 let sub_pattern = Persist::persist_read(reader);
                 PatternKind::LocalBinding {
                     local_id,
                     mode,
-                    sub_pattern
+                    sub_pattern,
                 }
             }
-            _ => panic!("todo persist read pattern '{}'",c)
+            _ => panic!("todo read pattern '{}'", c),
         };
-        Pattern{
-            kind,
-            ty
-        }
+        Pattern { kind, ty }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.ty.persist_write(writer);
         match self.kind {
-            PatternKind::LocalBinding { local_id, mode, sub_pattern } => {
+            PatternKind::LocalBinding {
+                local_id,
+                mode,
+                sub_pattern,
+            } => {
                 writer.write_byte(b'L');
                 local_id.persist_write(writer);
                 match mode {
@@ -600,14 +677,49 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 }
                 sub_pattern.persist_write(writer);
             }
-            _ => panic!("todo persist write pattern {:?}",self.kind)
+            PatternKind::LiteralValue(v) => {
+                writer.write_byte(b'V');
+                v.persist_write(writer);
+            }
+            PatternKind::Or{ref options} => {
+                writer.write_byte(b'|');
+                options.persist_write(writer);
+            }
+            PatternKind::Hole => {
+                writer.write_byte(b'_');
+            }
+            _ => panic!("todo write pattern {:?}", self.kind),
         }
     }
 }
 
 impl<'vm> Persist<'vm> for BinaryOp {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!()
+        let c = reader.read_byte() as char;
+        match c {
+            '+' => BinaryOp::Add,
+            '-' => BinaryOp::Sub,
+            '*' => BinaryOp::Mul,
+            '/' => BinaryOp::Div,
+            '%' => BinaryOp::Rem,
+
+            '&' => BinaryOp::BitAnd,
+            '|' => BinaryOp::BitOr,
+            '^' => BinaryOp::BitXor,
+
+            'U' => BinaryOp::ShiftL,
+            'D' => BinaryOp::ShiftR,
+
+            '=' => BinaryOp::Eq,
+            '!' => BinaryOp::NotEq,
+
+            '<' => BinaryOp::Lt,
+            '>' => BinaryOp::Gt,
+            'L' => BinaryOp::LtEq,
+            'G' => BinaryOp::GtEq,
+
+            _ => panic!("todo read binop {}",c)
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -631,7 +743,19 @@ impl<'vm> Persist<'vm> for BinaryOp {
             BinaryOp::Lt => writer.write_byte(b'<'),
             BinaryOp::Gt => writer.write_byte(b'>'),
             BinaryOp::LtEq => writer.write_byte(b'L'),
-            BinaryOp::GtEq => writer.write_byte(b'G')
+            BinaryOp::GtEq => writer.write_byte(b'G'),
         }
+    }
+}
+
+impl<'vm> Persist<'vm> for MatchArm {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.pattern.persist_write(writer);
+        self.has_guard.persist_write(writer);
+        self.body.persist_write(writer);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        todo!()
     }
 }

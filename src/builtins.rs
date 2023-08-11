@@ -250,8 +250,7 @@ pub fn compile_rust_intrinsic<'vm>(
                 let ty_usize = vm.common_types().usize;
 
                 let byte_slice_size = || {
-                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), ty_usize)
-                        .unwrap()
+                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), ty_usize).unwrap()
                 };
 
                 match arg_ty.kind() {

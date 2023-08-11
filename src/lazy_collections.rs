@@ -1,8 +1,15 @@
-use std::{marker::PhantomData, hash::{BuildHasher, Hash, Hasher}, sync::{Arc, OnceLock}};
+use std::{
+    hash::{BuildHasher, Hash, Hasher},
+    marker::PhantomData,
+    sync::{Arc, OnceLock},
+};
 
 use ahash::AHasher;
 
-use crate::{persist::{Persist, PersistReader, PersistWriter, PersistReadContext}, vm::VM};
+use crate::{
+    persist::{Persist, PersistReadContext, PersistReader, PersistWriter},
+    vm::VM,
+};
 
 /// Items stored in lazy arrays generally need interned in the VM. This trait handles that process.
 pub trait LazyItem<'vm> {
@@ -26,7 +33,7 @@ pub struct LazyArray<'vm, T> {
     data: &'vm [u8],
     array_ty: PhantomData<T>,
     loaded: Vec<OnceLock<T>>,
-    read_context: Arc<PersistReadContext<'vm>>
+    read_context: Arc<PersistReadContext<'vm>>,
 }
 
 // SERIALIZED FORM
@@ -42,7 +49,10 @@ where
     T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
 {
     /// Returns the item count.
-    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>) where 'vm: 'a {
+    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>)
+    where
+        'vm: 'a,
+    {
         let mut data_writer = out_writer.new_child_context();
 
         let mut item_indices = Vec::<u32>::new();
@@ -74,16 +84,14 @@ where
         let data_len = usize::persist_read(reader);
         let data = reader.read_bytes(data_len);
 
-        let loaded = item_indices.iter()
-            .map(|_| OnceLock::new())
-            .collect();
+        let loaded = item_indices.iter().map(|_| OnceLock::new()).collect();
 
         LazyArray {
             item_indices,
             data,
             array_ty: PhantomData,
             loaded,
-            read_context: reader.context.clone()
+            read_context: reader.context.clone(),
         }
     }
 
@@ -99,18 +107,18 @@ where
             let mut reader = PersistReader::new(data, self.read_context.clone());
 
             let input = T::Input::persist_read(&mut reader);
-            LazyItem::build(input,self.read_context.vm)
+            LazyItem::build(input, self.read_context.vm)
         })
     }
 }
 
 /// A perfect hash table which is lazily parsed
 pub struct LazyTable<'vm, T> {
-    pub array: LazyArray<'vm,T>,
+    pub array: LazyArray<'vm, T>,
     // primary hashes to indices (positive) OR hash seeds (negative)
     table_1: Vec<i32>,
     // secondary hashes to indices
-    table_2: Vec<i32>
+    table_2: Vec<i32>,
 }
 
 // SERIALIZED FORM
@@ -125,16 +133,18 @@ impl<'vm, T> LazyTable<'vm, T>
 where
     T: LazyItem<'vm> + LazyKey<'vm>,
     T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
-    T::Key: Hash + PartialEq + std::fmt::Debug
+    T::Key: Hash + PartialEq + std::fmt::Debug,
 {
-    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>) where 'vm: 'a {
-
+    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>)
+    where
+        'vm: 'a,
+    {
         let mut keys = Vec::new();
 
-        let items = items.enumerate().map(|(i,item)| {
+        let items = items.enumerate().map(|(i, item)| {
             let key = <T as LazyKey>::key(item);
-            keys.push((key,i));
-            
+            keys.push((key, i));
+
             item
         });
 
@@ -143,23 +153,23 @@ where
         let table_size = keys.len();
 
         // determine which bucket each entry will fall in
-        let mut buckets = vec!(vec!();table_size);
+        let mut buckets = vec![vec!(); table_size];
 
-        for (key,item_index) in keys {
+        for (key, item_index) in keys {
             let mut hasher = get_hasher(0);
             key.hash(&mut hasher);
             let bucket_index = hasher.finish() as usize % table_size;
-            buckets[bucket_index].push((key,item_index));
+            buckets[bucket_index].push((key, item_index));
         }
 
         // sort buckets, most full come first
         let mut buckets_sorted: Vec<_> = buckets.iter().enumerate().collect();
-        buckets_sorted.sort_by_key(|(_,bucket)| -(bucket.len() as isize));
+        buckets_sorted.sort_by_key(|(_, bucket)| -(bucket.len() as isize));
 
-        let mut table_1 = vec!(TABLE_SLOT_INVALID;table_size);
-        let mut table_2 = vec!(TABLE_SLOT_INVALID;table_size);
+        let mut table_1 = vec![TABLE_SLOT_INVALID; table_size];
+        let mut table_2 = vec![TABLE_SLOT_INVALID; table_size];
 
-        for (bucket_i,bucket_keys) in buckets_sorted {
+        for (bucket_i, bucket_keys) in buckets_sorted {
             if bucket_keys.len() == 1 {
                 let item_index = bucket_keys[0].1;
                 table_1[bucket_i] = item_index as i32;
@@ -168,19 +178,21 @@ where
                 loop {
                     let mut new_indices = Vec::with_capacity(bucket_keys.len());
 
-                    for (key,item_index) in bucket_keys {
+                    for (key, item_index) in bucket_keys {
                         let mut hasher = get_hasher(seed);
                         key.hash(&mut hasher);
                         let hash_index = hasher.finish() as usize % table_size;
-                        
-                        if table_2[hash_index] != TABLE_SLOT_INVALID || new_indices.iter().any(|(x,_)| *x == hash_index) {
+
+                        if table_2[hash_index] != TABLE_SLOT_INVALID
+                            || new_indices.iter().any(|(x, _)| *x == hash_index)
+                        {
                             break;
                         }
-                        new_indices.push((hash_index,item_index));
+                        new_indices.push((hash_index, item_index));
                     }
 
                     if new_indices.len() == bucket_keys.len() {
-                        for (hash_index,item_index) in new_indices {
+                        for (hash_index, item_index) in new_indices {
                             table_2[hash_index] = *item_index as i32;
                         }
                         table_1[bucket_i] = seed;
@@ -212,7 +224,7 @@ where
         Self {
             array,
             table_1,
-            table_2
+            table_2,
         }
     }
 
@@ -223,17 +235,26 @@ where
             self.table_1[hasher.finish() as usize % self.table_1.len()]
         };
 
-        if t1_index >= 0 {
+        let final_index = if t1_index >= 0 {
             // fast path
-            let item = self.array.get(t1_index as usize);
-
-            let item_key = <T as LazyKey>::key(item.input());
-            assert!(item_key == key);
-
-            item
+            t1_index as usize
         } else {
-            todo!("slow path");
-        }
+            // slow path, seed a secondary hasher
+            let t2_index = {
+                let mut hasher = get_hasher(t1_index);
+                key.hash(&mut hasher);
+                self.table_2[hasher.finish() as usize % self.table_2.len()]
+            };
+
+            t2_index as usize
+        };
+
+        let item = self.array.get(final_index);
+
+        let item_key = <T as LazyKey>::key(item.input());
+        assert!(item_key == key);
+
+        item
     }
 }
 

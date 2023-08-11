@@ -1,6 +1,8 @@
 use std::{
+    path::PathBuf,
+    str::FromStr,
     sync::{Arc, Barrier, Mutex, OnceLock},
-    time::Instant, path::PathBuf, str::FromStr,
+    time::Instant,
 };
 
 use ahash::AHashMap;
@@ -20,8 +22,11 @@ use crate::{
         path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, ExternCrate,
         FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
+    lazy_collections::{LazyArray, LazyTable},
+    persist::{Persist, PersistWriter},
+    persist_header::{persist_header_write, PersistCrateHeader},
     types::{IntSign, IntWidth, Type, TypeKind},
-    vm::VM, persist_header::{PersistCrateHeader, persist_header_write}, persist::{Persist, PersistWriter}, lazy_collections::{LazyArray, LazyTable},
+    vm::VM,
 };
 
 /////////////////////////
@@ -77,7 +82,7 @@ struct ImplItem<'tcx, 'vm> {
 }
 
 pub struct RustCWorkerConfig {
-    pub source_root: String,
+    pub source_root: PathBuf,
     pub extern_crates: Vec<ExternCrate>,
     pub is_core: bool,
     pub save_file: bool,
@@ -103,8 +108,6 @@ impl<'vm> RustCWorker<'vm> {
             None
         };
 
-        let source_root = PathBuf::from_str(&worker_config.source_root).expect("bad source path");
-
         let config = rustc_interface::Config {
             opts: config::Options {
                 crate_name,
@@ -120,7 +123,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(source_root),
+            input: config::Input::File(worker_config.source_root.clone()),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -140,12 +143,7 @@ impl<'vm> RustCWorker<'vm> {
             rustc_interface::run_compiler(config, |compiler| {
                 compiler.enter(move |queries| {
                     queries.global_ctxt().unwrap().enter(|tcx| {
-                        let ctx = RustCContext::new(
-                            vm,
-                            tcx,
-                            this_crate,
-                            worker_config
-                        );
+                        let ctx = RustCContext::new(vm, tcx, this_crate, worker_config);
 
                         loop {
                             let cmd: Box<dyn WorkerCommandDyn> = recv.recv().unwrap();
@@ -215,9 +213,8 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         let did = item_info.did;
         let is_constant = !item_info.item.is_function();
 
-        let res = self.call(move |ctx| {
-            build_ir(ctx,did,is_constant).expect("build_ir: no ir available")
-        });
+        let res = self
+            .call(move |ctx| build_ir(ctx, did, is_constant).expect("build_ir: no ir available"));
         res.wait()
     }
 
@@ -227,15 +224,25 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
     }
 }
 
-fn build_ir<'vm,'tcx>(ctx: &RustCContext<'vm,'tcx>, did: LocalDefId, is_constant: bool) -> Option<Arc<IRFunction<'vm>>> {
+fn build_ir<'vm, 'tcx>(
+    ctx: &RustCContext<'vm, 'tcx>,
+    did: LocalDefId,
+    is_constant: bool,
+) -> Option<Arc<IRFunction<'vm>>> {
     let hir = ctx.tcx.hir();
 
     if let Some(body_id) = hir.maybe_body_owned_by(did) {
         let body = hir.body(body_id);
-    
+
         let types = ctx.tcx.typeck(did);
-    
-        Some(Arc::new(IRFunctionConverter::run(ctx, did, body, types, is_constant)))
+
+        Some(Arc::new(IRFunctionConverter::run(
+            ctx,
+            did,
+            body,
+            types,
+            is_constant,
+        )))
     } else {
         None
     }
@@ -256,7 +263,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         vm: &'vm VM<'vm>,
         tcx: TyCtxt<'tcx>,
         this_crate: CrateId,
-        config: RustCWorkerConfig
+        config: RustCWorkerConfig,
     ) -> Self {
         let mut items = RustCItems::new(this_crate);
 
@@ -646,7 +653,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         }
 
         if config.save_file {
-
             // force-generate all available IR
             for item in &ctx.items.items {
                 // HACK: skip builtins
@@ -656,12 +662,13 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 }
 
                 let is_constant = !item.item.is_function();
-                if let Some(ir) = build_ir(&ctx,item.did,is_constant) {
+                if let Some(ir) = build_ir(&ctx, item.did, is_constant) {
                     item.item.set_raw_ir(ir);
                 }
             }
 
-            let crate_header = PersistCrateHeader::from_rustc(ctx.tcx).expect("failed to build header");
+            let crate_header =
+                PersistCrateHeader::from_rustc(ctx.tcx).expect("failed to build header");
             // TODO validate header by checking that none of the files were mutated after this executable started.
             // we could create two headers and compare them but, that would require knowing about all the source files
             // before rustc parses them
@@ -670,7 +677,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             persist_header_write(&mut writer);
             crate_header.persist_write(&mut writer);
 
-            let cache_path = format!("./cache/{}",crate_header.cache_file_name());
+            let cache_path = crate_header.cache_file_path();
 
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);

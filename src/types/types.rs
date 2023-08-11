@@ -230,8 +230,12 @@ impl<'vm> Type<'vm> {
 
     pub fn is_interior_mut(&self) -> bool {
         match self.kind() {
-            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char | TypeKind::StringSlice |
-            TypeKind::FunctionDef(_) => false,
+            TypeKind::Int(..)
+            | TypeKind::Float(..)
+            | TypeKind::Bool
+            | TypeKind::Char
+            | TypeKind::StringSlice
+            | TypeKind::FunctionDef(_) => false,
             TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut()),
             TypeKind::Array(child, _) => child.is_interior_mut(),
             TypeKind::Adt(adt) => {
