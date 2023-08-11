@@ -5,14 +5,12 @@ use super::{
     TypeKind, FloatWidth,
 };
 
-const TYPE_ID_OFFSET: usize = 100;
-
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         let type_id = self.0.persist_id.get_or_init(|| {
             let mut writer_types = writer.context.types.borrow_mut();
 
-            let i = TYPE_ID_OFFSET + writer_types.len();
+            let i = writer_types.len();
             writer_types.push(*self);
             i as u32
         });
@@ -21,7 +19,14 @@ impl<'vm> Persist<'vm> for Type<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        todo!()
+        let type_id = u32::persist_read(reader);
+        println!("get type {}",type_id);
+
+        let types = reader.context.types.get().unwrap();
+
+        let kind = types.get(type_id as usize);
+        println!("ty kind = {:?}",kind);
+        panic!()
     }
 }
 
@@ -165,7 +170,10 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        todo!()
+        let n = reader.read_byte();
+        match n {
+            _ => panic!("read type {:?}", n),
+        }
     }
 }
 

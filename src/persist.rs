@@ -1,6 +1,6 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::{Arc, OnceLock}};
 
-use crate::{items::CrateId, vm::VM, types::{Type, TypeKind}};
+use crate::{items::CrateId, vm::VM, types::{Type, TypeKind}, lazy_collections::LazyArray};
 
 pub struct PersistWriteContext<'vm> {
     pub this_crate: CrateId,
@@ -71,6 +71,7 @@ impl<'vm> PersistWriter<'vm> {
 pub struct PersistReadContext<'vm> {
     pub this_crate: CrateId,
     pub vm: &'vm VM<'vm>,
+    pub types: OnceLock<LazyArray<'vm,TypeKind<'vm>>>
 }
 
 pub struct PersistReader<'vm> {

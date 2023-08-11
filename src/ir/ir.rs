@@ -296,7 +296,14 @@ pub struct MatchArm {
 
 impl<'vm> Persist<'vm> for IRFunction<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!();
+        let sig_inputs = Persist::persist_read(reader);
+        let sig_output = Persist::persist_read(reader);
+
+        let sig = FunctionSig{
+            inputs: sig_inputs,
+            output: sig_output
+        };
+        panic!()
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {

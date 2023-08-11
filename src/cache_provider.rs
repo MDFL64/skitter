@@ -1,11 +1,12 @@
-use std::{error::Error, sync::Arc, rc::Rc};
+use std::{error::Error, sync::{Arc, OnceLock}, rc::Rc};
 
-use crate::{items::{CrateId, ItemId, Item, ItemPath}, vm::VM, crate_provider::CrateProvider, types::Type, ir::IRFunction, persist::{PersistReader, Persist, PersistReadContext}, persist_header::{persist_header_read, PersistCrateHeader}, lazy_collections::LazyTable};
+use crate::{items::{CrateId, ItemId, Item, ItemPath}, vm::VM, crate_provider::CrateProvider, types::Type, ir::IRFunction, persist::{PersistReader, Persist, PersistReadContext}, persist_header::{persist_header_read, PersistCrateHeader}, lazy_collections::{LazyTable, LazyArray}};
 
 
 pub struct CacheProvider<'vm> {
     //crate_id: CrateId
-    items: LazyTable<'vm,&'vm Item<'vm>>
+    read_context: Arc<PersistReadContext<'vm>>,
+    items: LazyTable<'vm,&'vm Item<'vm>>,
 }
 
 impl<'vm> CacheProvider<'vm> {
@@ -15,10 +16,11 @@ impl<'vm> CacheProvider<'vm> {
 
         let read_context = Arc::new(PersistReadContext{
             this_crate,
-            vm
+            vm,
+            types: OnceLock::new()
         });
 
-        let mut reader = PersistReader::new(bytes, read_context);
+        let mut reader = PersistReader::new(bytes, read_context.clone());
         persist_header_read(&mut reader)?;
 
         let crate_header = PersistCrateHeader::persist_read(&mut reader);
@@ -26,7 +28,11 @@ impl<'vm> CacheProvider<'vm> {
 
         let items = LazyTable::read(&mut reader);
 
+        let types = LazyArray::read(&mut reader);
+        assert!(read_context.types.set(types).is_ok());
+
         Ok(Self{
+            read_context,
             items
         })
     }
@@ -42,7 +48,15 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
     }
 
     fn build_ir(&self, id: ItemId) -> Arc<IRFunction<'vm>> {
-        panic!("build_ir")
+        let item = self.items.array.get(id.index());
+
+        if let Some(saved_ir) = item.saved_ir {
+            let mut reader = PersistReader::new(saved_ir, self.read_context.clone());
+            let ir = IRFunction::persist_read(&mut reader);
+            Arc::new(ir)
+        } else {
+            panic!("no ir available for {:?}",id);
+        }
     }
 
     fn fill_inherent_impls(&self, ty: Type<'vm>) {

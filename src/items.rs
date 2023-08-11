@@ -108,6 +108,7 @@ pub struct Item<'vm> {
     pub crate_id: CrateId,
     pub item_id: ItemId,
     pub path: ItemPath<'vm>,
+    pub saved_ir: Option<&'vm [u8]>,
     kind: ItemKind<'vm>,
 }
 
@@ -124,6 +125,7 @@ impl<'vm> Item<'vm> {
             crate_id,
             item_id,
             path,
+            saved_ir: None,
             kind,
         }
     }
@@ -226,6 +228,9 @@ impl<'vm> Persist<'vm> for &'vm Item<'vm> {
 
         // todo actual kind
         let kind_c = reader.read_byte() as char;
+
+        let mut ir: &[u8] = &[];
+
         let kind = match kind_c {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
@@ -239,7 +244,7 @@ impl<'vm> Persist<'vm> for &'vm Item<'vm> {
                     extern_name,
                     ctor_for,
                 };
-                let ir = reader.read_byte_slice();
+                ir = reader.read_byte_slice();
                 kind
             }
             'c' => {
@@ -252,7 +257,7 @@ impl<'vm> Persist<'vm> for &'vm Item<'vm> {
                     virtual_info,
                     ctor_for,
                 };
-                let ir = reader.read_byte_slice();
+                ir = reader.read_byte_slice();
                 kind
             }
             'y' => {
@@ -273,12 +278,19 @@ impl<'vm> Persist<'vm> for &'vm Item<'vm> {
             _ => panic!(),
         };
 
+        let saved_ir = if ir.len() > 0 {
+            Some(ir)
+        } else {
+            None
+        };
+
         let item = Item {
             vm: reader.context.vm,
             crate_id: reader.context.this_crate,
             item_id,
             path,
             kind,
+            saved_ir
         };
 
         reader.context.vm.alloc_item(item)
