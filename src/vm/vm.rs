@@ -19,8 +19,8 @@ use crate::types::TypeKind;
 use crate::vm::instr::Slot;
 use std::error::Error;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::RwLock;
@@ -145,13 +145,15 @@ impl<'vm> VM<'vm> {
         crate_id
     }
 
-    pub fn add_cache_provider(&'vm self, source_path: &Path, cache_path: &Path) -> Result<CrateId,Box<dyn Error>> {
+    pub fn add_cache_provider(
+        &'vm self,
+        source_path: &Path,
+        cache_path: &Path,
+    ) -> Result<CrateId, Box<dyn Error>> {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
 
-        let worker = Box::new(
-            CacheProvider::new(source_path,cache_path,self,crate_id)?
-        );
+        let worker = Box::new(CacheProvider::new(source_path, cache_path, self, crate_id)?);
 
         let worker_ref = self.arena_crates.alloc(worker);
         crates.push(worker_ref);

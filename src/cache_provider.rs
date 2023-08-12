@@ -29,30 +29,36 @@ impl<'vm> CacheProvider<'vm> {
     ) -> Result<Self, Box<dyn Error>> {
         let bytes = std::fs::read(cache_path)?;
         let bytes = vm.alloc_constant(bytes);
-    
+
         let read_context = Arc::new(PersistReadContext {
             this_crate,
             vm,
             types: OnceLock::new(),
             items: OnceLock::new(),
         });
-    
+
         let mut reader = PersistReader::new(bytes, read_context.clone());
         persist_header_read(&mut reader)?;
-    
+
         let crate_header = PersistCrateHeader::persist_read(&mut reader);
         crate_header.validate()?;
 
         if crate_header.files[0].path != source_path {
             return Err("cache file refers to incorrect source file".into());
         }
-    
+
         let items = LazyTable::read(&mut reader);
-        read_context.items.set(items).map_err(|_| "double-assign to items")?;
-    
+        read_context
+            .items
+            .set(items)
+            .map_err(|_| "double-assign to items")?;
+
         let types = LazyArray::read(&mut reader);
-        read_context.types.set(types).map_err(|_| "double-assign to types")?;
-    
+        read_context
+            .types
+            .set(types)
+            .map_err(|_| "double-assign to types")?;
+
         Ok(Self { read_context })
     }
 }

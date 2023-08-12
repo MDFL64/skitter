@@ -4,7 +4,7 @@ use crate::{
     types::{IntSign, IntWidth},
 };
 
-use super::{FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
+use super::{ArraySize, FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
 
 impl<'vm> LazyItem<'vm> for Type<'vm> {
     type Input = TypeKind<'vm>;
@@ -109,11 +109,30 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 children.persist_write(writer);
             }
 
+            TypeKind::Array(child, ArraySize::Static(n)) => {
+                writer.write_byte(23);
+                child.persist_write(writer);
+                n.persist_write(writer);
+            }
+            TypeKind::Array(child, ArraySize::ConstParam(n)) => {
+                writer.write_byte(24);
+                child.persist_write(writer);
+                n.persist_write(writer);
+            }
+
             TypeKind::FunctionDef(item_with_subs) => {
                 writer.write_byte(30);
                 item_with_subs.persist_write(writer);
             }
+            TypeKind::Adt(item_with_subs) => {
+                writer.write_byte(31);
+                item_with_subs.persist_write(writer);
+            }
 
+            TypeKind::Param(n) => {
+                writer.write_byte(40);
+                n.persist_write(writer);
+            }
             /*
             TypeKind::Ptr(child, Mutability::Const) => {
                 writer.write_byte(18);
@@ -210,13 +229,17 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             }
 
             22 => {
-                let children = Persist::persist_read(reader);
-                TypeKind::Tuple(children)
+                let item_with_subs = Persist::persist_read(reader);
+                TypeKind::Tuple(item_with_subs)
             }
 
             30 => {
                 let item = Persist::persist_read(reader);
                 TypeKind::FunctionDef(item)
+            }
+            31 => {
+                let item_with_subs = Persist::persist_read(reader);
+                TypeKind::Adt(item_with_subs)
             }
             _ => panic!("read type {:?}", n),
         }
@@ -269,7 +292,7 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
             self.item.item_id.index().persist_write(writer);
         } else {
             // todo foreign items
-            todo!()
+            todo!("foreign item")
         }
 
         self.subs.persist_write(writer);

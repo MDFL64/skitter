@@ -106,7 +106,8 @@ fn main() {
         let source_path = args.file_name.canonicalize().unwrap();
         let cache_path = cache_file_path(crate_name, &source_path);
 
-        vm.add_cache_provider(&source_path, &cache_path).expect("cache load failed")
+        vm.add_cache_provider(&source_path, &cache_path)
+            .expect("cache load failed")
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
             source_root: args.file_name,
