@@ -65,7 +65,8 @@ impl<'vm> CacheProvider<'vm> {
 
 impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
     fn item_by_id(&self, id: ItemId) -> &'vm Item<'vm> {
-        panic!("item_by_id")
+        let items = self.read_context.items.get().unwrap();
+        items.array.get(id.index())
     }
 
     fn item_by_path(&self, path: &ItemPath<'vm>) -> Option<&'vm Item<'vm>> {

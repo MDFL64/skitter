@@ -276,7 +276,7 @@ pub enum LogicOp {
     Or,
 }
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq,Clone,Copy)]
 pub enum PointerCast {
     ReifyFnPointer,
     UnsafeFnPointer,
@@ -480,6 +480,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let e = Persist::persist_read(reader);
                 ExprKind::Return(e)
             }
+            'S' => {
+                let variant = Persist::persist_read(reader);
+                let fields= Persist::persist_read(reader);
+                ExprKind::Adt{ variant, fields }
+            }
             '=' => {
                 let lhs = Persist::persist_read(reader);
                 let rhs = Persist::persist_read(reader);
@@ -582,6 +587,10 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'v');
                 n.persist_write(writer);
             }
+            ExprKind::LiteralBytes(bytes) => {
+                writer.write_byte(b'x');
+                writer.write_byte_slice(bytes);
+            }
             ExprKind::Array(ref children) => {
                 writer.write_byte(b'A');
                 children.persist_write(writer);
@@ -594,6 +603,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             ExprKind::Continue { loop_id } => {
                 writer.write_byte(b'C');
                 loop_id.0.persist_write(writer);
+            }
+            ExprKind::Let { pattern, init } => {
+                writer.write_byte(b'E');
+                pattern.persist_write(writer);
+                init.persist_write(writer);
             }
             ExprKind::LogicOp(op, lhs, rhs) => {
                 writer.write_byte(b'G');
@@ -639,6 +653,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             ExprKind::Cast(e) => {
                 writer.write_byte(b'@');
                 e.persist_write(writer);
+            }
+            ExprKind::PointerCast(e,cast) => {
+                writer.write_byte(b'^');
+                e.persist_write(writer);
+                cast.persist_write(writer);
             }
             ExprKind::NamedConst(ref item_with_subs) => {
                 writer.write_byte(b'#');
@@ -737,6 +756,19 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 writer.write_byte(b'V');
                 v.persist_write(writer);
             }
+            PatternKind::Enum{ref fields,variant_index} => {
+                writer.write_byte(b'E');
+                fields.persist_write(writer);
+                variant_index.persist_write(writer);
+            }
+            PatternKind::Struct{ref fields} => {
+                writer.write_byte(b'S');
+                fields.persist_write(writer);
+            }
+            PatternKind::DeRef { sub_pattern } => {
+                writer.write_byte(b'R');
+                sub_pattern.persist_write(writer);
+            }
             PatternKind::Or { ref options } => {
                 writer.write_byte(b'|');
                 options.persist_write(writer);
@@ -746,6 +778,17 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
             }
             _ => panic!("todo write pattern {:?}", self.kind),
         }
+    }
+}
+
+impl<'vm> Persist<'vm> for FieldPattern {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.field.persist_write(writer);
+        self.pattern.persist_write(writer);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        todo!()
     }
 }
 
@@ -813,5 +856,15 @@ impl<'vm> Persist<'vm> for MatchArm {
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         todo!()
+    }
+}
+
+impl<'vm> Persist<'vm> for PointerCast {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        PointerCast::UnSize
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        assert!(*self == PointerCast::UnSize);
     }
 }

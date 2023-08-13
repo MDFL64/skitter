@@ -103,21 +103,33 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(21);
                 child.persist_write(writer);
             }
+            TypeKind::Ptr(child, Mutability::Const) => {
+                writer.write_byte(22);
+                child.persist_write(writer);
+            }
+            TypeKind::Ptr(child, Mutability::Mut) => {
+                writer.write_byte(23);
+                child.persist_write(writer);
+            }
 
             TypeKind::Tuple(children) => {
-                writer.write_byte(22);
+                writer.write_byte(24);
                 children.persist_write(writer);
             }
 
             TypeKind::Array(child, ArraySize::Static(n)) => {
-                writer.write_byte(23);
+                writer.write_byte(25);
                 child.persist_write(writer);
                 n.persist_write(writer);
             }
             TypeKind::Array(child, ArraySize::ConstParam(n)) => {
-                writer.write_byte(24);
+                writer.write_byte(26);
                 child.persist_write(writer);
                 n.persist_write(writer);
+            }
+            TypeKind::Slice(child) => {
+                writer.write_byte(27);
+                child.persist_write(writer);
             }
 
             TypeKind::FunctionDef(item_with_subs) => {
@@ -126,6 +138,10 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             }
             TypeKind::Adt(item_with_subs) => {
                 writer.write_byte(31);
+                item_with_subs.persist_write(writer);
+            }
+            TypeKind::AssociatedType(item_with_subs) => {
+                writer.write_byte(32);
                 item_with_subs.persist_write(writer);
             }
 
@@ -227,10 +243,27 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let child = Persist::persist_read(reader);
                 TypeKind::Ref(child, Mutability::Mut)
             }
-
             22 => {
+                let child = Persist::persist_read(reader);
+                TypeKind::Ptr(child, Mutability::Const)
+            }
+            23 => {
+                let child = Persist::persist_read(reader);
+                TypeKind::Ptr(child, Mutability::Mut)
+            }
+            24 => {
                 let item_with_subs = Persist::persist_read(reader);
                 TypeKind::Tuple(item_with_subs)
+            }
+            25 => {
+                let child = Persist::persist_read(reader);
+                let n = Persist::persist_read(reader);
+                TypeKind::Array(child, ArraySize::Static(n))
+            }
+            26 => {
+                let child = Persist::persist_read(reader);
+                let n = Persist::persist_read(reader);
+                TypeKind::Array(child, ArraySize::ConstParam(n))
             }
 
             30 => {
@@ -240,6 +273,10 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             31 => {
                 let item_with_subs = Persist::persist_read(reader);
                 TypeKind::Adt(item_with_subs)
+            }
+            40 => {
+                let n = Persist::persist_read(reader);
+                TypeKind::Param(n)
             }
             _ => panic!("read type {:?}", n),
         }
@@ -291,8 +328,16 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
             writer.write_byte(0);
             self.item.item_id.index().persist_write(writer);
         } else {
-            // todo foreign items
-            todo!("foreign item")
+            // TODO just write a crate ID and item ID
+            // assume all dependencies are compiled with known ids
+            todo!("foreign item");
+            /*todo!("foreign item");
+            if !self.item.path.can_lookup() {
+                panic!("debug item")
+            } else {
+            }*/
+            //writer.write_byte(1);
+            //println!("{:?} - {:?}",self.item.crate_id,self.item.path);
         }
 
         self.subs.persist_write(writer);

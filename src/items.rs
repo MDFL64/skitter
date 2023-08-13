@@ -226,13 +226,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             ItemKind::Adt { info } => {
                 writer.write_byte('a' as u8);
-                // TODO just parse normally? the new scheme should parse all items
-                // after types
-
-                // adt info must be filled after parsing types
-                /*writer.start_block();
                 info.get().unwrap().persist_write(writer);
-                writer.end_block();*/
             }
             ItemKind::Trait { .. } => {
                 writer.write_byte('t' as u8);
@@ -285,10 +279,8 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 kind
             }
             'a' => {
-                panic!();
-                //let adt_info_block = reader.read_block();
-                //let kind = ItemKind::new_adt();
-                //(kind, Some(adt_info_block))
+                let info = AdtInfo::persist_read(reader);
+                ItemKind::Adt { info: info.into() }
             }
             't' => {
                 let kind = ItemKind::new_trait();
@@ -434,12 +426,23 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(reader);
-        panic!("fixme");
-        //let discriminator_ty = <Option<Type<'vm>>>::persist_read(reader);
-        /*AdtInfo{
+
+        let kind = match reader.read_byte() {
+            0 => AdtKind::Struct,
+            1 => {
+                let ty = Persist::persist_read(reader);
+                AdtKind::EnumWithDiscriminant(ty)
+            }
+            2 => {
+                AdtKind::EnumNonZero
+            }
+            _ => panic!()
+        };
+        
+        AdtInfo{
             variant_fields,
-            discriminator_ty
-        }*/
+            kind
+        }
     }
 }
 
