@@ -1,9 +1,11 @@
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
+    process::Command, ffi::{OsString, OsStr},
+    error::Error
 };
 
-pub fn test(dir_name: &Path, global_args: &[&str]) -> ! {
+pub fn test(dir_name: &Path, global_args: &[&OsStr]) -> ! {
     use colored::Colorize;
 
     let mut test_files = Vec::new();
@@ -55,13 +57,13 @@ pub fn test(dir_name: &Path, global_args: &[&str]) -> ! {
 #[derive(Ord, Eq, PartialEq, PartialOrd)]
 struct TestInfo {
     file: PathBuf,
-    args: Vec<String>,
+    args: Vec<OsString>,
 }
 
 fn gather_tests(dir_name: &Path, files: &mut Vec<TestInfo>) {
     let dir_path = Path::new(dir_name);
 
-    let args: Vec<String> = if let Result::Ok(data) = std::fs::read(dir_path.join("_args")) {
+    let args: Vec<OsString> = if let Result::Ok(data) = std::fs::read(dir_path.join("_args")) {
         let arg_data = std::str::from_utf8(&data).expect("bad args");
         arg_data
             .split(' ')
@@ -70,7 +72,7 @@ fn gather_tests(dir_name: &Path, files: &mut Vec<TestInfo>) {
                 if a.len() == 0 {
                     None
                 } else {
-                    Some(a.to_owned())
+                    Some(OsString::from(a))
                 }
             })
             .collect()
@@ -117,9 +119,8 @@ const ERROR_CHARS: usize = 80;
 fn run_test(
     test_info: &TestInfo,
     bin_name: &Path,
-    global_args: &[&str],
+    global_args: &[&OsStr],
 ) -> Result<TestResult, String> {
-    use std::process::Command;
 
     // Rust compile
     let t = Instant::now();
@@ -166,27 +167,26 @@ fn run_test(
     let time_rustc_exec = t.elapsed();
 
     // Skitter interpreter
-    let t = Instant::now();
-    let skitter_out = {
+    let (skitter_out,time_skitter) = {
         let fail = || Err(String::from("skitter failed"));
 
         let program = std::env::current_exe().expect("failed to get skitter path");
 
-        let mut cmd = Command::new(program);
-        cmd.arg(&test_info.file);
+        let mut args = Vec::new();
+        args.push(test_info.file.as_os_str());
 
         for arg in global_args {
-            cmd.arg(arg);
+            args.push(arg);
         }
 
         for arg in test_info.args.iter() {
-            cmd.arg(arg);
+            args.push(arg);
         }
 
-        let cmd_res = cmd.output();
+        let cmd_res = time_command(&program,&args);
 
         if let Ok(cmd_res) = cmd_res {
-            if !cmd_res.status.success() {
+            if !cmd_res.success {
                 let skitter_err =
                     std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
                 let first_line = skitter_err.lines().nth(0).unwrap_or_else(|| "");
@@ -199,13 +199,12 @@ fn run_test(
 
                 return Err(format!("skitter failed ( {} )", first_line));
             } else {
-                cmd_res.stdout
+                (cmd_res.stdout,cmd_res.time)
             }
         } else {
             return fail();
         }
     };
-    let time_skitter = t.elapsed();
 
     if rustc_out != skitter_out {
         Err("output mismatch".into())
@@ -218,5 +217,39 @@ fn run_test(
             time_skitter,
             fraction: time_skitter.as_secs_f64() / time_rustc.as_secs_f64(),
         })
+    }
+}
+
+struct TimeResult {
+    success: bool,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    time: Duration
+}
+
+fn time_command(cmd_name: &Path, args: &[&OsStr]) -> Result<TimeResult,Box<dyn Error>> {
+
+    let mut cmd = Command::new(cmd_name);
+    cmd.args(args);
+
+    let t = std::time::Instant::now();
+    let output = cmd.output()?;
+    let time = t.elapsed();
+
+    let success = output.status.success();
+
+    Ok(TimeResult{
+        success,
+        stdout: output.stdout,
+        stderr: output.stderr,
+        time
+    })
+}
+
+pub fn test_timer_overhead() {
+    for _ in 0..10 {
+        let program = std::env::current_exe().expect("failed to get skitter path");
+        let time = time_command(&program,&[]).unwrap().time;
+        println!("-> {:?}",time);
     }
 }

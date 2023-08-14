@@ -13,7 +13,7 @@ use crate::{
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
     types::Type,
-    vm::VM,
+    vm::VM, profiler::profile,
 };
 
 pub struct CacheProvider<'vm> {

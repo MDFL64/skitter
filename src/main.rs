@@ -1,5 +1,6 @@
 #![feature(rustc_private)]
 #![feature(drain_filter)]
+#![feature(lazy_cell)]
 
 extern crate rustc_abi;
 extern crate rustc_ast;
@@ -35,10 +36,12 @@ mod persist_header;
 mod rustc_worker;
 mod test;
 mod types;
+mod profiler;
 
-use std::{path::PathBuf, process};
+use std::{path::PathBuf, process, ffi::OsStr};
 
 use clap::Parser;
+use profiler::profile;
 use types::SubList;
 use vm::VM;
 
@@ -58,23 +61,30 @@ fn main() {
 
     let args = cli::CliArgs::parse();
 
-    if args.repeat {
-        loop {
+    profiler::profile("top", ||{
+        if args.repeat {
+            loop {
+                run(&args);
+            }
+        } else {
             run(&args);
         }
-    } else {
-        run(&args);
+    });
+
+    if args.profile {
+        profiler::profile_log();
     }
 }
 
 fn run(args: &cli::CliArgs) {
     if args.test {
+        test::test_timer_overhead();
         let mut global_args = Vec::new();
         if args.save {
-            global_args.push("--save");
+            global_args.push(OsStr::new("--save"));
         }
         if args.load {
-            global_args.push("--load");
+            global_args.push(OsStr::new("--load"));
         }
         test::test(&args.file_name, &global_args);
     }
