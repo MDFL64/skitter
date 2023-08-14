@@ -1,7 +1,6 @@
 use std::{
     error::Error,
     ffi::OsStr,
-    os::unix::prelude::OsStrExt,
     path::{Path, PathBuf},
 };
 
@@ -126,7 +125,7 @@ impl<'vm> Persist<'vm> for PersistCrateHeader {
 
 impl<'vm> Persist<'vm> for FileVersionEntry {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let path: PathBuf = Path::new(OsStr::from_bytes(reader.read_byte_slice())).to_owned(); //reader.read_byte_slice().into();
+        let path = Persist::persist_read(reader);
         let size = Persist::persist_read(reader);
         let time = Persist::persist_read(reader);
 
@@ -134,8 +133,7 @@ impl<'vm> Persist<'vm> for FileVersionEntry {
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        let path_bytes = self.path.as_os_str().as_bytes();
-        writer.write_byte_slice(path_bytes);
+        self.path.persist_write(writer);
 
         self.size.persist_write(writer);
         self.time.persist_write(writer);
@@ -148,7 +146,7 @@ impl<'vm> Persist<'vm> for FileVersionEntry {
 pub fn cache_file_path(crate_name: &str, root_path: &Path) -> PathBuf {
     let mut hash = md5::Context::new();
 
-    hash.consume(root_path.as_os_str().as_bytes());
+    hash.consume(root_path.to_string_lossy().as_bytes());
 
     let hash = hash.compute();
     let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*hash);

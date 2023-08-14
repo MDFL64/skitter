@@ -32,4 +32,8 @@ pub struct CliArgs {
     /// Load IR from a cache file instead of compiling from source
     #[clap(long)]
     pub load: bool,
+
+    /// Continue the same action in a loop, forever, or until an error is encountered.
+    #[clap(long)]
+    pub repeat: bool,
 }

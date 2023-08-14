@@ -136,6 +136,9 @@ fn run_test(
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
+                if let Ok(output) = std::str::from_utf8(&cmd_res.stderr) {
+                    println!("{}",output);
+                }
                 return fail();
             }
         } else {

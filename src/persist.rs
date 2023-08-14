@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{Arc, OnceLock},
+    path::PathBuf
 };
 
 use crate::{
@@ -237,6 +238,7 @@ macro_rules! persist_sint {
 persist_uint!(u128);
 persist_uint!(u64);
 persist_uint!(u32);
+persist_uint!(u16);
 persist_uint!(usize);
 
 persist_sint!(i128, u128);
@@ -258,6 +260,43 @@ impl<'vm> Persist<'vm> for String {
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         reader.read_str().to_owned()
+    }
+}
+
+#[cfg(windows)]
+impl<'vm> Persist<'vm> for PathBuf {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        use std::os::windows::ffi::OsStrExt;
+
+        let code_points: Vec<_> = self.as_os_str().encode_wide().collect();
+        code_points.persist_write(writer);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        let code_points = Vec::<u16>::persist_read(reader);
+
+        OsString::from_wide(&code_points).into()
+    }
+}
+
+#[cfg(unix)]
+impl<'vm> Persist<'vm> for PathBuf {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        use std::os::unix::ffi::OsStrExt;
+
+        writer.write_byte_slice(self.as_os_str().as_bytes());
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let bytes = reader.read_byte_slice().to_owned();
+
+        OsString::from_vec(bytes).into()
     }
 }
 

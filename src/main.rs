@@ -58,6 +58,16 @@ fn main() {
 
     let args = cli::CliArgs::parse();
 
+    if args.repeat {
+        loop {
+            run(&args);
+        }
+    } else {
+        run(&args);
+    }
+}
+
+fn run(args: &cli::CliArgs) {
     if args.test {
         let mut global_args = Vec::new();
         if args.save {
@@ -110,7 +120,7 @@ fn main() {
             .expect("cache load failed")
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
-            source_root: args.file_name,
+            source_root: args.file_name.clone(),
             extern_crates,
             is_core: false,
             save_file: args.save,
