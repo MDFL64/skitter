@@ -1,7 +1,7 @@
 use crate::{
     items::FunctionSig,
     persist::{Persist, PersistReader, PersistWriter},
-    types::{ItemWithSubs, Mutability, Type},
+    types::{ItemWithSubs, Mutability, Type, ArraySize},
 };
 
 #[derive(Default)]
@@ -175,6 +175,8 @@ pub enum ExprKind<'vm> {
         fields: Vec<(u32, ExprId)>,
     },
     Array(Vec<ExprId>),
+    /// Check the type to determine the count.
+    ArrayRepeat(ExprId,ArraySize),
 
     NamedConst(ItemWithSubs<'vm>),
     //Function(ItemWithSubs<'vm>),

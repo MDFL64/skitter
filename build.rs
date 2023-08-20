@@ -397,6 +397,13 @@ fn write_exec_match() {
         let res = stack.add(arg.index()) as usize + offset;
         write_stack(stack, *out, res);
     }
+    Instr::ArrayRepeat{ base, size, count } => {
+        let base_ptr = stack.add(base.index());
+        for i in 1..*count as usize {
+            let offset_ptr = base_ptr.add(*size as usize * i);
+            std::ptr::copy(base_ptr,offset_ptr,*size as _);
+        }
+    }
     Instr::PointerOffset3(arg_out,arg_2,offset_n) => {
         let offset_1: usize = read_stack(stack, *arg_out);
         let offset_2: usize = read_stack(stack, *arg_2);

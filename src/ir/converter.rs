@@ -339,6 +339,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let args = args.iter().map(|a| self.expr(a)).collect();
                 ExprKind::Array(args)
             }
+            hir::ExprKind::Repeat(arg,_) => {
+                let arg = self.expr(arg);
+                let TypeKind::Array(_,size) = ty.kind() else {
+                    panic!("bad type for repeated array")
+                };
+                ExprKind::ArrayRepeat(arg,size.clone())
+            }
             hir::ExprKind::Index(lhs, index) => {
                 let lhs = self.expr(lhs);
                 let index = self.expr(index);
@@ -780,7 +787,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         PatternKind::Hole
                     }
                 } else {
-                    panic!("path pattern = {:?}", path);
+                    println!("WARNING path pattern = {:?}", path);
+                    PatternKind::Error
                 }
             }
             hir::PatKind::Ref(sub_pattern, _) => {

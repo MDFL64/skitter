@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::ffi::OsString;
 
 use clap::Parser;
 
@@ -7,7 +7,7 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct CliArgs {
     /// The rust file to run.
-    pub file_name: PathBuf,
+    pub file_name: OsString,
 
     /// Used to run tests. Pass a directory as file_name.
     #[clap(long)]

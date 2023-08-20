@@ -286,6 +286,8 @@ pub enum Instr<'vm> {
     MovPS8N(Slot, Slot, u16, u16),
     MovPS16N(Slot, Slot, u16, u16),
 
+    ArrayRepeat{base: Slot, size: u32, count: u32},
+
     SlotAddr(Slot, Slot),
 
     PointerOffset3(Slot, Slot, u32),
@@ -581,6 +583,10 @@ impl<'vm> Instr<'vm> {
             | Instr::MovPS4N(x, _, _, _)
             | Instr::MovPS8N(x, _, _, _)
             | Instr::MovPS16N(x, _, _, _) => Some(x),
+
+            Instr::ArrayRepeat{ base, size, count } => {
+                Some(base)
+            }
 
             Instr::SlotAddr(x, _) => Some(x),
             Instr::SlotAddrOffset { out, .. } => Some(out),

@@ -7,7 +7,7 @@ use crate::ir::{
     PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{Mutability, SubList, Type, TypeKind};
+use crate::types::{Mutability, SubList, Type, TypeKind, ArraySize};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -722,6 +722,24 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let field_slot = dst_slot.offset_by(i as u32 * elem_size);
                     self.lower_expr(*field, Some(field_slot));
                 }
+
+                dst_slot
+            }
+            ExprKind::ArrayRepeat(arg,size) => {
+                // TODO could const eval the whole thing in many cases, but it may be best to
+                // think about that if/when doing more generalized const eval
+                let count = match size {
+                    ArraySize::Static(n) => *n,
+                    ArraySize::ConstParam(_) => panic!("todo const param array size")
+                };
+
+                let elem_size = self.expr_ty(*arg).layout().assert_size();
+
+                let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                self.lower_expr(*arg, Some(dst_slot));
+
+                self.out_bc.push(Instr::ArrayRepeat{ base: dst_slot, size: elem_size, count });
 
                 dst_slot
             }

@@ -38,7 +38,7 @@ mod test;
 mod types;
 mod profiler;
 
-use std::{path::PathBuf, process, ffi::OsStr};
+use std::{path::{Path, PathBuf}, process, ffi::{OsStr, OsString}, cell::LazyCell, os::unix::prelude::OsStrExt};
 
 use clap::Parser;
 use profiler::profile;
@@ -77,6 +77,8 @@ fn main() {
 }
 
 fn run(args: &cli::CliArgs) {
+    let file_name = Path::new(&args.file_name);
+
     if args.test {
         test::test_timer_overhead();
         let mut global_args = Vec::new();
@@ -86,7 +88,7 @@ fn run(args: &cli::CliArgs) {
         if args.load {
             global_args.push(OsStr::new("--load"));
         }
-        test::test(&args.file_name, &global_args);
+        test::test(file_name, &global_args);
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.core, args.verbose)));
@@ -95,7 +97,7 @@ fn run(args: &cli::CliArgs) {
 
     let mut extern_crates = Vec::new();
 
-    if args.core {
+    /*if args.core {
         let sysroot = get_sysroot();
         let core_root = PathBuf::from(format!(
             "{}/lib/rustlib/src/rust/library/core/src/lib.rs",
@@ -108,7 +110,6 @@ fn run(args: &cli::CliArgs) {
         let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
             source_root: core_root,
             extern_crates: vec![],
-            is_core: true,
             save_file: false,
         });
 
@@ -118,21 +119,22 @@ fn run(args: &cli::CliArgs) {
             id: core_crate,
             name: "core".to_owned(),
         });
-    }
+    }*/
+
+    let source = CratePath::new(&args.file_name);
 
     let main_crate = if args.load {
-        let crate_name = args.file_name.file_stem().unwrap().to_str().unwrap();
+        let crate_name = file_name.file_stem().unwrap().to_str().unwrap();
 
-        let source_path = args.file_name.canonicalize().unwrap();
+        let source_path = file_name.canonicalize().unwrap();
         let cache_path = cache_file_path(crate_name, &source_path);
 
         vm.add_cache_provider(&source_path, &cache_path)
             .expect("cache load failed")
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
-            source_root: args.file_name.clone(),
+            source,
             extern_crates,
-            is_core: false,
             save_file: args.save,
         })
     };
@@ -159,12 +161,53 @@ fn set_panic_handler() {
     }));
 }
 
-// currently used only to locate core lib sources
-fn get_sysroot() -> String {
+const SYSROOT: LazyCell<PathBuf> = LazyCell::new(|| {
     let out = process::Command::new("rustc")
         .arg("--print=sysroot")
         .current_dir(".")
         .output()
         .unwrap();
-    std::str::from_utf8(&out.stdout).unwrap().trim().to_owned()
+
+    std::str::from_utf8(&out.stdout).expect("bad sysroot").trim().into()
+});
+
+#[derive(Debug)]
+pub struct CratePath {
+    pub name: String,
+    pub path: PathBuf,
+    is_internal: bool
+}
+
+impl CratePath {
+    pub fn new(path: &OsStr) -> Self {
+        if let Some(path) = path.to_str() {
+            if path.starts_with('@') {
+                let name = path[1..].to_owned();
+
+                let mut path = SYSROOT.clone();
+                path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",name));
+
+                return CratePath{
+                    name,
+                    path,
+                    is_internal: true,
+                }
+            }
+        }
+
+        let path = Path::new(path).canonicalize().expect("invalid path (1)");
+        let name = path.file_stem().expect("invalid path (2)")
+            .to_str().expect("invalid path (3)")
+            .to_owned();
+
+        CratePath{
+            name,
+            path,
+            is_internal: false
+        }
+    }
+
+    pub fn is_core(&self) -> bool {
+        self.is_internal && self.name == "core"
+    }
 }

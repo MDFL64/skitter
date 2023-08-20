@@ -27,6 +27,7 @@ use crate::{
     persist_header::{persist_header_write, PersistCrateHeader},
     types::{IntSign, IntWidth, Type, TypeKind},
     vm::VM,
+    CratePath
 };
 
 /////////////////////////
@@ -82,9 +83,8 @@ struct ImplItem<'tcx, 'vm> {
 }
 
 pub struct RustCWorkerConfig {
-    pub source_root: PathBuf,
+    pub source: CratePath,
     pub extern_crates: Vec<ExternCrate>,
-    pub is_core: bool,
     pub save_file: bool,
 }
 
@@ -102,15 +102,9 @@ impl<'vm> RustCWorker<'vm> {
             config::SwitchWithOptPath::Disabled
         };
 
-        let crate_name = if worker_config.is_core {
-            Some("core".to_owned())
-        } else {
-            None
-        };
-
         let config = rustc_interface::Config {
             opts: config::Options {
-                crate_name,
+                crate_name: Some(worker_config.source.name.clone()),
                 edition: rustc_span::edition::Edition::Edition2021,
                 unstable_features: rustc_feature::UnstableFeatures::Cheat,
                 cg: config::CodegenOptions {
@@ -123,7 +117,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(worker_config.source_root.clone()),
+            input: config::Input::File(worker_config.source.path.clone()),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -263,7 +257,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         vm: &'vm VM<'vm>,
         tcx: TyCtxt<'tcx>,
         this_crate: CrateId,
-        config: RustCWorkerConfig,
+        worker_config: RustCWorkerConfig,
     ) -> Self {
         let mut items = RustCItems::new(this_crate);
 
@@ -465,7 +459,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             vm,
             tcx,
             items: Arc::new(items),
-            extern_crates: config.extern_crates,
+            extern_crates: worker_config.extern_crates,
             extern_crate_id_cache: Default::default(),
         };
 
@@ -613,7 +607,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             ty.set_impl(items);
         }
 
-        if config.is_core {
+        if worker_config.source.is_core() {
             let lang_items = tcx.lang_items();
             {
                 let lang_trait = lang_items.sized_trait().unwrap();
@@ -652,7 +646,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             println!("n = {}", ctx.items.items.len());
         }
 
-        if config.save_file {
+        if worker_config.save_file {
             // force-generate all available IR
             for item in &ctx.items.items {
                 // HACK: skip builtins
