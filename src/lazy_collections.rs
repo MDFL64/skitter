@@ -23,7 +23,7 @@ pub trait LazyItem<'vm> {
 pub trait LazyKey<'vm>: LazyItem<'vm> {
     type Key;
 
-    fn key(input: &Self::Input) -> &Self::Key;
+    fn key(input: &Self::Input) -> Option<&Self::Key>;
 }
 
 /// An array which is lazily parsed
@@ -133,7 +133,7 @@ impl<'vm, T> LazyTable<'vm, T>
 where
     T: LazyItem<'vm> + LazyKey<'vm>,
     T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
-    T::Key: Hash + PartialEq + std::fmt::Debug,
+    T::Key: Hash + Eq + std::fmt::Debug,
 {
     pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>)
     where
@@ -143,7 +143,9 @@ where
 
         let items = items.enumerate().map(|(i, item)| {
             let key = <T as LazyKey>::key(item);
-            keys.push((key, i));
+            if let Some(key) = key {
+                keys.push((key, i));
+            }
 
             item
         });
@@ -252,7 +254,7 @@ where
         let item = self.array.get(final_index);
 
         let item_key = <T as LazyKey>::key(item.input());
-        assert!(item_key == key);
+        assert!(item_key == Some(key));
 
         item
     }

@@ -1,6 +1,7 @@
 use ahash::AHashSet;
 use colosseum::sync::Arena;
 
+use crate::CratePath;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::crate_provider::CrateProvider;
@@ -147,13 +148,12 @@ impl<'vm> VM<'vm> {
 
     pub fn add_cache_provider(
         &'vm self,
-        source_path: &Path,
-        cache_path: &Path,
+        crate_path: &CratePath,
     ) -> Result<CrateId, Box<dyn Error>> {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
 
-        let worker = Box::new(CacheProvider::new(source_path, cache_path, self, crate_id)?);
+        let worker = Box::new(CacheProvider::new(crate_path, self, crate_id)?);
 
         let worker_ref = self.arena_crates.alloc(worker);
         crates.push(worker_ref);

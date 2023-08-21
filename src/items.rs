@@ -168,8 +168,12 @@ impl<'vm> LazyItem<'vm> for &'vm Item<'vm> {
 impl<'vm> LazyKey<'vm> for &'vm Item<'vm> {
     type Key = ItemPath<'vm>;
 
-    fn key(input: &Self::Input) -> &Self::Key {
-        &input.path
+    fn key(input: &Self::Input) -> Option<&Self::Key> {
+        if input.path.0 == NameSpace::DebugOnly {
+            None
+        } else {
+            Some(&input.path)
+        }
     }
 }
 

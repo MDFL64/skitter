@@ -34,6 +34,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         types: &'tcx TypeckResults<'tcx>,
         is_constant: bool,
     ) -> IRFunction<'vm> {
+        //println!("func = {:?}",func_id);
         assert!(body.generator_kind.is_none());
 
         let mut converter = Self {
@@ -287,16 +288,20 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             }
             hir::ExprKind::Break(dest, value) => {
                 let target = dest.target_id.unwrap();
-                let (_, loop_id) = self
+                let loop_id = self
                     .loops
                     .iter()
                     .find(|(h, _)| h == &target)
                     .copied()
-                    .unwrap();
+                    .map(|(_,id)| id);
 
-                let value = value.map(|e| self.expr(e));
-
-                ExprKind::Break { loop_id, value }
+                if let Some(loop_id) = loop_id {
+                    let value = value.map(|e| self.expr(e));
+                    ExprKind::Break { loop_id, value }
+                } else {
+                    // TODO -- most likely caused by breaks bound to blocks instead of loops
+                    ExprKind::Error
+                }
             }
             hir::ExprKind::Continue(dest) => {
                 let target = dest.target_id.unwrap();
@@ -319,21 +324,23 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 ExprKind::Tuple(args)
             }
             hir::ExprKind::Struct(path, fields, rest) => {
-                assert!(rest.is_none());
-
-                let res = self.types.qpath_res(&path, expr.hir_id);
-                let variant = Self::def_variant(&res, rs_ty);
-
-                let fields = fields
-                    .iter()
-                    .map(|field| {
-                        let id = self.types.field_index(field.hir_id).as_u32();
-                        let expr = self.expr(field.expr);
-                        (id, expr)
-                    })
-                    .collect();
-
-                ExprKind::Adt { variant, fields }
+                if rest.is_some() {
+                    ExprKind::Error
+                } else {
+                    let res = self.types.qpath_res(&path, expr.hir_id);
+                    let variant = Self::def_variant(&res, rs_ty);
+    
+                    let fields = fields
+                        .iter()
+                        .map(|field| {
+                            let id = self.types.field_index(field.hir_id).as_u32();
+                            let expr = self.expr(field.expr);
+                            (id, expr)
+                        })
+                        .collect();
+    
+                    ExprKind::Adt { variant, fields }
+                }
             }
             hir::ExprKind::Array(args) => {
                 let args = args.iter().map(|a| self.expr(a)).collect();
@@ -380,7 +387,10 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                     self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)
                             }
-                            _ => panic!("def = {:?}", def_kind),
+                            _ => {
+                                println!("TODO def = {:?}", def_kind);
+                                ExprKind::Error
+                            }
                         }
                     }
                     hir::def::Res::SelfCtor(_) => {
@@ -409,6 +419,12 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 // TODO TODO TODO
                 // this may pose an issue when implementing destructors / drop
                 return self.expr(e);
+            }
+            hir::ExprKind::Closure(..) |
+            hir::ExprKind::ConstBlock(..) |
+            hir::ExprKind::InlineAsm(..) => {
+                // TODO
+                ExprKind::Error
             }
             _ => panic!("todo expr kind {:?}", expr.kind),
         };
@@ -650,7 +666,10 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 match lit {
                     ExprKind::LiteralValue(val) => PatternKind::LiteralValue(val),
-                    _ => panic!("pat lit {:?}", lit),
+                    _ => {
+                        println!("pat lit {:?}",lit);
+                        PatternKind::Error
+                    }
                 }
             }
             hir::PatKind::Tuple(children, gap_pos) => {
@@ -800,6 +819,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 PatternKind::Or { options }
             }
             hir::PatKind::Wild => PatternKind::Hole,
+            hir::PatKind::Slice(..) |
+            hir::PatKind::Range(..) => {
+                // TODO
+                PatternKind::Error
+            }
             _ => panic!("pat {:?}", pat.kind),
         };
 

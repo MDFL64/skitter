@@ -117,19 +117,17 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 children.persist_write(writer);
             }
 
-            TypeKind::Array(child, ArraySize::Static(n)) => {
+            TypeKind::Array(child, size) => {
                 writer.write_byte(25);
                 child.persist_write(writer);
-                n.persist_write(writer);
-            }
-            TypeKind::Array(child, ArraySize::ConstParam(n)) => {
-                writer.write_byte(26);
-                child.persist_write(writer);
-                n.persist_write(writer);
+                size.persist_write(writer);
             }
             TypeKind::Slice(child) => {
-                writer.write_byte(27);
+                writer.write_byte(26);
                 child.persist_write(writer);
+            }
+            TypeKind::StringSlice => {
+                writer.write_byte(27);
             }
 
             TypeKind::FunctionDef(item_with_subs) => {
@@ -148,6 +146,15 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             TypeKind::Param(n) => {
                 writer.write_byte(40);
                 n.persist_write(writer);
+            }
+
+            TypeKind::FunctionPointer |
+            TypeKind::Closure |
+            TypeKind::Foreign |
+            TypeKind::Dynamic |
+            TypeKind::Opaque => {
+                // TODO
+                writer.write_byte(255);
             }
             /*
             TypeKind::Ptr(child, Mutability::Const) => {
@@ -257,13 +264,8 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             }
             25 => {
                 let child = Persist::persist_read(reader);
-                let n = Persist::persist_read(reader);
-                TypeKind::Array(child, ArraySize::Static(n))
-            }
-            26 => {
-                let child = Persist::persist_read(reader);
-                let n = Persist::persist_read(reader);
-                TypeKind::Array(child, ArraySize::ConstParam(n))
+                let size = Persist::persist_read(reader);
+                TypeKind::Array(child, size)
             }
 
             30 => {
@@ -357,5 +359,30 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
         let subs = Persist::persist_read(reader);
 
         ItemWithSubs { item, subs }
+    }
+}
+
+impl<'vm> Persist<'vm> for ArraySize {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let b = reader.read_byte();
+        let n = u32::persist_read(reader);
+        match b {
+            0 => ArraySize::Static(n),
+            1 => ArraySize::ConstParam(n),
+            _ => panic!()
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        match self {
+            ArraySize::Static(n) => {
+                writer.write_byte(0);
+                (*n).persist_write(writer);
+            }
+            ArraySize::ConstParam(n) => {
+                writer.write_byte(1);
+                (*n).persist_write(writer);
+            }
+        }
     }
 }

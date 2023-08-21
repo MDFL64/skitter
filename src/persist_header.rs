@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use base64::Engine;
 use rustc_middle::ty::TyCtxt;
 
 use crate::persist::{Persist, PersistReader, PersistWriter};
@@ -85,10 +84,6 @@ impl PersistCrateHeader {
         })
     }
 
-    pub fn cache_file_path(&self) -> PathBuf {
-        cache_file_path(&self.crate_name, &self.files[0].path)
-    }
-
     pub fn validate(&self) -> Result<(), Box<dyn Error>> {
         for file in &self.files {
             let meta = std::fs::metadata(&file.path)?;
@@ -138,18 +133,4 @@ impl<'vm> Persist<'vm> for FileVersionEntry {
         self.size.persist_write(writer);
         self.time.persist_write(writer);
     }
-}
-
-/// Computes the name used for the resulting cache file.
-/// Only uses the crate name and root source path.
-/// In the future it should use other build config.
-pub fn cache_file_path(crate_name: &str, root_path: &Path) -> PathBuf {
-    let mut hash = md5::Context::new();
-
-    hash.consume(root_path.to_string_lossy().as_bytes());
-
-    let hash = hash.compute();
-    let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*hash);
-
-    format!("./cache/{}-{}", crate_name, hash).into()
 }

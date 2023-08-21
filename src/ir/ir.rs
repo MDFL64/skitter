@@ -625,6 +625,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 block.persist_write(writer);
                 loop_id.0.persist_write(writer);
             }
+            ExprKind::ArrayRepeat(arg,size) => {
+                writer.write_byte(b'N');
+                arg.persist_write(writer);
+                size.persist_write(writer);
+            }
             ExprKind::Return(value) => {
                 writer.write_byte(b'R');
                 value.persist_write(writer);
@@ -709,6 +714,9 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 lhs.persist_write(writer);
                 index.persist_write(writer);
             }
+            ExprKind::Error => {
+                writer.write_byte(b'~');
+            }
             _ => panic!("todo write expr {:?}", self.kind),
         }
     }
@@ -777,6 +785,9 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
             }
             PatternKind::Hole => {
                 writer.write_byte(b'_');
+            }
+            PatternKind::Error => {
+                writer.write_byte(b'~');
             }
             _ => panic!("todo write pattern {:?}", self.kind),
         }
@@ -863,10 +874,27 @@ impl<'vm> Persist<'vm> for MatchArm {
 
 impl<'vm> Persist<'vm> for PointerCast {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        PointerCast::UnSize
+        let b = reader.read_byte();
+        match b {
+            0 => PointerCast::ReifyFnPointer,
+            1 => PointerCast::UnsafeFnPointer,
+            2 => PointerCast::ClosureFnPointer,
+            3 => PointerCast::MutToConstPointer,
+            4 => PointerCast::ArrayToPointer,
+            5 => PointerCast::UnSize,
+            _ => panic!()
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        assert!(*self == PointerCast::UnSize);
+        let b = match self {
+            PointerCast::ReifyFnPointer => 0,
+            PointerCast::UnsafeFnPointer => 1,
+            PointerCast::ClosureFnPointer => 2,
+            PointerCast::MutToConstPointer => 3,
+            PointerCast::ArrayToPointer => 4,
+            PointerCast::UnSize => 5,
+        };
+        writer.write_byte(b);
     }
 }

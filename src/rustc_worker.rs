@@ -83,7 +83,7 @@ struct ImplItem<'tcx, 'vm> {
 }
 
 pub struct RustCWorkerConfig {
-    pub source: CratePath,
+    pub crate_path: CratePath,
     pub extern_crates: Vec<ExternCrate>,
     pub save_file: bool,
 }
@@ -104,7 +104,7 @@ impl<'vm> RustCWorker<'vm> {
 
         let config = rustc_interface::Config {
             opts: config::Options {
-                crate_name: Some(worker_config.source.name.clone()),
+                crate_name: Some(worker_config.crate_path.name.clone()),
                 edition: rustc_span::edition::Edition::Edition2021,
                 unstable_features: rustc_feature::UnstableFeatures::Cheat,
                 cg: config::CodegenOptions {
@@ -117,7 +117,7 @@ impl<'vm> RustCWorker<'vm> {
                 },
                 ..config::Options::default()
             },
-            input: config::Input::File(worker_config.source.path.clone()),
+            input: config::Input::File(worker_config.crate_path.source_path()),
             crate_cfg: rustc_hash::FxHashSet::default(),
             crate_check_cfg: config::CheckCfg::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
@@ -607,7 +607,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             ty.set_impl(items);
         }
 
-        if worker_config.source.is_core() {
+        if worker_config.crate_path.is_core() {
             let lang_items = tcx.lang_items();
             {
                 let lang_trait = lang_items.sized_trait().unwrap();
@@ -661,24 +661,29 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 }
             }
 
-            let crate_header =
+            let mut crate_header =
                 PersistCrateHeader::from_rustc(ctx.tcx).expect("failed to build header");
+
             // TODO validate header by checking that none of the files were mutated after this executable started.
             // we could create two headers and compare them but, that would require knowing about all the source files
             // before rustc parses them
 
+            // do not include files in header for internal crates
+            if worker_config.crate_path.is_internal() {
+                crate_header.files.clear();
+            }
+
             let mut writer = PersistWriter::new(this_crate);
             persist_header_write(&mut writer);
             crate_header.persist_write(&mut writer);
-
-            let cache_path = crate_header.cache_file_path();
-
+            
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);
-
+            
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);
-
+            
+            let cache_path = worker_config.crate_path.cache_path();
             std::fs::write(cache_path, writer.flip()).expect("save failed");
         }
 

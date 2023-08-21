@@ -13,7 +13,7 @@ use crate::{
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
     types::Type,
-    vm::VM, profiler::profile,
+    vm::VM, profiler::profile, CratePath,
 };
 
 pub struct CacheProvider<'vm> {
@@ -22,12 +22,11 @@ pub struct CacheProvider<'vm> {
 
 impl<'vm> CacheProvider<'vm> {
     pub fn new(
-        source_path: &Path,
-        cache_path: &Path,
+        crate_path: &CratePath,
         vm: &'vm VM<'vm>,
         this_crate: CrateId,
     ) -> Result<Self, Box<dyn Error>> {
-        let bytes = std::fs::read(cache_path)?;
+        let bytes = std::fs::read(crate_path.cache_path())?;
         let bytes = vm.alloc_constant(bytes);
 
         let read_context = Arc::new(PersistReadContext {
@@ -43,7 +42,7 @@ impl<'vm> CacheProvider<'vm> {
         let crate_header = PersistCrateHeader::persist_read(&mut reader);
         crate_header.validate()?;
 
-        if crate_header.files[0].path != source_path {
+        if crate_header.files[0].path != crate_path.source_path() {
             return Err("cache file refers to incorrect source file".into());
         }
 

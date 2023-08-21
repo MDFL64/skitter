@@ -47,7 +47,6 @@ use vm::VM;
 
 use crate::{
     items::{ExternCrate, ItemPath},
-    persist_header::cache_file_path,
     rustc_worker::RustCWorkerConfig,
 };
 
@@ -121,19 +120,19 @@ fn run(args: &cli::CliArgs) {
         });
     }*/
 
-    let source = CratePath::new(&args.file_name);
+    let crate_path = CratePath::new(&args.file_name);
 
     let main_crate = if args.load {
-        let crate_name = file_name.file_stem().unwrap().to_str().unwrap();
+        /*let crate_name = file_name.file_stem().unwrap().to_str().unwrap();
 
         let source_path = file_name.canonicalize().unwrap();
-        let cache_path = cache_file_path(crate_name, &source_path);
+        let cache_path = cache_file_path(crate_name, &source_path);*/
 
-        vm.add_cache_provider(&source_path, &cache_path)
+        vm.add_cache_provider(&crate_path)
             .expect("cache load failed")
     } else {
         vm.add_rustc_provider(RustCWorkerConfig {
-            source,
+            crate_path,
             extern_crates,
             save_file: args.save,
         })
@@ -174,8 +173,7 @@ const SYSROOT: LazyCell<PathBuf> = LazyCell::new(|| {
 #[derive(Debug)]
 pub struct CratePath {
     pub name: String,
-    pub path: PathBuf,
-    is_internal: bool
+    path: Option<PathBuf>,
 }
 
 impl CratePath {
@@ -184,13 +182,12 @@ impl CratePath {
             if path.starts_with('@') {
                 let name = path[1..].to_owned();
 
-                let mut path = SYSROOT.clone();
-                path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",name));
+                //let mut path = SYSROOT.clone();
+                //path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",name));
 
                 return CratePath{
                     name,
-                    path,
-                    is_internal: true,
+                    path: None
                 }
             }
         }
@@ -202,12 +199,41 @@ impl CratePath {
 
         CratePath{
             name,
-            path,
-            is_internal: false
+            path: Some(path)
         }
     }
 
+    pub fn source_path(&self) -> PathBuf {
+        if let Some(path) = &self.path {
+            path.clone()
+        } else {
+            let mut path = SYSROOT.clone();
+            path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",self.name));
+            path
+        }
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.path.is_none()
+    }
+
     pub fn is_core(&self) -> bool {
-        self.is_internal && self.name == "core"
+        self.is_internal() && self.name == "core"
+    }
+
+    pub fn cache_path(&self) -> PathBuf {
+        use base64::Engine;
+
+        let mut hash = md5::Context::new();
+
+        // do not hash the the source path for internal crates
+        if let Some(path) = &self.path {
+            hash.consume(path.to_string_lossy().as_bytes());
+        }
+    
+        let hash = hash.compute();
+        let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*hash);
+    
+        format!("./cache/{}-{}", self.name, hash).into()
     }
 }
