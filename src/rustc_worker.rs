@@ -501,6 +501,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             Default::default();
 
         // fill impls
+        let mut impl_ids = Vec::new();
+
         for impl_item in impl_items {
             match impl_item.subject {
                 ImplSubject::Inherent(ty) => {
@@ -590,7 +592,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                     let for_types = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
-                    trait_item.add_trait_impl(TraitImpl {
+                    let index = trait_item.add_trait_impl(TraitImpl {
                         crate_id: this_crate,
                         for_types,
                         assoc_values: impl_item.assoc_values.into_iter().collect(),
@@ -598,6 +600,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         bounds,
                         generics,
                     });
+
+                    if worker_config.save_file {
+                        impl_ids.push((trait_item.crate_id,trait_item.item_id,index));
+                    }
                 }
             }
         }
@@ -683,6 +689,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);
             
+            println!("impl count = {}",impl_ids.len());
+
             let cache_path = worker_config.crate_path.cache_path();
             std::fs::write(cache_path, writer.flip()).expect("save failed");
         }

@@ -124,6 +124,7 @@ pub struct LazyTable<'vm, T> {
 // SERIALIZED FORM
 // ---------------
 // LazyArray: keys and values
+// int: table size (may be smaller than array)
 // [i32;count]: table 1
 // [i32;count]: table 2
 
@@ -153,6 +154,7 @@ where
         LazyArray::<T>::write(out_writer, items);
 
         let table_size = keys.len();
+        table_size.persist_write(out_writer);
 
         // determine which bucket each entry will fall in
         let mut buckets = vec![vec!(); table_size];
@@ -175,6 +177,7 @@ where
             if bucket_keys.len() == 1 {
                 let item_index = bucket_keys[0].1;
                 table_1[bucket_i] = item_index as i32;
+                println!("> {:?} t1[{}]={}",bucket_keys[0].0,bucket_i,item_index);
             } else if bucket_keys.len() > 1 {
                 let mut seed = -1;
                 loop {
@@ -186,16 +189,17 @@ where
                         let hash_index = hasher.finish() as usize % table_size;
 
                         if table_2[hash_index] != TABLE_SLOT_INVALID
-                            || new_indices.iter().any(|(x, _)| *x == hash_index)
+                            || new_indices.iter().any(|(x, _, _)| *x == hash_index)
                         {
                             break;
                         }
-                        new_indices.push((hash_index, item_index));
+                        new_indices.push((hash_index, item_index, key));
                     }
 
                     if new_indices.len() == bucket_keys.len() {
-                        for (hash_index, item_index) in new_indices {
+                        for (hash_index, item_index, key) in new_indices {
                             table_2[hash_index] = *item_index as i32;
+                            println!("> {:?} t1[{}]={} t2[{}]={}",key,bucket_i,seed,hash_index,item_index);
                         }
                         table_1[bucket_i] = seed;
                         break;
@@ -220,8 +224,10 @@ where
     pub fn read(reader: &mut PersistReader<'vm>) -> Self {
         let array = LazyArray::read(reader);
 
-        let table_1 = unsafe { reader.read_raw_array(array.len()) };
-        let table_2 = unsafe { reader.read_raw_array(array.len()) };
+        let table_len = usize::persist_read(reader);
+
+        let table_1 = unsafe { reader.read_raw_array(table_len) };
+        let table_2 = unsafe { reader.read_raw_array(table_len) };
 
         Self {
             array,
@@ -236,6 +242,7 @@ where
             key.hash(&mut hasher);
             self.table_1[hasher.finish() as usize % self.table_1.len()]
         };
+        //println!("get {:?} {}",key,t1_index);
 
         let final_index = if t1_index >= 0 {
             // fast path

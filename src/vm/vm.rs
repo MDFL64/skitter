@@ -18,6 +18,7 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
+use std::cell::OnceCell;
 use std::error::Error;
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -33,7 +34,7 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
-    pub core_crate: Option<CrateId>,
+    pub core_crate: OnceLock<CrateId>,
     common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
 
@@ -93,15 +94,9 @@ impl<'vm> VMThread<'vm> {
 }
 
 impl<'vm> VM<'vm> {
-    pub fn new(has_core: bool, is_verbose: bool) -> Self {
-        let core_crate = if has_core {
-            Some(CrateId::new(0))
-        } else {
-            None
-        };
-
+    pub fn new(is_verbose: bool) -> Self {
         Self {
-            core_crate,
+            core_crate: OnceLock::new(),
             types: TypeContext::new(),
             is_verbose,
             crates: Default::default(),

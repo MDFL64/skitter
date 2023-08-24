@@ -10,7 +10,7 @@ use crate::{
     vm::{
         instr::{Instr, Slot},
         VM,
-    },
+    }, persist::Persist,
 };
 
 #[derive(Copy, Clone)]
@@ -21,6 +21,33 @@ pub enum BuiltinTrait {
     FnOnce,
     FnMut,
     Fn,
+}
+
+impl<'vm> Persist<'vm> for BuiltinTrait {
+    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
+        let b = match self {
+            Self::Sized => 0,
+            Self::Tuple => 1,
+            Self::DiscriminantKind => 2,
+            Self::FnOnce => 3,
+            Self::FnMut => 4,
+            Self::Fn => 5,
+        };
+        writer.write_byte(b);
+    }
+
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let b = reader.read_byte();
+        match b {
+            0 => Self::Sized,
+            1 => Self::Tuple,
+            2 => Self::DiscriminantKind,
+            3 => Self::FnOnce,
+            4 => Self::FnMut,
+            5 => Self::Fn,
+            _ => panic!()
+        }
+    }
 }
 
 fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {

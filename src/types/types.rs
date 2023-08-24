@@ -288,7 +288,11 @@ impl<'vm> Type<'vm> {
     fn find_impl_crate(&self) -> CrateId {
         match self.kind() {
             // primitive types have impls in core
-            TypeKind::Int(..) => self.1.core_crate.unwrap(),
+            TypeKind::Int(..) => *self.1.core_crate.get().unwrap(),
+
+            TypeKind::Adt(item) => {
+                item.item.crate_id
+            }
             _ => panic!("find_impl_crate {:?}", self.kind()),
         }
     }

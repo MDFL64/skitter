@@ -142,78 +142,22 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(32);
                 item_with_subs.persist_write(writer);
             }
+            TypeKind::Foreign => {
+                writer.write_byte(33);
+            }
+            TypeKind::FunctionPointer => {
+                writer.write_byte(34);
+            }
 
             TypeKind::Param(n) => {
                 writer.write_byte(40);
                 n.persist_write(writer);
             }
 
-            TypeKind::FunctionPointer |
-            TypeKind::Closure |
-            TypeKind::Foreign |
-            TypeKind::Dynamic |
-            TypeKind::Opaque => {
-                // TODO
-                writer.write_byte(255);
-            }
-            /*
-            TypeKind::Ptr(child, Mutability::Const) => {
-                writer.write_byte(18);
-                child.persist_write(writer);
-            }
-            TypeKind::Ptr(child, Mutability::Mut) => {
-                writer.write_byte(19);
-                child.persist_write(writer);
-            }
-            TypeKind::Array(child, ArraySize::Static(n)) => {
-                writer.write_byte(20);
-                child.persist_write(writer);
-                n.persist_write(writer);
-            }
-            TypeKind::Array(child, ArraySize::ConstParam(n)) => {
-                writer.write_byte(21);
-                child.persist_write(writer);
-                // TODO
-            }
-            TypeKind::Slice(child) => {
-                writer.write_byte(22);
-                child.persist_write(writer);
-            }
-            TypeKind::StringSlice => {
-                writer.write_byte(23);
-            }
-            TypeKind::Tuple(children) => {
-                writer.write_byte(24);
-                children.persist_write(writer);
-            }
-            TypeKind::Adt(item_with_subs) => {
-                writer.write_byte(25);
-                item_with_subs.persist_write(writer);
-            }
-            TypeKind::FunctionDef(item_with_subs) => {
-                writer.write_byte(26);
-                item_with_subs.persist_write(writer);
-            }
-            TypeKind::AssociatedType(item_with_subs) => {
-                writer.write_byte(27);
-                item_with_subs.persist_write(writer);
-            }
-            TypeKind::Param(n) => {
-                writer.write_byte(28);
-                n.persist_write(writer);
-            }
-            TypeKind::Never => {
-                writer.write_byte(29);
-            }
-            TypeKind::Foreign => {
-                writer.write_byte(30);
-            }
-            TypeKind::Dynamic => {
-                writer.write_byte(31);
-            }
-            TypeKind::FunctionPointer => {
-                writer.write_byte(32);
-            }*/
+            TypeKind::Closure => writer.write_byte(252),
+            TypeKind::Dynamic => writer.write_byte(254),
+            TypeKind::Opaque => writer.write_byte(255),
+
             _ => panic!("write type {:?}", self),
         }
     }
@@ -267,6 +211,11 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let size = Persist::persist_read(reader);
                 TypeKind::Array(child, size)
             }
+            26 => {
+                let child = Persist::persist_read(reader);
+                TypeKind::Slice(child)
+            }
+            27 => TypeKind::StringSlice,
 
             30 => {
                 let item = Persist::persist_read(reader);
@@ -276,6 +225,12 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let item_with_subs = Persist::persist_read(reader);
                 TypeKind::Adt(item_with_subs)
             }
+            32 => {
+                let item_with_subs = Persist::persist_read(reader);
+                TypeKind::AssociatedType(item_with_subs)
+            }
+            33 => TypeKind::Foreign,
+            34 => TypeKind::FunctionPointer,
             40 => {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)

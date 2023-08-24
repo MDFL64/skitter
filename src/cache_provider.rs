@@ -42,8 +42,10 @@ impl<'vm> CacheProvider<'vm> {
         let crate_header = PersistCrateHeader::persist_read(&mut reader);
         crate_header.validate()?;
 
-        if crate_header.files[0].path != crate_path.source_path() {
-            return Err("cache file refers to incorrect source file".into());
+        if let Some(root_file) = crate_header.files.get(0) {
+            if root_file.path != crate_path.source_path() {
+                return Err("cache file refers to incorrect source file".into());
+            }
         }
 
         let items = LazyTable::read(&mut reader);

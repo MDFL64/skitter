@@ -90,7 +90,7 @@ fn run(args: &cli::CliArgs) {
         test::test(file_name, &global_args);
     }
 
-    let vm: &VM = Box::leak(Box::new(VM::new(args.core, args.verbose)));
+    let vm: &VM = Box::leak(Box::new(VM::new(args.verbose)));
     // HACK: this must be initialized ASAP so common types have correct persist IDs
     vm.common_types();
 
@@ -121,6 +121,21 @@ fn run(args: &cli::CliArgs) {
     }*/
 
     let crate_path = CratePath::new(&args.file_name);
+
+    if !crate_path.is_core() {
+        let core_path = CratePath::new(OsStr::new("@core"));
+
+        let core_id = vm.add_cache_provider(&core_path)
+            .expect("core load failed");
+
+        extern_crates.push(ExternCrate {
+            id: core_id,
+            name: "core".to_owned(),
+        });
+
+        vm.core_crate.set(core_id).unwrap();
+    }
+
 
     let main_crate = if args.load {
         /*let crate_name = file_name.file_stem().unwrap().to_str().unwrap();

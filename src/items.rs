@@ -232,9 +232,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('a' as u8);
                 info.get().unwrap().persist_write(writer);
             }
-            ItemKind::Trait { .. } => {
+            ItemKind::Trait { builtin, .. } => {
                 writer.write_byte('t' as u8);
-                // todo builtin ONLY, handle impls separately
+                builtin.get().copied().persist_write(writer);
             }
         }
     }
@@ -755,13 +755,15 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) {
+    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) ->  usize {
         let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let mut impl_list = impl_list.write().unwrap();
+        let index = impl_list.len();
         impl_list.push(info);
+        index
     }
 
     pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {

@@ -454,6 +454,14 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let n = Persist::persist_read(reader);
                 ExprKind::VarRef(n)
             }
+            'x' => {
+                let bytes = reader.read_byte_slice();
+                ExprKind::LiteralBytes(bytes)
+            }
+            'A' => {
+                let args = Persist::persist_read(reader);
+                ExprKind::Array(args)
+            }
             'B' => {
                 let loop_id = LoopId(Persist::persist_read(reader));
                 let value = Persist::persist_read(reader);
@@ -505,6 +513,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             '@' => {
                 let arg = Persist::persist_read(reader);
                 ExprKind::Cast(arg)
+            }
+            '^' => {
+                let arg = Persist::persist_read(reader);
+                let c = Persist::persist_read(reader);
+                ExprKind::PointerCast(arg,c)
             }
             ',' => {
                 let arg = Persist::persist_read(reader);
