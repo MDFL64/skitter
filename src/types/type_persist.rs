@@ -281,35 +281,13 @@ impl<'vm> Persist<'vm> for SubList<'vm> {
 
 impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        if self.item.crate_id == writer.context.this_crate {
-            writer.write_byte(0);
-            self.item.item_id.index().persist_write(writer);
-        } else {
-            // TODO just write a crate ID and item ID
-            // assume all dependencies are compiled with known ids
-            todo!("foreign item");
-            /*todo!("foreign item");
-            if !self.item.path.can_lookup() {
-                panic!("debug item")
-            } else {
-            }*/
-            //writer.write_byte(1);
-            //println!("{:?} - {:?}",self.item.crate_id,self.item.path);
-        }
+        writer.write_item_ref(self.item);
 
         self.subs.persist_write(writer);
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let item = match reader.read_byte() {
-            0 => {
-                let index = usize::persist_read(reader);
-                let items = reader.context.items.get().unwrap();
-
-                *items.array.get(index)
-            }
-            _ => todo!(),
-        };
+        let item = reader.read_item_ref();
 
         let subs = Persist::persist_read(reader);
 

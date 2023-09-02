@@ -5,7 +5,7 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
-    items::{AssocValue, CrateId, GenericCounts, TraitImpl},
+    items::{AssocValue, CrateId, GenericCounts, TraitImpl, Item, ItemPath},
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
@@ -53,8 +53,7 @@ impl<'vm> Persist<'vm> for BuiltinTrait {
 fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {
     TraitImpl {
         bounds: Default::default(),
-        assoc_tys: Default::default(),
-        assoc_values: Default::default(),
+        assoc_values: Vec::new(),
         crate_id: CrateId::new(0),
         for_types,
         generics: GenericCounts {
@@ -70,6 +69,7 @@ impl BuiltinTrait {
         &self,
         query_subs: &SubList<'vm>,
         vm: &'vm VM<'vm>,
+        trait_item: &Item<'vm>
     ) -> Option<TraitImpl<'vm>> {
         match self {
             BuiltinTrait::Sized => {
@@ -98,7 +98,9 @@ impl BuiltinTrait {
                     if let Some(discrim_ty) = ty.adt_info().discriminant_ty() {
                         let mut res = trait_impl(query_subs.clone());
 
-                        res.assoc_tys.insert("Discriminant".to_owned(), discrim_ty);
+                        res.assoc_values = trait_item.trait_build_impl_members(&[
+                            (ItemPath::for_type("Discriminant"),AssocValue::Type(discrim_ty)),
+                        ]);
 
                         return Some(res);
                     }
@@ -131,30 +133,29 @@ impl BuiltinTrait {
                         BuiltinTrait::FnOnce => {
                             let call_ir =
                                 glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
-                            res.assoc_values.insert(
-                                "call_once".to_owned(),
-                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                            );
 
-                            res.assoc_tys.insert("Output".to_owned(), sig.output);
+                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                                (ItemPath::for_value("call_once"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
+                                (ItemPath::for_type("Output"),AssocValue::Type(sig.output)),
+                            ]);
                         }
                         BuiltinTrait::FnMut => {
                             let ref_ty = func_ty.ref_to(Mutability::Mut);
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
-                            res.assoc_values.insert(
-                                "call_mut".to_owned(),
-                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                            );
+
+                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                                (ItemPath::for_value("call_mut"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
+                            ]);
                         }
                         BuiltinTrait::Fn => {
                             let ref_ty = func_ty.ref_to(Mutability::Const);
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
-                            res.assoc_values.insert(
-                                "call".to_owned(),
-                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                            );
+
+                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                                (ItemPath::for_value("call"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
+                            ]);
                         }
                         _ => panic!(),
                     }

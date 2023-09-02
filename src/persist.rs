@@ -5,6 +5,8 @@ use std::{
     path::PathBuf
 };
 
+use ahash::AHashMap;
+
 use crate::{
     items::{CrateId, Item},
     lazy_collections::{LazyArray, LazyTable},
@@ -67,6 +69,15 @@ impl<'vm> PersistWriter<'vm> {
 
     pub fn write_str(&mut self, string: &str) {
         self.write_byte_slice(string.as_bytes());
+    }
+
+    pub fn write_item_ref(&mut self, item: &Item<'vm>) {
+        // Just write our crate and item IDs. The deserializer will remap these IDs.
+        if item.crate_id != self.context.this_crate {
+            panic!("can't write foreign item");
+        }
+        item.crate_id.index().persist_write(self);
+        item.item_id.index().persist_write(self);
     }
 
     pub fn flip(&mut self) -> Vec<u8> {
@@ -140,6 +151,15 @@ impl<'vm> PersistReader<'vm> {
         result.set_len(n);
 
         result
+    }
+
+    pub fn read_item_ref(&mut self) -> &'vm Item<'vm> {
+        let crate_id = usize::persist_read(self);
+        let item_id = usize::persist_read(self);
+
+        let items = self.context.items.get().unwrap();
+
+        *items.array.get(item_id)
     }
 
     pub fn reset(&mut self, data: &'vm [u8]) {
@@ -318,6 +338,29 @@ where
             result.push(T::persist_read(reader));
         }
         result
+    }
+}
+
+impl<'vm, K, V> Persist<'vm> for AHashMap<K,V>
+where
+    K: Persist<'vm>, V: Persist<'vm>,
+{
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.len().persist_write(writer);
+        for (k,v) in self {
+            k.persist_write(writer);
+            v.persist_write(writer);
+        }
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        panic!("read map");
+        /*let len = usize::persist_read(reader);
+        let mut result = Vec::with_capacity(len);
+        for _ in 0..len {
+            result.push(T::persist_read(reader));
+        }
+        result*/
     }
 }
 

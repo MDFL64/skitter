@@ -35,8 +35,14 @@ impl<'vm> ItemPath<'vm> {
             _ => true,
         }
     }
-    pub fn new_debug(name: &str, vm: &'vm VM<'vm>) -> Self {
-        Self(NameSpace::DebugOnly, vm.alloc_path(name))
+    pub fn for_debug(name: &'vm str) -> Self {
+        Self(NameSpace::DebugOnly, name)
+    }
+    pub fn for_type(name: &'vm str) -> Self {
+        Self(NameSpace::Type, name)
+    }
+    pub fn for_value(name: &'vm str) -> Self {
+        Self(NameSpace::Value, name)
     }
     pub fn as_string(&self) -> &str {
         &self.1
@@ -306,6 +312,48 @@ impl<'vm> Persist<'vm> for Item<'vm> {
     }
 }
 
+impl<'vm> Persist<'vm> for BoundKind<'vm> {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        match self {
+            BoundKind::Trait(item) => {
+                writer.write_byte(0);
+                item.persist_write(writer);
+            }
+            BoundKind::Projection(item,ty) => {
+                writer.write_byte(1);
+                item.persist_write(writer);
+                ty.persist_write(writer);
+            }
+        }
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        panic!("read bound");
+    }
+}
+
+impl<'vm> Persist<'vm> for AssocValue<'vm> {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        match self {
+            AssocValue::Item(item) => {
+                writer.write_byte(0);
+                item.index().persist_write(writer);
+            }
+            AssocValue::Type(ty) => {
+                writer.write_byte(1);
+                ty.persist_write(writer);
+            }
+            AssocValue::RawFunctionIR(_) => {
+                panic!("attempt to persist raw IR");
+            }
+        }
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        panic!("read assoc value");
+    }
+}
+
 #[derive(PartialEq)]
 pub enum FunctionAbi {
     RustIntrinsic,
@@ -349,6 +397,7 @@ pub enum ItemKind<'vm> {
         info: OnceLock<AdtInfo<'vm>>,
     },
     Trait {
+        members: OnceLock<AHashMap<ItemPath<'vm>,u32>>,
         impl_list: RwLock<Vec<TraitImpl<'vm>>>,
         builtin: OnceLock<BuiltinTrait>,
     },
@@ -453,19 +502,19 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
 /// Always refers to a trait item in the same crate.
 pub struct VirtualInfo {
     pub trait_id: ItemId,
-    pub ident: String,
+    pub member_index: u32,
 }
 
 impl<'vm> Persist<'vm> for VirtualInfo {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.trait_id.index().persist_write(writer);
-        self.ident.persist_write(writer);
+        self.member_index.persist_write(writer);
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let trait_id = ItemId(u32::persist_read(reader));
-        let ident = String::persist_read(reader);
-        Self { trait_id, ident }
+        let member_index = u32::persist_read(reader);
+        Self { trait_id, member_index }
     }
 }
 
@@ -473,8 +522,8 @@ pub struct TraitImpl<'vm> {
     pub for_types: SubList<'vm>,
     //impl_params: Vec<Sub<'vm>>,
     pub crate_id: CrateId,
-    pub assoc_values: AHashMap<String, AssocValue<'vm>>,
-    pub assoc_tys: AHashMap<String, Type<'vm>>,
+    /// A vector of associated values. The trait item contains an index of identifiers to indices.
+    pub assoc_values: Vec<Option<AssocValue<'vm>>>,
     pub bounds: Vec<BoundKind<'vm>>,
     pub generics: GenericCounts,
 }
@@ -483,6 +532,8 @@ pub struct TraitImpl<'vm> {
 pub enum AssocValue<'vm> {
     /// An item. Can be either a function or a constant.
     Item(ItemId),
+    /// A type.
+    Type(Type<'vm>),
     /// Used to inject IR into builtin traits without building entire new items.
     RawFunctionIR(Arc<IRFunction<'vm>>),
 }
@@ -512,11 +563,11 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_function_virtual(trait_id: ItemId, ident: String) -> Self {
+    pub fn new_function_virtual(trait_id: ItemId, member_index: u32) -> Self {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            virtual_info: Some(VirtualInfo { trait_id, ident }),
+            virtual_info: Some(VirtualInfo { trait_id, member_index }),
             extern_name: None,
             ctor_for: None,
         }
@@ -551,11 +602,11 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_const_virtual(trait_id: ItemId, ident: String) -> Self {
+    pub fn new_const_virtual(trait_id: ItemId, member_index: u32) -> Self {
         Self::Constant {
             ir: Default::default(),
             mono_values: Default::default(),
-            virtual_info: Some(VirtualInfo { trait_id, ident }),
+            virtual_info: Some(VirtualInfo { trait_id, member_index }),
             ctor_for: None,
         }
     }
@@ -569,9 +620,9 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_associated_type(trait_id: ItemId, ident: String) -> Self {
+    pub fn new_associated_type(trait_id: ItemId, member_index: u32) -> Self {
         Self::AssociatedType {
-            virtual_info: VirtualInfo { trait_id, ident },
+            virtual_info: VirtualInfo { trait_id, member_index },
         }
     }
 
@@ -583,6 +634,7 @@ impl<'vm> ItemKind<'vm> {
 
     pub fn new_trait() -> Self {
         Self::Trait {
+            members: Default::default(),
             impl_list: Default::default(),
             builtin: Default::default(),
         }
@@ -662,7 +714,7 @@ impl<'vm> Item<'vm> {
         if let Some(virtual_info) = virtual_info {
             let crate_items = self.vm.crate_provider(self.crate_id);
             let trait_item = crate_items.item_by_id(virtual_info.trait_id);
-            let resolved_func = trait_item.find_trait_item_ir(subs, &virtual_info.ident);
+            let resolved_func = trait_item.find_trait_item_ir(subs, virtual_info.member_index);
             if let Some((ir, new_subs)) = resolved_func {
                 assert!(ir.is_constant == is_constant);
                 return (ir, Cow::Owned(new_subs));
@@ -773,6 +825,33 @@ impl<'vm> Item<'vm> {
         builtin.set(new_builtin).ok();
     }
 
+    pub fn trait_set_members(&self, new_members: AHashMap<ItemPath<'vm>,u32>) {
+        let ItemKind::Trait{members,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+        members.set(new_members).ok();
+    }
+
+    pub fn trait_build_impl_members(&self, key_values: &[(ItemPath,AssocValue<'vm>)]) -> Vec<Option<AssocValue<'vm>>> {
+        let ItemKind::Trait{members,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let members = members.get().unwrap();
+
+        let mut results = vec!(None;members.len());
+
+        for (key,val) in key_values {
+            if let Some(index) = members.get(key) {
+                results[*index as usize] = Some(val.clone());
+            } else {
+                panic!("failed to find impl member index");
+            }
+        }
+
+        results
+    }
+
     pub fn resolve_associated_ty(&self, subs: &SubList<'vm>) -> Type<'vm> {
         let ItemKind::AssociatedType{virtual_info} = &self.kind else {
             panic!("item kind mismatch");
@@ -783,9 +862,9 @@ impl<'vm> Item<'vm> {
 
         trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
-                let ty = trait_impl.assoc_tys.get(&virtual_info.ident);
+                let ty = &trait_impl.assoc_values[virtual_info.member_index as usize];
 
-                if let Some(ty) = ty {
+                if let Some(AssocValue::Type(ty)) = ty {
                     ty.sub(&subs)
                 } else {
                     panic!("failed to find associated type")
@@ -799,11 +878,11 @@ impl<'vm> Item<'vm> {
     fn find_trait_item_ir(
         &self,
         subs: &SubList<'vm>,
-        member_name: &str,
+        member_index: u32,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
         self.find_trait_impl(subs, &mut None, |trait_impl, subs| {
             let crate_items = self.vm.crate_provider(trait_impl.crate_id);
-            let ir_source = trait_impl.assoc_values.get(member_name);
+            let ir_source = &trait_impl.assoc_values[member_index as usize];
 
             if let Some(ir_source) = ir_source {
                 match ir_source {
@@ -813,6 +892,7 @@ impl<'vm> Item<'vm> {
                         return Some((ir, subs));
                     }
                     AssocValue::RawFunctionIR(ir) => return Some((ir.clone(), subs)),
+                    AssocValue::Type(_) => panic!("attempt to fetch IR for associated type")
                 }
             } else {
                 None
@@ -832,6 +912,37 @@ impl<'vm> Item<'vm> {
             .is_some()
     }
 
+    pub fn write_trait_impl(&self, index: usize, writer: &mut PersistWriter<'vm>) {
+        let ItemKind::Trait{members,impl_list,builtin} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let impl_list = impl_list.read().unwrap();
+        let impl_ref = &impl_list[index];
+
+        // write a ref to the trait item
+        writer.write_item_ref(self);
+
+        impl_ref.for_types.persist_write(writer);
+        impl_ref.bounds.persist_write(writer);
+
+        impl_ref.generics.lifetimes.persist_write(writer);
+        impl_ref.generics.types.persist_write(writer);
+        impl_ref.generics.consts.persist_write(writer);
+
+        impl_ref.assoc_values.persist_write(writer);
+
+        /*
+        
+        pub for_types: SubList<'vm>,
+        pub assoc_values: AHashMap<String, AssocValue<'vm>>,
+        pub assoc_tys: AHashMap<String, Type<'vm>>,
+        pub bounds: Vec<BoundKind<'vm>>,
+        pub generics: GenericCounts,
+
+        */
+    }
+
     /// Find a trait implementation for a given list of types.
     pub fn find_trait_impl<T>(
         &self,
@@ -839,12 +950,12 @@ impl<'vm> Item<'vm> {
         update_tys: &mut Option<&mut SubList<'vm>>,
         callback: impl FnOnce(&TraitImpl<'vm>, SubList<'vm>) -> T,
     ) -> Option<T> {
-        let ItemKind::Trait{impl_list,builtin} = &self.kind else {
+        let ItemKind::Trait{impl_list,members,builtin} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         if let Some(builtin) = builtin.get() {
-            let builtin_res = builtin.find_candidate(for_tys, self.vm);
+            let builtin_res = builtin.find_candidate(for_tys, self.vm, self);
             if let Some(candidate) = builtin_res {
                 if let Some(trait_subs) = self.check_trait_impl(for_tys, &candidate, update_tys) {
                     return Some(callback(&candidate, trait_subs));
@@ -1114,7 +1225,32 @@ pub fn path_from_rustc<'vm>(
             DefPathData::ValueNs(_) => ItemPath(NameSpace::Value, result),
             DefPathData::TypeNs(_) => ItemPath(NameSpace::Type, result),
             DefPathData::Ctor => ItemPath(NameSpace::Value, result),
-            _ => panic!("can't determine namespace: {:?}", last_elem.data),
+            _ => panic!("can't determine path namespace: {:?}", last_elem.data),
+        }
+    } else {
+        panic!("zero element path?");
+    }
+}
+
+/// Get a single identifier form a rustc path. Used for trait members.
+pub fn ident_from_rustc<'vm>(
+    in_path: &rustc_hir::definitions::DefPath,
+    vm: &'vm VM<'vm>,
+) -> ItemPath<'vm> {
+    use rustc_hir::definitions::DefPathData;
+
+    if let Some(last_elem) = in_path.data.last() {
+        match last_elem.data {
+            DefPathData::ValueNs(sym) => {
+                let interned = vm.alloc_path(sym.as_str());
+                ItemPath(NameSpace::Value, interned)
+            }
+            DefPathData::TypeNs(sym) => {
+                let interned = vm.alloc_path(sym.as_str());
+                ItemPath(NameSpace::Type, interned)
+            }
+            //DefPathData::Ctor => ItemPath(NameSpace::Value, result),
+            _ => panic!("can't determine ident namespace: {:?}", last_elem.data),
         }
     } else {
         panic!("zero element path?");
