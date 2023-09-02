@@ -397,7 +397,7 @@ pub enum ItemKind<'vm> {
         info: OnceLock<AdtInfo<'vm>>,
     },
     Trait {
-        members: OnceLock<AHashMap<ItemPath<'vm>,u32>>,
+        assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>,u32>>,
         impl_list: RwLock<Vec<TraitImpl<'vm>>>,
         builtin: OnceLock<BuiltinTrait>,
     },
@@ -634,7 +634,7 @@ impl<'vm> ItemKind<'vm> {
 
     pub fn new_trait() -> Self {
         Self::Trait {
-            members: Default::default(),
+            assoc_value_map: Default::default(),
             impl_list: Default::default(),
             builtin: Default::default(),
         }
@@ -825,24 +825,24 @@ impl<'vm> Item<'vm> {
         builtin.set(new_builtin).ok();
     }
 
-    pub fn trait_set_members(&self, new_members: AHashMap<ItemPath<'vm>,u32>) {
-        let ItemKind::Trait{members,..} = &self.kind else {
+    pub fn trait_set_assoc_value_map(&self, new_map: AHashMap<ItemPath<'vm>,u32>) {
+        let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
             panic!("item kind mismatch");
         };
-        members.set(new_members).ok();
+        assoc_value_map.set(new_map).ok();
     }
 
-    pub fn trait_build_impl_members(&self, key_values: &[(ItemPath,AssocValue<'vm>)]) -> Vec<Option<AssocValue<'vm>>> {
-        let ItemKind::Trait{members,..} = &self.kind else {
+    pub fn trait_build_assoc_values_for_impl(&self, pairs: &[(ItemPath,AssocValue<'vm>)]) -> Vec<Option<AssocValue<'vm>>> {
+        let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        let members = members.get().unwrap();
+        let assoc_value_map = assoc_value_map.get().unwrap();
 
-        let mut results = vec!(None;members.len());
+        let mut results = vec!(None;assoc_value_map.len());
 
-        for (key,val) in key_values {
-            if let Some(index) = members.get(key) {
+        for (key,val) in pairs {
+            if let Some(index) = assoc_value_map.get(key) {
                 results[*index as usize] = Some(val.clone());
             } else {
                 panic!("failed to find impl member index");
@@ -913,7 +913,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn write_trait_impl(&self, index: usize, writer: &mut PersistWriter<'vm>) {
-        let ItemKind::Trait{members,impl_list,builtin} = &self.kind else {
+        let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -931,16 +931,6 @@ impl<'vm> Item<'vm> {
         impl_ref.generics.consts.persist_write(writer);
 
         impl_ref.assoc_values.persist_write(writer);
-
-        /*
-        
-        pub for_types: SubList<'vm>,
-        pub assoc_values: AHashMap<String, AssocValue<'vm>>,
-        pub assoc_tys: AHashMap<String, Type<'vm>>,
-        pub bounds: Vec<BoundKind<'vm>>,
-        pub generics: GenericCounts,
-
-        */
     }
 
     /// Find a trait implementation for a given list of types.
@@ -950,7 +940,7 @@ impl<'vm> Item<'vm> {
         update_tys: &mut Option<&mut SubList<'vm>>,
         callback: impl FnOnce(&TraitImpl<'vm>, SubList<'vm>) -> T,
     ) -> Option<T> {
-        let ItemKind::Trait{impl_list,members,builtin} = &self.kind else {
+        let ItemKind::Trait{impl_list,builtin,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 

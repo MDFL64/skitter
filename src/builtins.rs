@@ -98,7 +98,7 @@ impl BuiltinTrait {
                     if let Some(discrim_ty) = ty.adt_info().discriminant_ty() {
                         let mut res = trait_impl(query_subs.clone());
 
-                        res.assoc_values = trait_item.trait_build_impl_members(&[
+                        res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                             (ItemPath::for_type("Discriminant"),AssocValue::Type(discrim_ty)),
                         ]);
 
@@ -134,7 +134,7 @@ impl BuiltinTrait {
                             let call_ir =
                                 glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
 
-                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                                 (ItemPath::for_value("call_once"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
                                 (ItemPath::for_type("Output"),AssocValue::Type(sig.output)),
                             ]);
@@ -144,7 +144,7 @@ impl BuiltinTrait {
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
 
-                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                                 (ItemPath::for_value("call_mut"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
                             ]);
                         }
@@ -153,7 +153,7 @@ impl BuiltinTrait {
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
 
-                            res.assoc_values = trait_item.trait_build_impl_members(&[
+                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                                 (ItemPath::for_value("call"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
                             ]);
                         }

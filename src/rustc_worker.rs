@@ -348,7 +348,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         items.index_item(kind, item_path, local_id, vm)
                     };
 
-                    let mut trait_members = AHashMap::new();
+                    let mut assoc_value_map = AHashMap::new();
                     let mut next_id = 0;
                     for item in child_items {
                         let local_id = item.id.owner_id.def_id;
@@ -357,7 +357,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         let item_ident = ident_from_rustc(&hir.def_path(local_id), vm);
                         let id_in_trait = next_id;
                         next_id += 1;
-                        trait_members.insert(item_ident, id_in_trait);
+                        assoc_value_map.insert(item_ident, id_in_trait);
 
                         //let ident = item.ident.as_str().to_owned();
 
@@ -372,7 +372,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     }
 
                     let trait_item = items.items[trait_id.index()].item;
-                    trait_item.trait_set_members(trait_members);
+                    trait_item.trait_set_assoc_value_map(assoc_value_map);
                 }
                 HirItemKind::Impl(impl_info) => {
                     let impl_id = item.owner_id.def_id;
@@ -603,15 +603,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         assoc_value_source.push((ItemPath::for_value(key),val.clone()));
                     }
 
-                    let assoc_values = trait_item.trait_build_impl_members(&assoc_value_source);
-
-                    /*let mut assoc_values = impl_item.assoc_values
-
-                    for (name, local_id) in impl_item.assoc_tys {
-                        let ty = tcx.type_of(local_id).skip_binder();
-                        let ty = vm.types.type_from_rustc(ty, &ctx);
-                        assoc_values.push()
-                    }*/
+                    let assoc_values = trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
 
                     let index = trait_item.add_trait_impl(TraitImpl {
                         crate_id: this_crate,
