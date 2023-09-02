@@ -36,7 +36,7 @@ impl<'vm> PersistWriter<'vm> {
         }
     }
 
-    pub fn new_child_context(&self) -> Self {
+    pub fn new_child_writer(&self) -> Self {
         Self {
             output: vec![],
             context: self.context.clone(),
@@ -343,7 +343,7 @@ where
 
 impl<'vm, K, V> Persist<'vm> for AHashMap<K,V>
 where
-    K: Persist<'vm>, V: Persist<'vm>,
+    K: Persist<'vm> + std::hash::Hash + Eq, V: Persist<'vm>,
 {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.len().persist_write(writer);
@@ -354,13 +354,15 @@ where
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!("read map");
-        /*let len = usize::persist_read(reader);
-        let mut result = Vec::with_capacity(len);
+        let len = usize::persist_read(reader);
+        let mut result = AHashMap::with_capacity(len);
         for _ in 0..len {
-            result.push(T::persist_read(reader));
+            let key = K::persist_read(reader);
+            let val = V::persist_read(reader);
+
+            result.insert(key,val);
         }
-        result*/
+        result
     }
 }
 

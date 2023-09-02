@@ -235,6 +235,9 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)
             }
+            254 => {
+                TypeKind::Dynamic
+            }
             _ => panic!("read type {:?}", n),
         }
     }

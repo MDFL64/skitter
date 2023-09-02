@@ -13,7 +13,7 @@ use crate::{
     }, persist::Persist,
 };
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum BuiltinTrait {
     Sized,
     Tuple,

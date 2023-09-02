@@ -202,7 +202,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let ir_block = self
                     .raw_ir()
                     .map(|ir| {
-                        let mut writer = writer.new_child_context();
+                        let mut writer = writer.new_child_writer();
                         ir.persist_write(&mut writer);
                         writer.flip()
                     })
@@ -222,7 +222,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let ir_block = self
                     .raw_ir()
                     .map(|ir| {
-                        let mut writer = writer.new_child_context();
+                        let mut writer = writer.new_child_writer();
                         ir.persist_write(&mut writer);
                         writer.flip()
                     })
@@ -238,9 +238,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('a' as u8);
                 info.get().unwrap().persist_write(writer);
             }
-            ItemKind::Trait { builtin, .. } => {
+            ItemKind::Trait { builtin, assoc_value_map, .. } => {
                 writer.write_byte('t' as u8);
                 builtin.get().copied().persist_write(writer);
+                assoc_value_map.get().unwrap().persist_write(writer);
             }
         }
     }
@@ -293,8 +294,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 ItemKind::Adt { info: info.into() }
             }
             't' => {
-                let kind = ItemKind::new_trait();
-                kind
+                let builtin = Option::<BuiltinTrait>::persist_read(reader);
+                let assoc_value_map = AHashMap::<ItemPath,u32>::persist_read(reader);
+
+                ItemKind::new_trait_with(assoc_value_map,builtin)
             }
             _ => panic!(),
         };
@@ -328,7 +331,19 @@ impl<'vm> Persist<'vm> for BoundKind<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!("read bound");
+        let b = reader.read_byte();
+        match b {
+            0 => {
+                let item = ItemWithSubs::persist_read(reader);
+                BoundKind::Trait(item)
+            }
+            1 => {
+                let item = ItemWithSubs::persist_read(reader);
+                let ty = Type::persist_read(reader);
+                BoundKind::Projection(item, ty)
+            }
+            _ => panic!()
+        }
     }
 }
 
@@ -350,7 +365,17 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!("read assoc value");
+        let b = reader.read_byte();
+        match b {
+            0 => {
+                let item_id = u32::persist_read(reader);
+                AssocValue::Item(ItemId::new(item_id))
+            }
+            1 => {
+                panic!("read assoc type")
+            }
+            _ => panic!()
+        }
     }
 }
 
@@ -637,6 +662,20 @@ impl<'vm> ItemKind<'vm> {
             assoc_value_map: Default::default(),
             impl_list: Default::default(),
             builtin: Default::default(),
+        }
+    }
+
+    pub fn new_trait_with(assoc_value_map: AHashMap<ItemPath<'vm>,u32>, builtin: Option<BuiltinTrait>) -> Self {
+        let mut builtin_lock = OnceLock::new();
+
+        if let Some(builtin) = builtin {
+            builtin_lock.set(builtin).unwrap();
+        }
+
+        Self::Trait {
+            assoc_value_map: assoc_value_map.into(),
+            impl_list: Default::default(),
+            builtin: builtin_lock,
         }
     }
 }
@@ -931,6 +970,41 @@ impl<'vm> Item<'vm> {
         impl_ref.generics.consts.persist_write(writer);
 
         impl_ref.assoc_values.persist_write(writer);
+    }
+
+    pub fn read_trait_impl(&self, reader: &mut PersistReader<'vm>) {
+
+        let for_types = SubList::persist_read(reader);
+        let bounds = Vec::<BoundKind>::persist_read(reader);
+
+        let generics = {
+            let lifetimes = u32::persist_read(reader);
+            let types = u32::persist_read(reader);
+            let consts = u32::persist_read(reader);
+            GenericCounts{
+                lifetimes,
+                types,
+                consts
+            }
+        };
+
+        let assoc_values = Vec::<Option<AssocValue>>::persist_read(reader);
+
+        // build the impl and add it to our list
+
+        let ItemKind::Trait{impl_list,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let mut impl_list = impl_list.write().unwrap();
+
+        impl_list.push(TraitImpl{
+            crate_id: reader.context.this_crate,
+            for_types,
+            bounds,
+            generics,
+            assoc_values,
+        });
     }
 
     /// Find a trait implementation for a given list of types.

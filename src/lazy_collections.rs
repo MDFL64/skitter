@@ -53,7 +53,7 @@ where
     where
         'vm: 'a,
     {
-        let mut data_writer = out_writer.new_child_context();
+        let mut data_writer = out_writer.new_child_writer();
 
         let mut item_indices = Vec::<u32>::new();
 

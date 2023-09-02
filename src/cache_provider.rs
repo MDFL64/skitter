@@ -60,6 +60,12 @@ impl<'vm> CacheProvider<'vm> {
             .set(types)
             .map_err(|_| "double-assign to types")?;
 
+        let impl_count = usize::persist_read(&mut reader);
+        for _ in 0..impl_count {
+            let trait_item = reader.read_item_ref();
+            trait_item.read_trait_impl(&mut reader);
+        }
+
         Ok(Self { read_context })
     }
 }
