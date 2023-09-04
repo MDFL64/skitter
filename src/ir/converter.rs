@@ -420,7 +420,20 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 // this may pose an issue when implementing destructors / drop
                 return self.expr(e);
             }
-            hir::ExprKind::Closure(..) |
+            hir::ExprKind::Closure(closure) => {
+                println!("closure ids = {:?} / {:?}",closure.def_id,closure.body);
+
+                // assert the absolute simplest case
+                if let rustc_hir::ClosureBinder::For{..} = closure.binder {
+                    panic!("closure binder");
+                }
+                assert!(closure.constness == rustc_hir::Constness::NotConst);
+                assert!(closure.capture_clause == rustc_hir::CaptureBy::Ref);
+                assert!(closure.bound_generic_params.len() == 0);
+                assert!(closure.movability.is_none());
+
+                ExprKind::LiteralVoid
+            }
             hir::ExprKind::ConstBlock(..) |
             hir::ExprKind::InlineAsm(..) => {
                 // TODO

@@ -96,6 +96,10 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
+            TypeKind::Closure => {
+                println!("todo layout closure");
+                Layout::simple(0)
+            }
             _ => panic!("can't layout: {:?}", kind),
         }
     }

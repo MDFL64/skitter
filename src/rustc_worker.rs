@@ -602,6 +602,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     for (key,val) in &impl_item.assoc_values {
                         assoc_value_source.push((ItemPath::for_value(key),val.clone()));
                     }
+                    for (key,local_id) in &impl_item.assoc_tys {
+                        let ty = tcx.type_of(*local_id).skip_binder();
+                        let ty = vm.types.type_from_rustc(ty, &ctx);
+                        assoc_value_source.push((ItemPath::for_type(key),AssocValue::Type(ty)));
+                    }
 
                     let assoc_values = trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
 

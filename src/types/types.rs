@@ -204,6 +204,10 @@ impl<'vm> Type<'vm> {
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
             // These types never accept subs.
+            TypeKind::Closure => {
+                println!("todo sub closure");
+                *self
+            }
             TypeKind::Never
             | TypeKind::Int(..)
             | TypeKind::Float(_)

@@ -372,7 +372,8 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
                 AssocValue::Item(ItemId::new(item_id))
             }
             1 => {
-                panic!("read assoc type")
+                let ty = Type::persist_read(reader);
+                AssocValue::Type(ty)
             }
             _ => panic!()
         }
@@ -1263,6 +1264,10 @@ pub fn path_from_rustc<'vm>(
             }
             DefPathData::Impl => {
                 result.push_str("::{impl}");
+                is_debug = true;
+            }
+            DefPathData::ClosureExpr => {
+                result.push_str("::{closure}");
                 is_debug = true;
             }
             DefPathData::Ctor => {

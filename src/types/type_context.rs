@@ -120,7 +120,11 @@ impl<'vm> TypeContext<'vm> {
             TyKind::Foreign(_) => TypeKind::Foreign,
             TyKind::Dynamic(..) => TypeKind::Dynamic,
             TyKind::FnPtr(_) => TypeKind::FunctionPointer,
-            TyKind::Closure(_, _) => TypeKind::Closure,
+            TyKind::Closure(did, subs) => {
+                let item_with_subs = self.def_from_rustc(*did, subs, ctx);
+                println!("{:?}",item_with_subs);
+                TypeKind::Closure
+            }
 
             TyKind::Param(param) => TypeKind::Param(param.index),
 

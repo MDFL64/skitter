@@ -171,6 +171,7 @@ impl<'vm> VM<'vm> {
             subs,
             native: Default::default(),
             bytecode: Default::default(),
+            sub_id: None
         };
 
         let path = item.path.as_string();
@@ -244,8 +245,11 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
 pub struct Function<'vm> {
     item: &'vm Item<'vm>,
     subs: SubList<'vm>,
+    /// Store a void pointer because function pointers can't be stored by this(?)
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>,
+    /// This is set for closures which refer to their root function item.
+    sub_id: Option<u32>
 }
 
 impl<'vm> Function<'vm> {

@@ -471,6 +471,15 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let loop_id = LoopId(Persist::persist_read(reader));
                 ExprKind::Continue { loop_id }
             }
+            'E' => {
+                let pattern = Persist::persist_read(reader);
+                let init = Persist::persist_read(reader);
+
+                ExprKind::Let{
+                    pattern,
+                    init
+                }
+            }
             'G' => {
                 let op = match reader.read_byte() {
                     0 => LogicOp::And,
@@ -531,6 +540,15 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                     lhs,
                     variant,
                     field,
+                }
+            }
+            ':' => {
+                let arg = Persist::persist_read(reader);
+                let arms = Persist::persist_read(reader);
+
+                ExprKind::Match {
+                    arg,
+                    arms
                 }
             }
             '&' => {
@@ -754,6 +772,33 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                     sub_pattern,
                 }
             }
+            'V' => {
+                let n = Persist::persist_read(reader);
+                PatternKind::LiteralValue(n)
+            }
+            'E' => {
+                let fields = Persist::persist_read(reader);
+                let variant_index = Persist::persist_read(reader);
+
+                PatternKind::Enum{
+                    fields,
+                    variant_index
+                }
+            }
+            'S' => {
+                let fields = Persist::persist_read(reader);
+
+                PatternKind::Struct{
+                    fields
+                }
+            }
+            'R' => {
+                let sub_pattern = Persist::persist_read(reader);
+                PatternKind::DeRef { sub_pattern }
+            }
+            '_' => {
+                PatternKind::Hole
+            }
             _ => panic!("todo read pattern '{}'", c),
         };
         Pattern { kind, ty }
@@ -814,7 +859,13 @@ impl<'vm> Persist<'vm> for FieldPattern {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        todo!()
+        let field = Persist::persist_read(reader);
+        let pattern = Persist::persist_read(reader);
+
+        Self {
+            field,
+            pattern
+        }
     }
 }
 
@@ -881,7 +932,15 @@ impl<'vm> Persist<'vm> for MatchArm {
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        todo!()
+        let pattern = Persist::persist_read(reader);
+        let has_guard = Persist::persist_read(reader);
+        let body = Persist::persist_read(reader);
+
+        Self {
+            pattern,
+            body,
+            has_guard
+        }
     }
 }
 
