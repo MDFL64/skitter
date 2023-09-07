@@ -5,12 +5,13 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
-    items::{AssocValue, CrateId, GenericCounts, TraitImpl, Item, ItemPath},
+    items::{AssocValue, CrateId, GenericCounts, Item, ItemPath, TraitImpl},
+    persist::Persist,
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
         VM,
-    }, persist::Persist,
+    },
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -45,7 +46,7 @@ impl<'vm> Persist<'vm> for BuiltinTrait {
             3 => Self::FnOnce,
             4 => Self::FnMut,
             5 => Self::Fn,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -69,7 +70,7 @@ impl BuiltinTrait {
         &self,
         query_subs: &SubList<'vm>,
         vm: &'vm VM<'vm>,
-        trait_item: &Item<'vm>
+        trait_item: &Item<'vm>,
     ) -> Option<TraitImpl<'vm>> {
         match self {
             BuiltinTrait::Sized => {
@@ -98,9 +99,10 @@ impl BuiltinTrait {
                     if let Some(discrim_ty) = ty.adt_info().discriminant_ty() {
                         let mut res = trait_impl(query_subs.clone());
 
-                        res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
-                            (ItemPath::for_type("Discriminant"),AssocValue::Type(discrim_ty)),
-                        ]);
+                        res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                            ItemPath::for_type("Discriminant"),
+                            AssocValue::Type(discrim_ty),
+                        )]);
 
                         return Some(res);
                     }
@@ -135,8 +137,11 @@ impl BuiltinTrait {
                                 glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
 
                             res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
-                                (ItemPath::for_value("call_once"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
-                                (ItemPath::for_type("Output"),AssocValue::Type(sig.output)),
+                                (
+                                    ItemPath::for_value("call_once"),
+                                    AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                                ),
+                                (ItemPath::for_type("Output"), AssocValue::Type(sig.output)),
                             ]);
                         }
                         BuiltinTrait::FnMut => {
@@ -144,18 +149,20 @@ impl BuiltinTrait {
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
 
-                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
-                                (ItemPath::for_value("call_mut"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
-                            ]);
+                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                                ItemPath::for_value("call_mut"),
+                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                            )]);
                         }
                         BuiltinTrait::Fn => {
                             let ref_ty = func_ty.ref_to(Mutability::Const);
                             let call_ir =
                                 glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
 
-                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
-                                (ItemPath::for_value("call"),AssocValue::RawFunctionIR(Arc::new(call_ir))),
-                            ]);
+                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                                ItemPath::for_value("call"),
+                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
+                            )]);
                         }
                         _ => panic!(),
                     }

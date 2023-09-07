@@ -34,12 +34,17 @@ mod items;
 mod lazy_collections;
 mod persist;
 mod persist_header;
+mod profiler;
 mod rustc_worker;
 mod test;
 mod types;
-mod profiler;
 
-use std::{path::{Path, PathBuf}, process, ffi::{OsStr, OsString}, cell::LazyCell, os::unix::prelude::OsStrExt};
+use std::{
+    cell::LazyCell,
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    process,
+};
 
 use clap::Parser;
 use profiler::profile;
@@ -61,7 +66,7 @@ fn main() {
 
     let args = cli::CliArgs::parse();
 
-    profiler::profile("top", ||{
+    profiler::profile("top", || {
         if args.repeat {
             loop {
                 run(&args);
@@ -126,8 +131,7 @@ fn run(args: &cli::CliArgs) {
     if !crate_path.is_core() {
         let core_path = CratePath::new(OsStr::new("@core"));
 
-        let core_id = vm.add_cache_provider(&core_path)
-            .expect("core load failed");
+        let core_id = vm.add_cache_provider(&core_path).expect("core load failed");
 
         extern_crates.push(ExternCrate {
             id: core_id,
@@ -136,7 +140,6 @@ fn run(args: &cli::CliArgs) {
 
         vm.core_crate.set(core_id).unwrap();
     }
-
 
     let main_crate = if args.load {
         /*let crate_name = file_name.file_stem().unwrap().to_str().unwrap();
@@ -183,7 +186,10 @@ const SYSROOT: LazyCell<PathBuf> = LazyCell::new(|| {
         .output()
         .unwrap();
 
-    std::str::from_utf8(&out.stdout).expect("bad sysroot").trim().into()
+    std::str::from_utf8(&out.stdout)
+        .expect("bad sysroot")
+        .trim()
+        .into()
 });
 
 #[derive(Debug)]
@@ -201,21 +207,21 @@ impl CratePath {
                 //let mut path = SYSROOT.clone();
                 //path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",name));
 
-                return CratePath{
-                    name,
-                    path: None
-                }
+                return CratePath { name, path: None };
             }
         }
 
         let path = Path::new(path).canonicalize().expect("invalid path (1)");
-        let name = path.file_stem().expect("invalid path (2)")
-            .to_str().expect("invalid path (3)")
+        let name = path
+            .file_stem()
+            .expect("invalid path (2)")
+            .to_str()
+            .expect("invalid path (3)")
             .to_owned();
 
-        CratePath{
+        CratePath {
             name,
-            path: Some(path)
+            path: Some(path),
         }
     }
 
@@ -224,7 +230,10 @@ impl CratePath {
             path.clone()
         } else {
             let mut path = SYSROOT.clone();
-            path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",self.name));
+            path.push(format!(
+                "lib/rustlib/src/rust/library/{}/src/lib.rs",
+                self.name
+            ));
             path
         }
     }
@@ -246,10 +255,10 @@ impl CratePath {
         if let Some(path) = &self.path {
             hash.consume(path.to_string_lossy().as_bytes());
         }
-    
+
         let hash = hash.compute();
         let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(*hash);
-    
+
         format!("./cache/{}-{}", self.name, hash).into()
     }
 }

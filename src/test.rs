@@ -1,8 +1,9 @@
 use std::{
+    error::Error,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
+    process::Command,
     time::{Duration, Instant},
-    process::Command, ffi::{OsString, OsStr},
-    error::Error
 };
 
 pub fn test(dir_name: &Path, global_args: &[&OsStr]) -> ! {
@@ -121,7 +122,6 @@ fn run_test(
     bin_name: &Path,
     global_args: &[&OsStr],
 ) -> Result<TestResult, String> {
-
     // Rust compile
     let t = Instant::now();
     {
@@ -138,7 +138,7 @@ fn run_test(
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.status.success() {
                 if let Ok(output) = std::str::from_utf8(&cmd_res.stderr) {
-                    println!("{}",output);
+                    println!("{}", output);
                 }
                 return fail();
             }
@@ -167,7 +167,7 @@ fn run_test(
     let time_rustc_exec = t.elapsed();
 
     // Skitter interpreter
-    let (skitter_out,time_skitter) = {
+    let (skitter_out, time_skitter) = {
         let fail = || Err(String::from("skitter failed"));
 
         let program = std::env::current_exe().expect("failed to get skitter path");
@@ -183,7 +183,7 @@ fn run_test(
             args.push(arg);
         }
 
-        let cmd_res = time_command(&program,&args);
+        let cmd_res = time_command(&program, &args);
 
         if let Ok(cmd_res) = cmd_res {
             if !cmd_res.success {
@@ -199,7 +199,7 @@ fn run_test(
 
                 return Err(format!("skitter failed ( {} )", first_line));
             } else {
-                (cmd_res.stdout,cmd_res.time)
+                (cmd_res.stdout, cmd_res.time)
             }
         } else {
             return fail();
@@ -224,11 +224,10 @@ struct TimeResult {
     success: bool,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
-    time: Duration
+    time: Duration,
 }
 
-fn time_command(cmd_name: &Path, args: &[&OsStr]) -> Result<TimeResult,Box<dyn Error>> {
-
+fn time_command(cmd_name: &Path, args: &[&OsStr]) -> Result<TimeResult, Box<dyn Error>> {
     let mut cmd = Command::new(cmd_name);
     cmd.args(args);
 
@@ -238,18 +237,18 @@ fn time_command(cmd_name: &Path, args: &[&OsStr]) -> Result<TimeResult,Box<dyn E
 
     let success = output.status.success();
 
-    Ok(TimeResult{
+    Ok(TimeResult {
         success,
         stdout: output.stdout,
         stderr: output.stderr,
-        time
+        time,
     })
 }
 
 pub fn test_timer_overhead() {
     for _ in 0..10 {
         let program = std::env::current_exe().expect("failed to get skitter path");
-        let time = time_command(&program,&[]).unwrap().time;
-        println!("-> {:?}",time);
+        let time = time_command(&program, &[]).unwrap().time;
+        println!("-> {:?}", time);
     }
 }

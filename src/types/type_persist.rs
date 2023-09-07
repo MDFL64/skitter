@@ -1,4 +1,5 @@
 use crate::{
+    items::FunctionSig,
     lazy_collections::LazyItem,
     persist::{Persist, PersistReader, PersistWriter},
     types::{IntSign, IntWidth},
@@ -145,8 +146,9 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
             TypeKind::Foreign => {
                 writer.write_byte(33);
             }
-            TypeKind::FunctionPointer => {
+            TypeKind::FunctionPointer(_) => {
                 writer.write_byte(34);
+                // TODO WRITE SIG
             }
 
             TypeKind::Param(n) => {
@@ -230,14 +232,19 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 TypeKind::AssociatedType(item_with_subs)
             }
             33 => TypeKind::Foreign,
-            34 => TypeKind::FunctionPointer,
+            34 => {
+                println!("todo read sig");
+                let sig = FunctionSig {
+                    inputs: vec![],
+                    output: reader.context.vm.ty_tuple(vec![]),
+                };
+                TypeKind::FunctionPointer(sig)
+            }
             40 => {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)
             }
-            254 => {
-                TypeKind::Dynamic
-            }
+            254 => TypeKind::Dynamic,
             _ => panic!("read type {:?}", n),
         }
     }
@@ -305,7 +312,7 @@ impl<'vm> Persist<'vm> for ArraySize {
         match b {
             0 => ArraySize::Static(n),
             1 => ArraySize::ConstParam(n),
-            _ => panic!()
+            _ => panic!(),
         }
     }
 

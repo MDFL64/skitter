@@ -1,7 +1,7 @@
 use crate::{
     items::FunctionSig,
     persist::{Persist, PersistReader, PersistWriter},
-    types::{ItemWithSubs, Mutability, Type, ArraySize},
+    types::{ArraySize, ItemWithSubs, Mutability, Type},
 };
 
 #[derive(Default)]
@@ -176,7 +176,7 @@ pub enum ExprKind<'vm> {
     },
     Array(Vec<ExprId>),
     /// Check the type to determine the count.
-    ArrayRepeat(ExprId,ArraySize),
+    ArrayRepeat(ExprId, ArraySize),
 
     NamedConst(ItemWithSubs<'vm>),
     //Function(ItemWithSubs<'vm>),
@@ -278,7 +278,7 @@ pub enum LogicOp {
     Or,
 }
 
-#[derive(Debug,PartialEq,Clone,Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PointerCast {
     ReifyFnPointer,
     UnsafeFnPointer,
@@ -475,10 +475,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let pattern = Persist::persist_read(reader);
                 let init = Persist::persist_read(reader);
 
-                ExprKind::Let{
-                    pattern,
-                    init
-                }
+                ExprKind::Let { pattern, init }
             }
             'G' => {
                 let op = match reader.read_byte() {
@@ -501,8 +498,8 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             }
             'S' => {
                 let variant = Persist::persist_read(reader);
-                let fields= Persist::persist_read(reader);
-                ExprKind::Adt{ variant, fields }
+                let fields = Persist::persist_read(reader);
+                ExprKind::Adt { variant, fields }
             }
             '=' => {
                 let lhs = Persist::persist_read(reader);
@@ -526,7 +523,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             '^' => {
                 let arg = Persist::persist_read(reader);
                 let c = Persist::persist_read(reader);
-                ExprKind::PointerCast(arg,c)
+                ExprKind::PointerCast(arg, c)
             }
             ',' => {
                 let arg = Persist::persist_read(reader);
@@ -546,10 +543,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let arg = Persist::persist_read(reader);
                 let arms = Persist::persist_read(reader);
 
-                ExprKind::Match {
-                    arg,
-                    arms
-                }
+                ExprKind::Match { arg, arms }
             }
             '&' => {
                 let mutability = match reader.read_byte() {
@@ -656,7 +650,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 block.persist_write(writer);
                 loop_id.0.persist_write(writer);
             }
-            ExprKind::ArrayRepeat(arg,size) => {
+            ExprKind::ArrayRepeat(arg, size) => {
                 writer.write_byte(b'N');
                 arg.persist_write(writer);
                 size.persist_write(writer);
@@ -692,7 +686,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 writer.write_byte(b'@');
                 e.persist_write(writer);
             }
-            ExprKind::PointerCast(e,cast) => {
+            ExprKind::PointerCast(e, cast) => {
                 writer.write_byte(b'^');
                 e.persist_write(writer);
                 cast.persist_write(writer);
@@ -780,25 +774,21 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 let fields = Persist::persist_read(reader);
                 let variant_index = Persist::persist_read(reader);
 
-                PatternKind::Enum{
+                PatternKind::Enum {
                     fields,
-                    variant_index
+                    variant_index,
                 }
             }
             'S' => {
                 let fields = Persist::persist_read(reader);
 
-                PatternKind::Struct{
-                    fields
-                }
+                PatternKind::Struct { fields }
             }
             'R' => {
                 let sub_pattern = Persist::persist_read(reader);
                 PatternKind::DeRef { sub_pattern }
             }
-            '_' => {
-                PatternKind::Hole
-            }
+            '_' => PatternKind::Hole,
             _ => panic!("todo read pattern '{}'", c),
         };
         Pattern { kind, ty }
@@ -824,12 +814,15 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 writer.write_byte(b'V');
                 v.persist_write(writer);
             }
-            PatternKind::Enum{ref fields,variant_index} => {
+            PatternKind::Enum {
+                ref fields,
+                variant_index,
+            } => {
                 writer.write_byte(b'E');
                 fields.persist_write(writer);
                 variant_index.persist_write(writer);
             }
-            PatternKind::Struct{ref fields} => {
+            PatternKind::Struct { ref fields } => {
                 writer.write_byte(b'S');
                 fields.persist_write(writer);
             }
@@ -862,10 +855,7 @@ impl<'vm> Persist<'vm> for FieldPattern {
         let field = Persist::persist_read(reader);
         let pattern = Persist::persist_read(reader);
 
-        Self {
-            field,
-            pattern
-        }
+        Self { field, pattern }
     }
 }
 
@@ -939,7 +929,7 @@ impl<'vm> Persist<'vm> for MatchArm {
         Self {
             pattern,
             body,
-            has_guard
+            has_guard,
         }
     }
 }
@@ -954,7 +944,7 @@ impl<'vm> Persist<'vm> for PointerCast {
             3 => PointerCast::MutToConstPointer,
             4 => PointerCast::ArrayToPointer,
             5 => PointerCast::UnSize,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 

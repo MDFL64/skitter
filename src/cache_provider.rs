@@ -12,8 +12,10 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
+    profiler::profile,
     types::Type,
-    vm::VM, profiler::profile, CratePath,
+    vm::VM,
+    CratePath,
 };
 
 pub struct CacheProvider<'vm> {

@@ -286,7 +286,11 @@ pub enum Instr<'vm> {
     MovPS8N(Slot, Slot, u16, u16),
     MovPS16N(Slot, Slot, u16, u16),
 
-    ArrayRepeat{base: Slot, size: u32, count: u32},
+    ArrayRepeat {
+        base: Slot,
+        size: u32,
+        count: u32,
+    },
 
     SlotAddr(Slot, Slot),
 
@@ -315,6 +319,10 @@ pub enum Instr<'vm> {
     JumpT(i32, Slot),
 
     Call(Slot, &'vm Function<'vm>),
+    CallPtr {
+        frame: Slot,
+        func_ptr: Slot,
+    },
 
     Return,
     Bad,
@@ -584,9 +592,7 @@ impl<'vm> Instr<'vm> {
             | Instr::MovPS8N(x, _, _, _)
             | Instr::MovPS16N(x, _, _, _) => Some(x),
 
-            Instr::ArrayRepeat{ base, size, count } => {
-                Some(base)
-            }
+            Instr::ArrayRepeat { base, size, count } => Some(base),
 
             Instr::SlotAddr(x, _) => Some(x),
             Instr::SlotAddrOffset { out, .. } => Some(out),
@@ -601,7 +607,8 @@ impl<'vm> Instr<'vm> {
             | Instr::Return
             | Instr::Bad
             | Instr::Debug(_)
-            | Instr::Call(_, _) => None,
+            | Instr::Call(_, _)
+            | Instr::CallPtr { .. } => None,
 
             Instr::I8_PopCount(x, _)
             | Instr::I16_PopCount(x, _)

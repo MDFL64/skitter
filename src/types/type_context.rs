@@ -7,10 +7,11 @@ use rustc_middle::ty::{
 };
 
 use crate::{
-    items::{path_from_rustc, AssocValue},
+    closure::Closure,
+    items::{path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
     types::Sub,
-    vm::VM, closure::Closure,
+    vm::VM,
 };
 
 use colosseum::sync::Arena;
@@ -120,9 +121,11 @@ impl<'vm> TypeContext<'vm> {
             },
             TyKind::Foreign(_) => TypeKind::Foreign,
             TyKind::Dynamic(..) => TypeKind::Dynamic,
-            TyKind::FnPtr(_) => TypeKind::FunctionPointer,
-            TyKind::Closure(did,subs) => {
-
+            TyKind::FnPtr(rs_sig) => {
+                let sig = FunctionSig::from_rustc(&rs_sig.skip_binder(), ctx);
+                TypeKind::FunctionPointer(sig)
+            }
+            TyKind::Closure(did, subs) => {
                 let closure = self.closure_from_rustc(*did, ctx);
 
                 let subs = self.subs_from_rustc(subs, ctx);
@@ -137,7 +140,6 @@ impl<'vm> TypeContext<'vm> {
         //println!("{:?} -> {:?}",ty,new_kind);
         self.intern(new_kind, ctx.vm)
     }
-
 
     pub fn subs_from_rustc<'tcx>(
         &'vm self,
@@ -209,7 +211,11 @@ impl<'vm> TypeContext<'vm> {
         ItemWithSubs { item, subs }
     }
 
-    pub fn closure_from_rustc<'tcx>(&'vm self, mut did: DefId, ctx: &RustCContext<'vm, 'tcx>) -> &'vm Closure<'vm> {
+    pub fn closure_from_rustc<'tcx>(
+        &'vm self,
+        mut did: DefId,
+        ctx: &RustCContext<'vm, 'tcx>,
+    ) -> &'vm Closure<'vm> {
         let mut path_indices = Vec::new();
 
         let mut def_path = ctx.tcx.def_path(did);
@@ -225,10 +231,8 @@ impl<'vm> TypeContext<'vm> {
                     def_path.data.pop();
                     did = ctx.tcx.parent(did);
                 }
-                DefPathData::ValueNs(_) => {
-                    break 
-                }
-                d => panic!("closure resolve {:?}",d)
+                DefPathData::ValueNs(_) => break,
+                d => panic!("closure resolve {:?}", d),
             }
         }
 

@@ -388,6 +388,10 @@ fn write_exec_match() {
     Instr::Call(base,func) => {
         self.call(func,stack_offset + base.index() as u32);
     }
+    Instr::CallPtr{ frame, func_ptr } => {
+        let func: &Function = read_stack(stack, *func_ptr);
+        self.call(func,stack_offset + frame.index() as u32);
+    }
     Instr::SlotAddr(out,arg) => {
         let res = stack.add(arg.index()) as usize;
         write_stack(stack, *out, res);

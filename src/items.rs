@@ -1,5 +1,5 @@
 use std::{
-    borrow::{Cow, BorrowMut},
+    borrow::{BorrowMut, Cow},
     hash::Hash,
     sync::{Arc, Mutex, OnceLock, RwLock},
 };
@@ -7,12 +7,13 @@ use std::{
 use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
+    closure::Closure,
     ir::{glue_builder::glue_for_ctor, IRFunction},
     lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM}, closure::Closure,
+    vm::{Function, VM},
 };
 use ahash::AHashMap;
 
@@ -237,7 +238,11 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('a' as u8);
                 info.get().unwrap().persist_write(writer);
             }
-            ItemKind::Trait { builtin, assoc_value_map, .. } => {
+            ItemKind::Trait {
+                builtin,
+                assoc_value_map,
+                ..
+            } => {
                 writer.write_byte('t' as u8);
                 builtin.get().copied().persist_write(writer);
                 assoc_value_map.get().unwrap().persist_write(writer);
@@ -266,7 +271,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     virtual_info,
                     extern_name,
                     ctor_for,
-                    closures: Default::default()
+                    closures: Default::default(),
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -295,9 +300,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             't' => {
                 let builtin = Option::<BuiltinTrait>::persist_read(reader);
-                let assoc_value_map = AHashMap::<ItemPath,u32>::persist_read(reader);
+                let assoc_value_map = AHashMap::<ItemPath, u32>::persist_read(reader);
 
-                ItemKind::new_trait_with(assoc_value_map,builtin)
+                ItemKind::new_trait_with(assoc_value_map, builtin)
             }
             _ => panic!(),
         };
@@ -322,7 +327,7 @@ impl<'vm> Persist<'vm> for BoundKind<'vm> {
                 writer.write_byte(0);
                 item.persist_write(writer);
             }
-            BoundKind::Projection(item,ty) => {
+            BoundKind::Projection(item, ty) => {
                 writer.write_byte(1);
                 item.persist_write(writer);
                 ty.persist_write(writer);
@@ -342,7 +347,7 @@ impl<'vm> Persist<'vm> for BoundKind<'vm> {
                 let ty = Type::persist_read(reader);
                 BoundKind::Projection(item, ty)
             }
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -375,7 +380,7 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
                 let ty = Type::persist_read(reader);
                 AssocValue::Type(ty)
             }
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -407,7 +412,7 @@ pub enum ItemKind<'vm> {
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
         extern_name: Option<(FunctionAbi, String)>,
-        closures: Mutex<AHashMap<Vec<u32>,&'vm Closure<'vm>>>
+        closures: Mutex<AHashMap<Vec<u32>, &'vm Closure<'vm>>>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -424,13 +429,13 @@ pub enum ItemKind<'vm> {
         info: OnceLock<AdtInfo<'vm>>,
     },
     Trait {
-        assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>,u32>>,
+        assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
         impl_list: RwLock<Vec<TraitImpl<'vm>>>,
         builtin: OnceLock<BuiltinTrait>,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionSig<'vm> {
     pub inputs: Vec<Type<'vm>>,
     pub output: Type<'vm>,
@@ -513,15 +518,13 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
                 let ty = Persist::persist_read(reader);
                 AdtKind::EnumWithDiscriminant(ty)
             }
-            2 => {
-                AdtKind::EnumNonZero
-            }
-            _ => panic!()
+            2 => AdtKind::EnumNonZero,
+            _ => panic!(),
         };
-        
-        AdtInfo{
+
+        AdtInfo {
             variant_fields,
-            kind
+            kind,
         }
     }
 }
@@ -541,7 +544,10 @@ impl<'vm> Persist<'vm> for VirtualInfo {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let trait_id = ItemId(u32::persist_read(reader));
         let member_index = u32::persist_read(reader);
-        Self { trait_id, member_index }
+        Self {
+            trait_id,
+            member_index,
+        }
     }
 }
 
@@ -587,7 +593,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: None,
             ctor_for: None,
-            closures: Default::default()
+            closures: Default::default(),
         }
     }
 
@@ -595,10 +601,13 @@ impl<'vm> ItemKind<'vm> {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
-            virtual_info: Some(VirtualInfo { trait_id, member_index }),
+            virtual_info: Some(VirtualInfo {
+                trait_id,
+                member_index,
+            }),
             extern_name: None,
             ctor_for: None,
-            closures: Default::default()
+            closures: Default::default(),
         }
     }
 
@@ -609,7 +618,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: Some((abi, name)),
             ctor_for: None,
-            closures: Default::default()
+            closures: Default::default(),
         }
     }
 
@@ -620,7 +629,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: None,
             ctor_for: Some((adt_id, variant)),
-            closures: Default::default()
+            closures: Default::default(),
         }
     }
 
@@ -637,7 +646,10 @@ impl<'vm> ItemKind<'vm> {
         Self::Constant {
             ir: Default::default(),
             mono_values: Default::default(),
-            virtual_info: Some(VirtualInfo { trait_id, member_index }),
+            virtual_info: Some(VirtualInfo {
+                trait_id,
+                member_index,
+            }),
             ctor_for: None,
         }
     }
@@ -653,7 +665,10 @@ impl<'vm> ItemKind<'vm> {
 
     pub fn new_associated_type(trait_id: ItemId, member_index: u32) -> Self {
         Self::AssociatedType {
-            virtual_info: VirtualInfo { trait_id, member_index },
+            virtual_info: VirtualInfo {
+                trait_id,
+                member_index,
+            },
         }
     }
 
@@ -671,7 +686,10 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_trait_with(assoc_value_map: AHashMap<ItemPath<'vm>,u32>, builtin: Option<BuiltinTrait>) -> Self {
+    pub fn new_trait_with(
+        assoc_value_map: AHashMap<ItemPath<'vm>, u32>,
+        builtin: Option<BuiltinTrait>,
+    ) -> Self {
         let mut builtin_lock = OnceLock::new();
 
         if let Some(builtin) = builtin {
@@ -843,9 +861,9 @@ impl<'vm> Item<'vm> {
 
         let mut closures = closures.lock().unwrap();
 
-        closures.entry(path_indices).or_insert_with(|| {
-            self.vm.alloc_closure()
-        })
+        closures
+            .entry(path_indices)
+            .or_insert_with(|| self.vm.alloc_closure())
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
@@ -864,7 +882,7 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) ->  usize {
+    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) -> usize {
         let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
@@ -882,23 +900,26 @@ impl<'vm> Item<'vm> {
         builtin.set(new_builtin).ok();
     }
 
-    pub fn trait_set_assoc_value_map(&self, new_map: AHashMap<ItemPath<'vm>,u32>) {
+    pub fn trait_set_assoc_value_map(&self, new_map: AHashMap<ItemPath<'vm>, u32>) {
         let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
             panic!("item kind mismatch");
         };
         assoc_value_map.set(new_map).ok();
     }
 
-    pub fn trait_build_assoc_values_for_impl(&self, pairs: &[(ItemPath,AssocValue<'vm>)]) -> Vec<Option<AssocValue<'vm>>> {
+    pub fn trait_build_assoc_values_for_impl(
+        &self,
+        pairs: &[(ItemPath, AssocValue<'vm>)],
+    ) -> Vec<Option<AssocValue<'vm>>> {
         let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         let assoc_value_map = assoc_value_map.get().unwrap();
 
-        let mut results = vec!(None;assoc_value_map.len());
+        let mut results = vec![None; assoc_value_map.len()];
 
-        for (key,val) in pairs {
+        for (key, val) in pairs {
             if let Some(index) = assoc_value_map.get(key) {
                 results[*index as usize] = Some(val.clone());
             } else {
@@ -949,7 +970,7 @@ impl<'vm> Item<'vm> {
                         return Some((ir, subs));
                     }
                     AssocValue::RawFunctionIR(ir) => return Some((ir.clone(), subs)),
-                    AssocValue::Type(_) => panic!("attempt to fetch IR for associated type")
+                    AssocValue::Type(_) => panic!("attempt to fetch IR for associated type"),
                 }
             } else {
                 None
@@ -991,7 +1012,6 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn read_trait_impl(&self, reader: &mut PersistReader<'vm>) {
-
         let for_types = SubList::persist_read(reader);
         let bounds = Vec::<BoundKind>::persist_read(reader);
 
@@ -999,10 +1019,10 @@ impl<'vm> Item<'vm> {
             let lifetimes = u32::persist_read(reader);
             let types = u32::persist_read(reader);
             let consts = u32::persist_read(reader);
-            GenericCounts{
+            GenericCounts {
                 lifetimes,
                 types,
-                consts
+                consts,
             }
         };
 
@@ -1016,7 +1036,7 @@ impl<'vm> Item<'vm> {
 
         let mut impl_list = impl_list.write().unwrap();
 
-        impl_list.push(TraitImpl{
+        impl_list.push(TraitImpl {
             crate_id: reader.context.this_crate,
             for_types,
             bounds,

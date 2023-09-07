@@ -177,7 +177,7 @@ where
             if bucket_keys.len() == 1 {
                 let item_index = bucket_keys[0].1;
                 table_1[bucket_i] = item_index as i32;
-                println!("> {:?} t1[{}]={}",bucket_keys[0].0,bucket_i,item_index);
+                println!("> {:?} t1[{}]={}", bucket_keys[0].0, bucket_i, item_index);
             } else if bucket_keys.len() > 1 {
                 let mut seed = -1;
                 loop {
@@ -199,7 +199,10 @@ where
                     if new_indices.len() == bucket_keys.len() {
                         for (hash_index, item_index, key) in new_indices {
                             table_2[hash_index] = *item_index as i32;
-                            println!("> {:?} t1[{}]={} t2[{}]={}",key,bucket_i,seed,hash_index,item_index);
+                            println!(
+                                "> {:?} t1[{}]={} t2[{}]={}",
+                                key, bucket_i, seed, hash_index, item_index
+                            );
                         }
                         table_1[bucket_i] = seed;
                         break;

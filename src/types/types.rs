@@ -2,7 +2,10 @@ use std::fmt::Display;
 
 use ahash::AHashMap;
 
-use crate::{items::{AdtInfo, AssocValue, CrateId, Item}, closure::Closure};
+use crate::{
+    closure::Closure,
+    items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
+};
 
 use super::{
     layout::Layout,
@@ -34,8 +37,8 @@ pub enum TypeKind<'vm> {
     Foreign,
     Opaque,
     Dynamic,
-    FunctionPointer,
-    Closure(&'vm Closure<'vm>,SubList<'vm>),
+    FunctionPointer(FunctionSig<'vm>),
+    Closure(&'vm Closure<'vm>, SubList<'vm>),
 
     Param(u32),
     Unknown, //Error
@@ -203,13 +206,12 @@ impl<'vm> Type<'vm> {
 
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
-            TypeKind::Closure(closure,closure_subs) => {
-
+            TypeKind::Closure(closure, closure_subs) => {
                 let new_subs = closure_subs.sub(subs);
 
                 vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
             }
-            TypeKind::FunctionPointer => {
+            TypeKind::FunctionPointer(_) => {
                 assert!(subs.list.len() == 0);
 
                 *self
@@ -232,10 +234,10 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
-            TypeKind::Closure(_,subs) => subs.is_concrete(),
+            TypeKind::Closure(_, subs) => subs.is_concrete(),
             TypeKind::Ref(child, _) => child.is_concrete(),
             TypeKind::Slice(child) => child.is_concrete(),
-            TypeKind::FunctionPointer => {
+            TypeKind::FunctionPointer(_) => {
                 println!("todo function pointer concrete?");
                 true
             }
@@ -306,9 +308,7 @@ impl<'vm> Type<'vm> {
             // primitive types have impls in core
             TypeKind::Int(..) => *self.1.core_crate.get().unwrap(),
 
-            TypeKind::Adt(item) => {
-                item.item.crate_id
-            }
+            TypeKind::Adt(item) => item.item.crate_id,
             _ => panic!("find_impl_crate {:?}", self.kind()),
         }
     }

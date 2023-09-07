@@ -1,7 +1,6 @@
 use ahash::AHashSet;
 use colosseum::sync::Arena;
 
-use crate::CratePath;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::closure::Closure;
@@ -19,6 +18,7 @@ use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
+use crate::CratePath;
 use std::cell::OnceCell;
 use std::error::Error;
 use std::path::Path;
@@ -117,7 +117,7 @@ impl<'vm> VM<'vm> {
 
             map_paths: Default::default(),
 
-            next_closure_id: AtomicU32::new(0)
+            next_closure_id: AtomicU32::new(0),
         }
     }
 
@@ -179,7 +179,7 @@ impl<'vm> VM<'vm> {
             subs,
             native: Default::default(),
             bytecode: Default::default(),
-            sub_id: None
+            sub_id: None,
         };
 
         let path = item.path.as_string();
@@ -211,7 +211,7 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
-        println!("- {}",n);
+        println!("- {}", n);
 
         self.arena_closures.alloc(Closure::new(n))
     }
@@ -264,7 +264,7 @@ pub struct Function<'vm> {
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>,
     /// This is set for closures which refer to their root function item.
-    sub_id: Option<u32>
+    sub_id: Option<u32>,
 }
 
 impl<'vm> Function<'vm> {

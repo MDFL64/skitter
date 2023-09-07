@@ -7,7 +7,7 @@ use crate::ir::{
     PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{Mutability, SubList, Type, TypeKind, ArraySize};
+use crate::types::{ArraySize, Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -353,27 +353,67 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             }
             ExprKind::Call { func, args } => {
                 let ty = self.expr_ty(*func);
-                let func_ref = ty.func_item().expect("can't find function");
+                if let Some(func_ref) = ty.func_item() {
+                    if let Some((FunctionAbi::RustIntrinsic, extern_name)) =
+                        func_ref.item.func_extern()
+                    {
+                        let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                if let Some((FunctionAbi::RustIntrinsic, extern_name)) = func_ref.item.func_extern()
-                {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                        let arg_slots =
+                            args.iter().map(|arg| self.lower_expr(*arg, None)).collect();
 
-                    let arg_slots = args.iter().map(|arg| self.lower_expr(*arg, None)).collect();
+                        compile_rust_intrinsic(
+                            extern_name,
+                            &func_ref.subs,
+                            self.vm,
+                            &mut self.out_bc,
+                            &mut self.stack,
+                            arg_slots,
+                            dst_slot,
+                        );
 
-                    compile_rust_intrinsic(
-                        extern_name,
-                        &func_ref.subs,
-                        self.vm,
-                        &mut self.out_bc,
-                        &mut self.stack,
-                        arg_slots,
-                        dst_slot,
-                    );
+                        dst_slot
+                    } else {
+                        let func = func_ref.item.func_mono(&func_ref.subs);
+                        let call_start_instr = self.out_bc.len();
 
-                    dst_slot
-                } else {
-                    let func = func_ref.item.func_mono(&func_ref.subs);
+                        // evaluate arguments and write them to a virtual call frame
+                        let mut call_frame = CallFrame::default();
+                        call_frame.alloc(expr_ty);
+                        for arg in args.iter() {
+                            let arg_ty = self.expr_ty(*arg);
+                            let arg_slot = call_frame.alloc(arg_ty);
+                            self.lower_expr(*arg, Some(arg_slot));
+                        }
+
+                        // set up real call frame
+                        let base_slot = self.stack.align_for_call();
+                        let ret_slot = self.stack.alloc(expr_ty);
+                        assert_eq!(ret_slot, base_slot);
+
+                        for arg in args.iter() {
+                            let arg_ty = self.expr_ty(*arg);
+                            self.stack.alloc(arg_ty);
+                        }
+
+                        // amend the previous code to write args into the correct slots
+                        for index in call_start_instr..self.out_bc.len() {
+                            self.out_bc[index].replace_arg_sub(base_slot);
+                        }
+
+                        self.out_bc.push(Instr::Call(ret_slot, func));
+                        if let Some(dst_slot) = dst_slot {
+                            if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty)
+                            {
+                                self.out_bc.push(instr);
+                            }
+                            dst_slot
+                        } else {
+                            ret_slot
+                        }
+                    }
+                } else if let TypeKind::FunctionPointer(_) = ty.kind() {
+                    let func_slot = self.lower_expr(*func, None);
                     let call_start_instr = self.out_bc.len();
 
                     // evaluate arguments and write them to a virtual call frame
@@ -400,7 +440,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.out_bc[index].replace_arg_sub(base_slot);
                     }
 
-                    self.out_bc.push(Instr::Call(ret_slot, func));
+                    self.out_bc.push(Instr::CallPtr {
+                        frame: ret_slot,
+                        func_ptr: func_slot,
+                    });
                     if let Some(dst_slot) = dst_slot {
                         if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty) {
                             self.out_bc.push(instr);
@@ -409,6 +452,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     } else {
                         ret_slot
                     }
+                } else {
+                    panic!("bad call");
                 }
             }
             ExprKind::If {
@@ -696,6 +741,24 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         dst_slot
                     }
+                    PointerCast::ReifyFnPointer => {
+                        let src_ty = self.expr_ty(*source);
+
+                        if let Some(func_ref) = src_ty.func_item() {
+                            let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                            let func_ptr = func_ref.item.func_mono(&func_ref.subs) as *const _;
+
+                            self.out_bc.push(bytecode_select::literal(
+                                func_ptr as i128,
+                                POINTER_SIZE.bytes(),
+                                dst_slot,
+                            ));
+                            dst_slot
+                        } else {
+                            panic!("cannot reify function: {}", src_ty)
+                        }
+                    }
                     _ => panic!("todo ptr cast {:?}", cast),
                 }
             }
@@ -725,12 +788,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::ArrayRepeat(arg,size) => {
+            ExprKind::ArrayRepeat(arg, size) => {
                 // TODO could const eval the whole thing in many cases, but it may be best to
                 // think about that if/when doing more generalized const eval
                 let count = match size {
                     ArraySize::Static(n) => *n,
-                    ArraySize::ConstParam(_) => panic!("todo const param array size")
+                    ArraySize::ConstParam(_) => panic!("todo const param array size"),
                 };
 
                 let elem_size = self.expr_ty(*arg).layout().assert_size();
@@ -739,7 +802,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 self.lower_expr(*arg, Some(dst_slot));
 
-                self.out_bc.push(Instr::ArrayRepeat{ base: dst_slot, size: elem_size, count });
+                self.out_bc.push(Instr::ArrayRepeat {
+                    base: dst_slot,
+                    size: elem_size,
+                    count,
+                });
 
                 dst_slot
             }

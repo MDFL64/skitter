@@ -1,9 +1,8 @@
-use std::sync::{Mutex, Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ahash::AHashMap;
 
 use crate::{ir::IRFunction, types::SubList, vm::Function};
-
 
 /// Plays a similar role to function items. Contains IR and a table of monomorphizations.
 /// FUTURE CONSIDERATIONS: Unlike function items, the IR cannot be mutated once set.
@@ -11,7 +10,7 @@ use crate::{ir::IRFunction, types::SubList, vm::Function};
 pub struct Closure<'vm> {
     ir: OnceLock<Arc<IRFunction<'vm>>>,
     mono_instances: Mutex<AHashMap<SubList<'vm>, &'vm Function<'vm>>>,
-    unique_id: u32
+    unique_id: u32,
 }
 
 impl<'vm> Closure<'vm> {
@@ -19,7 +18,7 @@ impl<'vm> Closure<'vm> {
         Self {
             ir: Default::default(),
             mono_instances: Default::default(),
-            unique_id
+            unique_id,
         }
     }
 }

@@ -19,15 +19,15 @@ use crate::{
     crate_provider::CrateProvider,
     ir::{converter::IRFunctionConverter, IRFunction},
     items::{
-        path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId, ExternCrate,
-        FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl, ident_from_rustc,
+        ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
+        ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
-    types::{IntSign, IntWidth, Type, TypeKind, ItemWithSubs},
+    types::{IntSign, IntWidth, ItemWithSubs, Type, TypeKind},
     vm::VM,
-    CratePath
+    CratePath,
 };
 
 /////////////////////////
@@ -365,8 +365,12 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                             AssocItemKind::Fn { .. } => {
                                 ItemKind::new_function_virtual(trait_id, id_in_trait)
                             }
-                            AssocItemKind::Type => ItemKind::new_associated_type(trait_id, id_in_trait),
-                            AssocItemKind::Const => ItemKind::new_const_virtual(trait_id, id_in_trait),
+                            AssocItemKind::Type => {
+                                ItemKind::new_associated_type(trait_id, id_in_trait)
+                            }
+                            AssocItemKind::Const => {
+                                ItemKind::new_const_virtual(trait_id, id_in_trait)
+                            }
                         };
                         items.index_item(kind, item_path, local_id, vm);
                     }
@@ -394,7 +398,9 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                         match item.kind {
                             AssocItemKind::Fn { .. } => {
-                                let item_path = ItemPath::for_debug(vm.alloc_path(&format!("{}::{}", base_path, item.ident)));
+                                let item_path = ItemPath::for_debug(
+                                    vm.alloc_path(&format!("{}::{}", base_path, item.ident)),
+                                );
 
                                 let kind = ItemKind::new_function();
                                 let item_id = items.index_item(kind, item_path, local_id, vm);
@@ -402,7 +408,9 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                 assoc_values.push((item_name, AssocValue::Item(item_id)));
                             }
                             AssocItemKind::Const => {
-                                let item_path = ItemPath::for_debug(vm.alloc_path(&format!("{}::{}", base_path, item.ident)));
+                                let item_path = ItemPath::for_debug(
+                                    vm.alloc_path(&format!("{}::{}", base_path, item.ident)),
+                                );
 
                                 let kind = ItemKind::new_const();
                                 let item_id = items.index_item(kind, item_path, local_id, vm);
@@ -464,7 +472,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             tcx,
             items: Arc::new(items),
             extern_crates: worker_config.extern_crates,
-            extern_crate_id_cache: Default::default()
+            extern_crate_id_cache: Default::default(),
         };
 
         // fill ADT fields
@@ -527,14 +535,14 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 }
                 ImplSubject::Trait(trait_ref) => {
                     /*let assoc_tys: AHashMap<_, _> = impl_item
-                        .assoc_tys
-                        .into_iter()
-                        .map(|(name, local_id)| {
-                            let ty = tcx.type_of(local_id).skip_binder();
-                            let ty = vm.types.type_from_rustc(ty, &ctx);
-                            (name, ty)
-                        })
-                        .collect();*/
+                    .assoc_tys
+                    .into_iter()
+                    .map(|(name, local_id)| {
+                        let ty = tcx.type_of(local_id).skip_binder();
+                        let ty = vm.types.type_from_rustc(ty, &ctx);
+                        (name, ty)
+                    })
+                    .collect();*/
 
                     let trait_did = trait_ref.def_id;
 
@@ -596,19 +604,21 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                     let for_types = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
-                    let assoc_value_count = impl_item.assoc_values.len() + impl_item.assoc_tys.len();
+                    let assoc_value_count =
+                        impl_item.assoc_values.len() + impl_item.assoc_tys.len();
                     let mut assoc_value_source = Vec::with_capacity(assoc_value_count);
 
-                    for (key,val) in &impl_item.assoc_values {
-                        assoc_value_source.push((ItemPath::for_value(key),val.clone()));
+                    for (key, val) in &impl_item.assoc_values {
+                        assoc_value_source.push((ItemPath::for_value(key), val.clone()));
                     }
-                    for (key,local_id) in &impl_item.assoc_tys {
+                    for (key, local_id) in &impl_item.assoc_tys {
                         let ty = tcx.type_of(*local_id).skip_binder();
                         let ty = vm.types.type_from_rustc(ty, &ctx);
-                        assoc_value_source.push((ItemPath::for_type(key),AssocValue::Type(ty)));
+                        assoc_value_source.push((ItemPath::for_type(key), AssocValue::Type(ty)));
                     }
 
-                    let assoc_values = trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
+                    let assoc_values =
+                        trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
 
                     let index = trait_item.add_trait_impl(TraitImpl {
                         crate_id: this_crate,
@@ -619,7 +629,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     });
 
                     if worker_config.save_file {
-                        impl_ids.push((trait_item,index));
+                        impl_ids.push((trait_item, index));
                     }
                 }
             }
@@ -699,7 +709,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let mut writer = PersistWriter::new(this_crate);
             persist_header_write(&mut writer);
             crate_header.persist_write(&mut writer);
-            
+
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);
 
@@ -707,7 +717,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 let mut writer = writer.new_child_writer();
 
                 impl_ids.len().persist_write(&mut writer);
-                for (trait_item,index) in impl_ids {
+                for (trait_item, index) in impl_ids {
                     trait_item.write_trait_impl(index, &mut writer);
                 }
 

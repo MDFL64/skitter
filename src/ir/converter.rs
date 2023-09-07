@@ -293,7 +293,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     .iter()
                     .find(|(h, _)| h == &target)
                     .copied()
-                    .map(|(_,id)| id);
+                    .map(|(_, id)| id);
 
                 if let Some(loop_id) = loop_id {
                     let value = value.map(|e| self.expr(e));
@@ -329,7 +329,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 } else {
                     let res = self.types.qpath_res(&path, expr.hir_id);
                     let variant = Self::def_variant(&res, rs_ty);
-    
+
                     let fields = fields
                         .iter()
                         .map(|field| {
@@ -338,7 +338,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             (id, expr)
                         })
                         .collect();
-    
+
                     ExprKind::Adt { variant, fields }
                 }
             }
@@ -346,12 +346,12 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let args = args.iter().map(|a| self.expr(a)).collect();
                 ExprKind::Array(args)
             }
-            hir::ExprKind::Repeat(arg,_) => {
+            hir::ExprKind::Repeat(arg, _) => {
                 let arg = self.expr(arg);
                 let TypeKind::Array(_,size) = ty.kind() else {
                     panic!("bad type for repeated array")
                 };
-                ExprKind::ArrayRepeat(arg,size.clone())
+                ExprKind::ArrayRepeat(arg, size.clone())
             }
             hir::ExprKind::Index(lhs, index) => {
                 let lhs = self.expr(lhs);
@@ -421,10 +421,10 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 return self.expr(e);
             }
             hir::ExprKind::Closure(closure) => {
-                println!("closure ids = {:?} / {:?}",closure.def_id,closure.body);
+                println!("closure ids = {:?} / {:?}", closure.def_id, closure.body);
 
                 // assert the absolute simplest case
-                if let rustc_hir::ClosureBinder::For{..} = closure.binder {
+                if let rustc_hir::ClosureBinder::For { .. } = closure.binder {
                     panic!("closure binder");
                 }
                 assert!(closure.constness == rustc_hir::Constness::NotConst);
@@ -434,8 +434,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 ExprKind::LiteralVoid
             }
-            hir::ExprKind::ConstBlock(..) |
-            hir::ExprKind::InlineAsm(..) => {
+            hir::ExprKind::ConstBlock(..) | hir::ExprKind::InlineAsm(..) => {
                 // TODO
                 ExprKind::Error
             }
@@ -680,7 +679,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 match lit {
                     ExprKind::LiteralValue(val) => PatternKind::LiteralValue(val),
                     _ => {
-                        println!("pat lit {:?}",lit);
+                        println!("pat lit {:?}", lit);
                         PatternKind::Error
                     }
                 }
@@ -832,8 +831,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 PatternKind::Or { options }
             }
             hir::PatKind::Wild => PatternKind::Hole,
-            hir::PatKind::Slice(..) |
-            hir::PatKind::Range(..) => {
+            hir::PatKind::Slice(..) | hir::PatKind::Range(..) => {
                 // TODO
                 PatternKind::Error
             }

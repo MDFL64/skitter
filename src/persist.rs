@@ -1,8 +1,8 @@
 use std::{
     cell::RefCell,
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, OnceLock},
-    path::PathBuf
 };
 
 use ahash::AHashMap;
@@ -341,13 +341,14 @@ where
     }
 }
 
-impl<'vm, K, V> Persist<'vm> for AHashMap<K,V>
+impl<'vm, K, V> Persist<'vm> for AHashMap<K, V>
 where
-    K: Persist<'vm> + std::hash::Hash + Eq, V: Persist<'vm>,
+    K: Persist<'vm> + std::hash::Hash + Eq,
+    V: Persist<'vm>,
 {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.len().persist_write(writer);
-        for (k,v) in self {
+        for (k, v) in self {
             k.persist_write(writer);
             v.persist_write(writer);
         }
@@ -360,7 +361,7 @@ where
             let key = K::persist_read(reader);
             let val = V::persist_read(reader);
 
-            result.insert(key,val);
+            result.insert(key, val);
         }
         result
     }

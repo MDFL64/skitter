@@ -84,6 +84,11 @@ impl Layout {
                     }
                 }
             }
+            TypeKind::FunctionPointer(_) => {
+                let ptr_size = POINTER_SIZE.bytes();
+                Layout::simple(ptr_size)
+            }
+
             TypeKind::Adt(ItemWithSubs { item, subs }) => {
                 let info = item.adt_info();
 
