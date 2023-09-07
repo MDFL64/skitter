@@ -4,6 +4,7 @@ use colosseum::sync::Arena;
 use crate::CratePath;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
+use crate::closure::Closure;
 use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
 use crate::items::Item;
@@ -21,6 +22,7 @@ use crate::vm::instr::Slot;
 use std::cell::OnceCell;
 use std::error::Error;
 use std::path::Path;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,11 +43,14 @@ pub struct VM<'vm> {
     arena_crates: Arena<Box<dyn CrateProvider<'vm>>>,
     arena_items: Arena<Item<'vm>>,
     arena_functions: Arena<Function<'vm>>,
+    arena_closures: Arena<Closure<'vm>>,
     arena_bytecode: Arena<Vec<Instr<'vm>>>,
     arena_constants: Arena<Vec<u8>>,
     arena_paths: Arena<String>,
 
     map_paths: Mutex<AHashSet<&'vm str>>,
+
+    next_closure_id: AtomicU32,
 }
 
 pub struct VMThread<'vm> {
@@ -108,8 +113,11 @@ impl<'vm> VM<'vm> {
             arena_bytecode: Arena::new(),
             arena_constants: Arena::new(),
             arena_paths: Arena::new(),
+            arena_closures: Arena::new(),
 
             map_paths: Default::default(),
+
+            next_closure_id: AtomicU32::new(0)
         }
     }
 
@@ -199,6 +207,13 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_constant(&'vm self, str: Vec<u8>) -> &'vm [u8] {
         self.arena_constants.alloc(str)
+    }
+
+    pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
+        let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
+        println!("- {}",n);
+
+        self.arena_closures.alloc(Closure::new(n))
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {

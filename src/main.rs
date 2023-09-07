@@ -27,6 +27,7 @@ mod bytecode_compiler;
 mod bytecode_select;
 mod cache_provider;
 mod cli;
+mod closure;
 mod crate_provider;
 mod ir;
 mod items;

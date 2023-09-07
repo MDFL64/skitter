@@ -1,5 +1,6 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
+use ahash::AHashMap;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{
     AliasKind, FloatTy, GenericArg, GenericArgKind, ImplSubject, IntTy, Ty, TyKind, UintTy,
@@ -9,7 +10,7 @@ use crate::{
     items::{path_from_rustc, AssocValue},
     rustc_worker::RustCContext,
     types::Sub,
-    vm::VM,
+    vm::VM, closure::Closure,
 };
 
 use colosseum::sync::Arena;
@@ -20,7 +21,7 @@ use super::{
 };
 
 pub struct TypeContext<'vm> {
-    table: Mutex<HashMap<TypeKind<'vm>, Type<'vm>>>,
+    table: Mutex<AHashMap<TypeKind<'vm>, Type<'vm>>>,
     arena: Arena<InternedType<'vm>>,
 }
 
@@ -120,10 +121,13 @@ impl<'vm> TypeContext<'vm> {
             TyKind::Foreign(_) => TypeKind::Foreign,
             TyKind::Dynamic(..) => TypeKind::Dynamic,
             TyKind::FnPtr(_) => TypeKind::FunctionPointer,
-            TyKind::Closure(did, subs) => {
-                let item_with_subs = self.def_from_rustc(*did, subs, ctx);
-                println!("{:?}",item_with_subs);
-                TypeKind::Closure
+            TyKind::Closure(did,subs) => {
+
+                let closure = self.closure_from_rustc(*did, ctx);
+
+                let subs = self.subs_from_rustc(subs, ctx);
+
+                TypeKind::Closure(closure, subs)
             }
 
             TyKind::Param(param) => TypeKind::Param(param.index),
@@ -133,6 +137,7 @@ impl<'vm> TypeContext<'vm> {
         //println!("{:?} -> {:?}",ty,new_kind);
         self.intern(new_kind, ctx.vm)
     }
+
 
     pub fn subs_from_rustc<'tcx>(
         &'vm self,
@@ -202,6 +207,40 @@ impl<'vm> TypeContext<'vm> {
         let subs = self.subs_from_rustc(args, ctx);
 
         ItemWithSubs { item, subs }
+    }
+
+    pub fn closure_from_rustc<'tcx>(&'vm self, mut did: DefId, ctx: &RustCContext<'vm, 'tcx>) -> &'vm Closure<'vm> {
+        let mut path_indices = Vec::new();
+
+        let mut def_path = ctx.tcx.def_path(did);
+
+        loop {
+            use rustc_hir::definitions::DefPathData;
+
+            let last = def_path.data.last().expect("closure missing parent");
+
+            match last.data {
+                DefPathData::ClosureExpr => {
+                    path_indices.push(last.disambiguator);
+                    def_path.data.pop();
+                    did = ctx.tcx.parent(did);
+                }
+                DefPathData::ValueNs(_) => {
+                    break 
+                }
+                d => panic!("closure resolve {:?}",d)
+            }
+        }
+
+        // DEBUG
+        {
+            let check_path = ctx.tcx.def_path(did);
+            assert!(def_path.data == check_path.data);
+        }
+
+        let parent_item = self.def_from_rustc(did, &[], ctx);
+
+        parent_item.item.child_closure(path_indices)
     }
 
     pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {

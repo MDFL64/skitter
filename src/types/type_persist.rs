@@ -154,7 +154,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 n.persist_write(writer);
             }
 
-            TypeKind::Closure => writer.write_byte(252),
+            TypeKind::Closure(..) => writer.write_byte(252),
             TypeKind::Dynamic => writer.write_byte(254),
             TypeKind::Opaque => writer.write_byte(255),
 

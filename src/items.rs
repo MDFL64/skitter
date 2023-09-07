@@ -1,6 +1,5 @@
 use std::{
-    borrow::Cow,
-    collections::HashMap,
+    borrow::{Cow, BorrowMut},
     hash::Hash,
     sync::{Arc, Mutex, OnceLock, RwLock},
 };
@@ -13,7 +12,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM},
+    vm::{Function, VM}, closure::Closure,
 };
 use ahash::AHashMap;
 
@@ -267,6 +266,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     virtual_info,
                     extern_name,
                     ctor_for,
+                    closures: Default::default()
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -403,16 +403,17 @@ impl<'vm> Persist<'vm> for (FunctionAbi, String) {
 pub enum ItemKind<'vm> {
     Function {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        mono_instances: Mutex<HashMap<SubList<'vm>, &'vm Function<'vm>>>,
+        mono_instances: Mutex<AHashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
         extern_name: Option<(FunctionAbi, String)>,
+        closures: Mutex<AHashMap<Vec<u32>,&'vm Closure<'vm>>>
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
     Constant {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        mono_values: Mutex<HashMap<SubList<'vm>, &'vm [u8]>>,
+        mono_values: Mutex<AHashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
     },
@@ -586,6 +587,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: None,
             ctor_for: None,
+            closures: Default::default()
         }
     }
 
@@ -596,6 +598,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: Some(VirtualInfo { trait_id, member_index }),
             extern_name: None,
             ctor_for: None,
+            closures: Default::default()
         }
     }
 
@@ -606,6 +609,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: Some((abi, name)),
             ctor_for: None,
+            closures: Default::default()
         }
     }
 
@@ -616,6 +620,7 @@ impl<'vm> ItemKind<'vm> {
             virtual_info: None,
             extern_name: None,
             ctor_for: Some((adt_id, variant)),
+            closures: Default::default()
         }
     }
 
@@ -829,6 +834,18 @@ impl<'vm> Item<'vm> {
             ItemKind::Constant { ctor_for, .. } => ctor_for.clone(),
             _ => panic!("item kind mismatch"),
         }
+    }
+
+    pub fn child_closure(&self, path_indices: Vec<u32>) -> &'vm Closure<'vm> {
+        let ItemKind::Function{closures,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        let mut closures = closures.lock().unwrap();
+
+        closures.entry(path_indices).or_insert_with(|| {
+            self.vm.alloc_closure()
+        })
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {

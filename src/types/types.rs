@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use ahash::AHashMap;
 
-use crate::items::{AdtInfo, AssocValue, CrateId, Item};
+use crate::{items::{AdtInfo, AssocValue, CrateId, Item}, closure::Closure};
 
 use super::{
     layout::Layout,
@@ -35,7 +35,7 @@ pub enum TypeKind<'vm> {
     Opaque,
     Dynamic,
     FunctionPointer,
-    Closure,
+    Closure(&'vm Closure<'vm>,SubList<'vm>),
 
     Param(u32),
     Unknown, //Error
@@ -203,11 +203,18 @@ impl<'vm> Type<'vm> {
 
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
-            // These types never accept subs.
-            TypeKind::Closure => {
-                println!("todo sub closure");
+            TypeKind::Closure(closure,closure_subs) => {
+
+                let new_subs = closure_subs.sub(subs);
+
+                vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
+            }
+            TypeKind::FunctionPointer => {
+                assert!(subs.list.len() == 0);
+
                 *self
             }
+            // These types never accept subs.
             TypeKind::Never
             | TypeKind::Int(..)
             | TypeKind::Float(_)
@@ -225,8 +232,13 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
+            TypeKind::Closure(_,subs) => subs.is_concrete(),
             TypeKind::Ref(child, _) => child.is_concrete(),
             TypeKind::Slice(child) => child.is_concrete(),
+            TypeKind::FunctionPointer => {
+                println!("todo function pointer concrete?");
+                true
+            }
             TypeKind::Param(_) | TypeKind::Unknown => false,
             _ => panic!("is concrete? {}", self),
         }

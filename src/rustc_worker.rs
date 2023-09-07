@@ -25,7 +25,7 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
-    types::{IntSign, IntWidth, Type, TypeKind},
+    types::{IntSign, IntWidth, Type, TypeKind, ItemWithSubs},
     vm::VM,
     CratePath
 };
@@ -464,7 +464,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             tcx,
             items: Arc::new(items),
             extern_crates: worker_config.extern_crates,
-            extern_crate_id_cache: Default::default(),
+            extern_crate_id_cache: Default::default()
         };
 
         // fill ADT fields
