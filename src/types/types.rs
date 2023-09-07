@@ -211,10 +211,10 @@ impl<'vm> Type<'vm> {
 
                 vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
             }
-            TypeKind::FunctionPointer(_) => {
-                assert!(subs.list.len() == 0);
+            TypeKind::FunctionPointer(sig) => {
+                let new_sig = sig.sub(subs);
 
-                *self
+                vm.types.intern(TypeKind::FunctionPointer(new_sig), vm)
             }
             // These types never accept subs.
             TypeKind::Never
