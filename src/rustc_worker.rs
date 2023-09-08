@@ -212,6 +212,10 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         res.wait()
     }
 
+    fn build_adt(&self, id: ItemId) -> AdtInfo<'vm> {
+        panic!("rustc worker should create all adt info eagerly");
+    }
+
     fn fill_inherent_impls(&self, _: Type<'vm>) {
         // All we need to do is wait for initialization.
         self.call(|_| {}).wait();

@@ -87,6 +87,12 @@ pub struct ItemWithSubs<'vm> {
     pub subs: SubList<'vm>,
 }
 
+impl<'vm> Display for ItemWithSubs<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}",self.item.path.as_string(),self.subs)
+    }
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ArraySize {
     Static(u32),

@@ -8,7 +8,7 @@ use std::{
 use crate::{
     crate_provider::CrateProvider,
     ir::IRFunction,
-    items::{CrateId, Item, ItemId, ItemPath},
+    items::{CrateId, Item, ItemId, ItemPath, AdtInfo},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
@@ -93,6 +93,18 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
             Arc::new(ir)
         } else {
             panic!("no ir available for {:?}", id);
+        }
+    }
+
+    fn build_adt(&self, id: ItemId) -> AdtInfo<'vm> {
+        let items = self.read_context.items.get().unwrap();
+        let item = items.array.get(id.index());
+
+        if let Some(saved_info) = item.saved_ir {
+            let mut reader = PersistReader::new(saved_info, self.read_context.clone());
+            AdtInfo::persist_read(&mut reader)
+        } else {
+            panic!("no adt info available for {:?}", id);
         }
     }
 

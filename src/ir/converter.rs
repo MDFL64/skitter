@@ -428,8 +428,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     panic!("closure binder");
                 }
                 assert!(closure.constness == rustc_hir::Constness::NotConst);
-                assert!(closure.capture_clause == rustc_hir::CaptureBy::Ref);
-                assert!(closure.bound_generic_params.len() == 0);
+                //assert!(closure.capture_clause == rustc_hir::CaptureBy::Ref);
+                //assert!(closure.bound_generic_params.len() == 0);
                 assert!(closure.movability.is_none());
 
                 ExprKind::LiteralVoid

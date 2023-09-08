@@ -236,7 +236,13 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             ItemKind::Adt { info } => {
                 writer.write_byte('a' as u8);
-                info.get().unwrap().persist_write(writer);
+
+                let adt_block = {
+                    let mut writer = writer.new_child_writer();
+                    info.get().unwrap().persist_write(&mut writer);
+                    writer.flip()
+                };
+                writer.write_byte_slice(&adt_block);
             }
             ItemKind::Trait {
                 builtin,
@@ -295,8 +301,8 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 kind
             }
             'a' => {
-                let info = AdtInfo::persist_read(reader);
-                ItemKind::Adt { info: info.into() }
+                ir = reader.read_byte_slice();
+                ItemKind::Adt { info: OnceLock::new() }
             }
             't' => {
                 let builtin = Option::<BuiltinTrait>::persist_read(reader);
@@ -461,6 +467,22 @@ impl<'vm> FunctionSig<'vm> {
         let output = self.output.sub(subs);
 
         Self { inputs, output }
+    }
+}
+
+impl<'vm> Persist<'vm> for FunctionSig<'vm> {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let inputs = Persist::persist_read(reader);
+        let output = Persist::persist_read(reader);
+        Self {
+            inputs,
+            output
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.inputs.persist_write(writer);
+        self.output.persist_write(writer);
     }
 }
 
@@ -855,15 +877,24 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn child_closure(&self, path_indices: Vec<u32>) -> &'vm Closure<'vm> {
-        let ItemKind::Function{closures,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
-
-        let mut closures = closures.lock().unwrap();
-
-        closures
-            .entry(path_indices)
-            .or_insert_with(|| self.vm.alloc_closure())
+        // TODO just place the closures map on all items?
+        // fns and consts will probably account for a majority of items anyway
+        match &self.kind {
+            ItemKind::Function{closures,..} => {
+                let mut closures = closures.lock().unwrap();
+        
+                closures
+                    .entry(path_indices)
+                    .or_insert_with(|| self.vm.alloc_closure())
+            }
+            ItemKind::Constant { .. } => {
+                println!("TODO CLOSURE IN CONSTANT!");
+                self.vm.alloc_closure()
+            }
+            _ => {
+                panic!("attempt to get child closure on {:?}",self)
+            }
+        }
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
@@ -871,7 +902,13 @@ impl<'vm> Item<'vm> {
             panic!("item kind mismatch");
         };
 
-        info.get().expect("adt missing fields")
+        if let Some(info) = info.get() {
+            info
+        } else {
+            let new_info = self.vm.crate_provider(self.crate_id).build_adt(self.item_id);
+            info.set(new_info).ok();
+            info.get().expect("adt missing fields after forced init")
+        }
     }
 
     pub fn set_adt_info(&self, new_info: AdtInfo<'vm>) {
@@ -994,7 +1031,7 @@ impl<'vm> Item<'vm> {
         let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
-
+        
         let impl_list = impl_list.read().unwrap();
         let impl_ref = &impl_list[index];
 

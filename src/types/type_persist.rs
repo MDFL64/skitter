@@ -143,12 +143,12 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(32);
                 item_with_subs.persist_write(writer);
             }
-            TypeKind::Foreign => {
+            TypeKind::FunctionPointer(sig) => {
                 writer.write_byte(33);
+                sig.persist_write(writer);
             }
-            TypeKind::FunctionPointer(_) => {
+            TypeKind::Foreign => {
                 writer.write_byte(34);
-                // TODO WRITE SIG
             }
 
             TypeKind::Param(n) => {
@@ -231,15 +231,11 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let item_with_subs = Persist::persist_read(reader);
                 TypeKind::AssociatedType(item_with_subs)
             }
-            33 => TypeKind::Foreign,
-            34 => {
-                println!("todo read sig");
-                let sig = FunctionSig {
-                    inputs: vec![],
-                    output: reader.context.vm.ty_tuple(vec![]),
-                };
+            33 => {
+                let sig = Persist::persist_read(reader);
                 TypeKind::FunctionPointer(sig)
             }
+            34 => TypeKind::Foreign,
             40 => {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)

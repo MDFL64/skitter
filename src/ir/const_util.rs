@@ -40,6 +40,7 @@ impl<'vm> IRFunction<'vm> {
         match expr.kind {
             ExprKind::VarRef(_) => ConstStatus::Not,
             ExprKind::LiteralValue(_) => ConstStatus::CanPromote,
+            ExprKind::LiteralVoid => ConstStatus::Not, // ???
 
             ExprKind::LiteralBytes(_) => ConstStatus::Explicit,
 
