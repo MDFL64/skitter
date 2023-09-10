@@ -89,7 +89,7 @@ pub struct ItemWithSubs<'vm> {
 
 impl<'vm> Display for ItemWithSubs<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}",self.item.path.as_string(),self.subs)
+        write!(f, "{}{}", self.item.path.as_string(), self.subs)
     }
 }
 

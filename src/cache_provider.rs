@@ -8,7 +8,7 @@ use std::{
 use crate::{
     crate_provider::CrateProvider,
     ir::IRFunction,
-    items::{CrateId, Item, ItemId, ItemPath, AdtInfo},
+    items::{AdtInfo, CrateId, Item, ItemId, ItemPath},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},

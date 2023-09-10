@@ -421,16 +421,18 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 return self.expr(e);
             }
             hir::ExprKind::Closure(closure) => {
-                println!("closure ids = {:?} / {:?}", closure.def_id, closure.body);
+                let body = self.ctx.tcx.hir().body(closure.body);
+                let types = self.ctx.tcx.typeck_body(closure.body);
 
-                // assert the absolute simplest case
-                if let rustc_hir::ClosureBinder::For { .. } = closure.binder {
-                    panic!("closure binder");
-                }
-                assert!(closure.constness == rustc_hir::Constness::NotConst);
-                //assert!(closure.capture_clause == rustc_hir::CaptureBy::Ref);
-                //assert!(closure.bound_generic_params.len() == 0);
-                assert!(closure.movability.is_none());
+                let closure = self
+                    .ctx
+                    .vm
+                    .types
+                    .closure_from_rustc(closure.def_id.into(), self.ctx);
+                println!("ENTER CLOSURE!");
+                let ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
+
+                closure.set_ir_base(ir);
 
                 ExprKind::LiteralVoid
             }

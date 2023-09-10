@@ -302,7 +302,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             'a' => {
                 ir = reader.read_byte_slice();
-                ItemKind::Adt { info: OnceLock::new() }
+                ItemKind::Adt {
+                    info: OnceLock::new(),
+                }
             }
             't' => {
                 let builtin = Option::<BuiltinTrait>::persist_read(reader);
@@ -369,7 +371,7 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
                 writer.write_byte(1);
                 ty.persist_write(writer);
             }
-            AssocValue::RawFunctionIR(_) => {
+            AssocValue::RawFunctionIR(..) => {
                 panic!("attempt to persist raw IR");
             }
         }
@@ -474,10 +476,7 @@ impl<'vm> Persist<'vm> for FunctionSig<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let inputs = Persist::persist_read(reader);
         let output = Persist::persist_read(reader);
-        Self {
-            inputs,
-            output
-        }
+        Self { inputs, output }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -590,7 +589,14 @@ pub enum AssocValue<'vm> {
     /// A type.
     Type(Type<'vm>),
     /// Used to inject IR into builtin traits without building entire new items.
-    RawFunctionIR(Arc<IRFunction<'vm>>),
+    RawFunctionIR(Arc<IRFunction<'vm>>, IRFlag),
+}
+
+/// This is a hack to get correct subs in closures.
+#[derive(Clone, PartialEq)]
+pub enum IRFlag {
+    None,
+    UseClosureSubs,
 }
 
 pub enum BoundKind<'vm> {
@@ -880,9 +886,9 @@ impl<'vm> Item<'vm> {
         // TODO just place the closures map on all items?
         // fns and consts will probably account for a majority of items anyway
         match &self.kind {
-            ItemKind::Function{closures,..} => {
+            ItemKind::Function { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
-        
+
                 closures
                     .entry(path_indices)
                     .or_insert_with(|| self.vm.alloc_closure())
@@ -892,7 +898,7 @@ impl<'vm> Item<'vm> {
                 self.vm.alloc_closure()
             }
             _ => {
-                panic!("attempt to get child closure on {:?}",self)
+                panic!("attempt to get child closure on {:?}", self)
             }
         }
     }
@@ -905,7 +911,10 @@ impl<'vm> Item<'vm> {
         if let Some(info) = info.get() {
             info
         } else {
-            let new_info = self.vm.crate_provider(self.crate_id).build_adt(self.item_id);
+            let new_info = self
+                .vm
+                .crate_provider(self.crate_id)
+                .build_adt(self.item_id);
             info.set(new_info).ok();
             info.get().expect("adt missing fields after forced init")
         }
@@ -992,10 +1001,10 @@ impl<'vm> Item<'vm> {
 
     fn find_trait_item_ir(
         &self,
-        subs: &SubList<'vm>,
+        for_tys: &SubList<'vm>,
         member_index: u32,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
-        self.find_trait_impl(subs, &mut None, |trait_impl, subs| {
+        self.find_trait_impl(for_tys, &mut None, |trait_impl, subs| {
             let crate_items = self.vm.crate_provider(trait_impl.crate_id);
             let ir_source = &trait_impl.assoc_values[member_index as usize];
 
@@ -1006,7 +1015,18 @@ impl<'vm> Item<'vm> {
                         let (ir, _) = fn_item.ir(&subs);
                         return Some((ir, subs));
                     }
-                    AssocValue::RawFunctionIR(ir) => return Some((ir.clone(), subs)),
+                    AssocValue::RawFunctionIR(ir, flag) => {
+                        if *flag == IRFlag::UseClosureSubs {
+                            let for_ty = for_tys.list[0].assert_ty();
+                            if let TypeKind::Closure(_, closure_subs) = for_ty.kind() {
+                                return Some((ir.clone(), closure_subs.clone()));
+                            } else {
+                                panic!("attempt to use closure subs on non-closure");
+                            }
+                        } else {
+                            return Some((ir.clone(), subs));
+                        }
+                    }
                     AssocValue::Type(_) => panic!("attempt to fetch IR for associated type"),
                 }
             } else {
@@ -1014,7 +1034,7 @@ impl<'vm> Item<'vm> {
             }
         })
         .unwrap_or_else(|| {
-            panic!("failed to find {} for {}", self.path.as_string(), subs);
+            panic!("failed to find {} for {}", self.path.as_string(), for_tys);
         })
     }
 
@@ -1031,7 +1051,7 @@ impl<'vm> Item<'vm> {
         let ItemKind::Trait{impl_list,..} = &self.kind else {
             panic!("item kind mismatch");
         };
-        
+
         let impl_list = impl_list.read().unwrap();
         let impl_ref = &impl_list[index];
 

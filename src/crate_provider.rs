@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     ir::IRFunction,
-    items::{Item, ItemId, ItemPath, AdtInfo},
+    items::{AdtInfo, Item, ItemId, ItemPath},
     types::Type,
 };
 

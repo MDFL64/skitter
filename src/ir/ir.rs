@@ -75,6 +75,24 @@ impl<'vm> IRFunction<'vm> {
     pub fn pattern(&self, id: PatternId) -> &Pattern<'vm> {
         &self.patterns[id.0 as usize]
     }
+
+    // deliberately given this name to avoid accidental clones
+    pub fn clone_ir(&self) -> Self {
+        Self {
+            sig: self.sig.clone(),
+            is_constant: self.is_constant,
+            root_expr: self.root_expr,
+            params: self.params.clone(),
+            exprs: self.exprs.clone(),
+            patterns: self.patterns.clone(),
+        }
+    }
+
+    pub fn insert_pattern(&mut self, kind: PatternKind, ty: Type<'vm>) -> PatternId {
+        let index = self.patterns.len();
+        self.patterns.push(Pattern { kind, ty });
+        PatternId(index as u32)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,13 +109,13 @@ impl LoopId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub result: Option<ExprId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Expr(ExprId),
     Let {
@@ -107,18 +125,19 @@ pub enum Stmt {
     },
 }
 
+#[derive(Clone)]
 pub struct Expr<'vm> {
     pub kind: ExprKind<'vm>,
     pub ty: Type<'vm>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pattern<'vm> {
     pub kind: PatternKind,
     pub ty: Type<'vm>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
     Dummy(ExprId),
@@ -203,7 +222,7 @@ pub enum ExprKind<'vm> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PatternKind {
     LocalBinding {
         local_id: u32,
@@ -238,7 +257,7 @@ pub enum BindingMode {
     Ref,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FieldPattern {
     pub field: u32,
     pub pattern: PatternId,
@@ -288,7 +307,7 @@ pub enum PointerCast {
     UnSize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchArm {
     pub pattern: PatternId,
     pub body: ExprId,

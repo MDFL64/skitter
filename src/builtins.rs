@@ -4,8 +4,9 @@ use crate::{
     abi::POINTER_SIZE,
     bytecode_compiler::CompilerStack,
     bytecode_select,
+    closure::FnTrait,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
-    items::{AssocValue, CrateId, GenericCounts, Item, ItemPath, TraitImpl},
+    items::{AssocValue, CrateId, GenericCounts, IRFlag, Item, ItemPath, TraitImpl},
     persist::Persist,
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
@@ -112,62 +113,93 @@ impl BuiltinTrait {
             BuiltinTrait::FnOnce | BuiltinTrait::FnMut | BuiltinTrait::Fn => {
                 let func_ty = query_subs.list[0].assert_ty();
 
-                if let TypeKind::FunctionDef(fun) = func_ty.kind() {
-                    let sig = fun.item.func_sig(&fun.subs);
+                match func_ty.kind() {
+                    TypeKind::FunctionDef(fun) => {
+                        let sig = fun.item.func_sig(&fun.subs);
 
-                    // todo how to handle generics?
-                    // make sure the sig is concrete. will see if this poses issues down the line
-                    {
-                        for in_ty in sig.inputs.iter() {
-                            assert!(in_ty.is_concrete());
+                        // todo how to handle generics?
+                        // make sure the sig is concrete. will see if this poses issues down the line
+                        {
+                            for in_ty in sig.inputs.iter() {
+                                assert!(in_ty.is_concrete());
+                            }
+                            assert!(sig.output.is_concrete());
                         }
-                        assert!(sig.output.is_concrete());
+
+                        let fn_args_ty = vm.ty_tuple(sig.inputs);
+                        let for_tys = SubList {
+                            list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
+                        };
+
+                        // BAD:?
+                        let mut res = trait_impl(for_tys);
+                        match self {
+                            BuiltinTrait::FnOnce => {
+                                let call_ir =
+                                    glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
+
+                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
+                                    (
+                                        ItemPath::for_value("call_once"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    ),
+                                    (ItemPath::for_type("Output"), AssocValue::Type(sig.output)),
+                                ]);
+                            }
+                            BuiltinTrait::FnMut => {
+                                let ref_ty = func_ty.ref_to(Mutability::Mut);
+                                let call_ir =
+                                    glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call_mut"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    )]);
+                            }
+                            BuiltinTrait::Fn => {
+                                let ref_ty = func_ty.ref_to(Mutability::Const);
+                                let call_ir =
+                                    glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    )]);
+                            }
+                            _ => panic!(),
+                        }
+
+                        return Some(res);
                     }
+                    TypeKind::Closure(closure, subs) => {
+                        let fn_trait = match self {
+                            BuiltinTrait::FnOnce => FnTrait::FnOnce,
+                            BuiltinTrait::FnMut => FnTrait::FnMut,
+                            BuiltinTrait::Fn => FnTrait::Fn,
+                            _ => panic!(),
+                        };
 
-                    let fn_args_ty = vm.ty_tuple(sig.inputs);
-                    let for_tys = SubList {
-                        list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
-                    };
+                        let ir = closure.ir_for_trait(vm, fn_trait);
 
-                    // BAD:?
-                    let mut res = trait_impl(for_tys);
-                    match self {
-                        BuiltinTrait::FnOnce => {
-                            let call_ir =
-                                glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
+                        let fn_args_ty = ir.sig.inputs[1].sub(subs);
+                        let for_tys = SubList {
+                            list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
+                        };
 
-                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
-                                (
-                                    ItemPath::for_value("call_once"),
-                                    AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                                ),
-                                (ItemPath::for_type("Output"), AssocValue::Type(sig.output)),
-                            ]);
-                        }
-                        BuiltinTrait::FnMut => {
-                            let ref_ty = func_ty.ref_to(Mutability::Mut);
-                            let call_ir =
-                                glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                        println!("==> {}", subs);
+                        println!("FOR TYPES = {}", for_tys);
 
-                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
-                                ItemPath::for_value("call_mut"),
-                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                            )]);
-                        }
-                        BuiltinTrait::Fn => {
-                            let ref_ty = func_ty.ref_to(Mutability::Const);
-                            let call_ir =
-                                glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                        let mut res = trait_impl(for_tys);
+                        res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                            ItemPath::for_value("call"),
+                            AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                        )]);
 
-                            res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
-                                ItemPath::for_value("call"),
-                                AssocValue::RawFunctionIR(Arc::new(call_ir)),
-                            )]);
-                        }
-                        _ => panic!(),
+                        return Some(res);
                     }
-
-                    return Some(res);
+                    _ => (),
                 }
                 None
             }
