@@ -188,7 +188,6 @@ impl BuiltinTrait {
                             list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
                         };
 
-                        println!("==> {}", subs);
                         println!("FOR TYPES = {}", for_tys);
 
                         let mut res = trait_impl(for_tys);

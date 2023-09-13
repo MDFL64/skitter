@@ -243,9 +243,9 @@ impl<'vm> Type<'vm> {
             TypeKind::Closure(_, subs) => subs.is_concrete(),
             TypeKind::Ref(child, _) => child.is_concrete(),
             TypeKind::Slice(child) => child.is_concrete(),
-            TypeKind::FunctionPointer(_) => {
-                println!("todo function pointer concrete?");
-                true
+            TypeKind::FunctionPointer(sig) => {
+                let args_concrete = sig.inputs.iter().all(|arg| arg.is_concrete());
+                args_concrete && sig.output.is_concrete()
             }
             TypeKind::Param(_) | TypeKind::Unknown => false,
             _ => panic!("is concrete? {}", self),

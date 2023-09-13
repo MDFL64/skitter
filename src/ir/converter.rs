@@ -424,17 +424,35 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let body = self.ctx.tcx.hir().body(closure.body);
                 let types = self.ctx.tcx.typeck_body(closure.body);
 
+                let captures: Vec<_> = self.types.closure_min_captures_flattened(closure.def_id).map(|capture| {
+                    self.expr_capture(capture)
+                }).collect();
+
                 let closure = self
                     .ctx
                     .vm
                     .types
                     .closure_from_rustc(closure.def_id.into(), self.ctx);
-                println!("ENTER CLOSURE!");
-                let ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
 
+                let ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
                 closure.set_ir_base(ir);
 
-                ExprKind::LiteralVoid
+                // assert capture types are correct!
+                {
+                    let cap_ty_a: Vec<_> = captures.iter().map(|id| {
+                        self.builder.expr(*id).ty
+                    }).collect();
+
+                    if let TypeKind::Closure(_,closure_subs) = ty.kind() {
+                        let cap_ty_b = closure_subs.list.last().expect("closure has no captures");
+                        println!("CAPTURE TYPES: {:?} == {}",cap_ty_a,cap_ty_b);
+                    } else {
+                        panic!("closure expression has wrong type");
+                    }
+                }
+
+
+                ExprKind::Tuple(captures)
             }
             hir::ExprKind::ConstBlock(..) | hir::ExprKind::InlineAsm(..) => {
                 // TODO
@@ -612,6 +630,62 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             hir::ExprKind::Unary(hir::UnOp::Neg, sub_expr) => self.expr_literal(sub_expr, ty, true),
             _ => panic!("lit = {:?}", expr.kind),
         }
+    }
+
+    fn expr_capture(&mut self, cap: &rustc_middle::ty::CapturedPlace<'tcx>) -> ExprId {
+        let mut base_ty = self.ctx.type_from_rustc(cap.place.base_ty);
+
+        let mut base = if let rustc_middle::hir::place::PlaceBase::Upvar(upvar) = cap.place.base {
+            let local_id = upvar.var_path.hir_id.local_id.as_u32();
+
+            self.builder.add_expr(Expr{
+                kind: ExprKind::VarRef(local_id),
+                ty: base_ty
+            })
+        } else {
+            panic!("cannot handle capture base {:?}",cap.place.base);
+        };
+
+        for proj in cap.place.projections.iter() {
+            use rustc_middle::hir::place::ProjectionKind;
+            let new_expr = match proj.kind {
+                ProjectionKind::Field(field,variant) => {
+                    ExprKind::Field{
+                        lhs: base,
+                        variant: variant.as_u32(),
+                        field: field.as_u32()
+                    }
+                }
+                _ => panic!("todo projection {:?}",proj)
+            };
+
+            base_ty = self.ctx.type_from_rustc(proj.ty);
+
+            base = self.builder.add_expr(Expr {
+                kind: new_expr,
+                ty: base_ty,
+            });
+        }
+
+        {
+            use rustc_middle::ty::{BorrowKind, UpvarCapture};
+
+            match cap.info.capture_kind {
+                /*UpvarCapture::ByValue => {
+
+                }*/
+                UpvarCapture::ByRef(BorrowKind::ImmBorrow) => {
+                    base_ty = self.ctx.vm.ty_ref(base_ty, Mutability::Const);
+                    base = self.builder.add_expr(Expr {
+                        kind: ExprKind::Ref(base, Mutability::Const),
+                        ty: base_ty,
+                    });
+                }
+                k => panic!("todo capture kind! {:?}",k)
+            }
+        }
+
+        base
     }
 
     fn block(&mut self, block: &hir::Block) -> Block {

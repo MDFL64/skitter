@@ -211,7 +211,6 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
-        println!("- {}", n);
 
         self.arena_closures.alloc(Closure::new(n))
     }

@@ -5,7 +5,7 @@ use crate::{
 
 use super::{FloatWidth, ItemWithSubs};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     pub maybe_size: Option<u32>,
     pub align: u32,
@@ -101,9 +101,11 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
-            TypeKind::Closure(..) => {
-                println!("todo layout closure");
-                Layout::simple(0)
+            TypeKind::Closure(_,subs) => {
+                let captures = subs.list.last().expect("closure missing captures").assert_ty();
+
+                assert!(captures.is_concrete());
+                captures.layout().clone()
             }
             _ => panic!("can't layout: {:?}", kind),
         }
