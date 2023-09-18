@@ -6,13 +6,13 @@ use std::str::FromStr;
 
 use crate::{
     rustc_worker::RustCContext,
-    types::{FloatWidth, Mutability, Type, TypeKind},
+    types::{FloatWidth, Mutability, Type, TypeKind, Sub},
 };
 
 use super::{
     BinaryOp, BindingMode, Block, Expr, ExprId, ExprKind, FieldPattern, IRFunction,
     IRFunctionBuilder, LogicOp, LoopId, MatchArm, Pattern, PatternId, PatternKind, PointerCast,
-    Stmt, UnaryOp,
+    Stmt, UnaryOp, UpVar,
 };
 
 /// Converts rust IR to skitter IR.
@@ -424,7 +424,9 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let body = self.ctx.tcx.hir().body(closure.body);
                 let types = self.ctx.tcx.typeck_body(closure.body);
 
-                let captures: Vec<_> = self.types.closure_min_captures_flattened(closure.def_id).map(|capture| {
+                let captures: Vec<_> = self.types.closure_min_captures_flattened(closure.def_id).collect();
+
+                let capture_exprs: Vec<_> = captures.iter().map(|capture| {
                     self.expr_capture(capture)
                 }).collect();
 
@@ -434,25 +436,34 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     .types
                     .closure_from_rustc(closure.def_id.into(), self.ctx);
 
-                let ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
+                let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
+                replace_captures(&mut ir,&captures);
+                ir.print();
                 closure.set_ir_base(ir);
 
                 // assert capture types are correct!
                 {
-                    let cap_ty_a: Vec<_> = captures.iter().map(|id| {
+                    let cap_ty_a = capture_exprs.iter().map(|id| {
                         self.builder.expr(*id).ty
-                    }).collect();
+                    });
 
                     if let TypeKind::Closure(_,closure_subs) = ty.kind() {
-                        let cap_ty_b = closure_subs.list.last().expect("closure has no captures");
-                        println!("CAPTURE TYPES: {:?} == {}",cap_ty_a,cap_ty_b);
+                        let cap_ty_b = closure_subs.list.last().expect("no captures").assert_ty();
+                        if let TypeKind::Tuple(cap_ty_b) = cap_ty_b.kind() {
+                            assert!(cap_ty_a.len() == cap_ty_b.len());
+                            for (a,b) in cap_ty_a.zip(cap_ty_b) {
+                                assert!(a == *b);
+                            }
+                        } else {
+                            panic!("bad captures");
+                        }
                     } else {
                         panic!("closure expression has wrong type");
                     }
                 }
 
 
-                ExprKind::Tuple(captures)
+                ExprKind::Tuple(capture_exprs)
             }
             hir::ExprKind::ConstBlock(..) | hir::ExprKind::InlineAsm(..) => {
                 // TODO
@@ -951,5 +962,70 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 panic!("struct from {:?}", res)
             }
         }
+    }
+}
+
+/// Iterates through all expressions and replaces captured exprs with UpVar exprs.
+fn replace_captures(ir: &mut IRFunction, captures: &[&rustc_middle::ty::CapturedPlace]) {
+    for expr_id in ir.iter_expr_ids() {
+        for (capture_index,capture) in captures.iter().enumerate() {
+            if let Some(upvar) = match_capture(ir,expr_id, capture, capture_index as u32, 0) {
+                ir.expr_mut(expr_id).kind = ExprKind::UpVar(upvar);
+                // we shouldn't need to consider any other candidates for this expr
+                break;
+            }
+        }
+    }
+}
+
+fn match_capture(ir: &IRFunction, expr_id: ExprId, capture: &rustc_middle::ty::CapturedPlace, capture_index: u32, proj_index: usize) -> Option<UpVar> {
+    let expr = &ir.expr(expr_id).kind;
+
+    if let Some(proj) = capture.place.projections.get(proj_index) {
+
+        use rustc_middle::hir::place::ProjectionKind;
+        match proj.kind {
+            ProjectionKind::Field(cap_field,cap_variant) => {
+                if let ExprKind::Field { lhs, variant, field } = expr {
+                    if *variant == cap_variant.as_u32() && *field == cap_field.as_u32() {
+                        match_capture(ir, *lhs, capture, capture_index, proj_index + 1)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => panic!("todo projection {:?}",proj)
+        }
+    } else {
+        assert!(proj_index == capture.place.projections.len());
+
+        if let rustc_middle::hir::place::PlaceBase::Upvar(upvar) = capture.place.base {
+            let local_id = upvar.var_path.hir_id.local_id.as_u32();
+
+            if let ExprKind::VarRef(id) = expr {
+                if *id == local_id {
+                    Some(UpVar{
+                        index: capture_index,
+                        is_ref: is_capture_by_ref(capture)
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            panic!("cannot handle capture base {:?}",capture.place.base);
+        }
+    }
+}
+
+fn is_capture_by_ref(capture: &rustc_middle::ty::CapturedPlace) -> bool {
+    use rustc_middle::ty::UpvarCapture;
+    match capture.info.capture_kind {
+        UpvarCapture::ByValue => false,
+        UpvarCapture::ByRef(_) => true
     }
 }

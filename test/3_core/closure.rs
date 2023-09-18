@@ -13,9 +13,14 @@ pub fn add_4(a: f32, b: f64, c: i16, d: i8) -> f32 {
         b: f64
     }
 
+    impl S {
+        fn check(&self) {}
+    }
+
     let s = S{a,b};
 
     let f = || {
+        //s.check();
         s.a + s.b as f32 + c as f32 + d as f32
     };
     f()

@@ -93,6 +93,22 @@ impl<'vm> IRFunction<'vm> {
         self.patterns.push(Pattern { kind, ty });
         PatternId(index as u32)
     }
+
+    pub fn print(&self) {
+        for (i,expr) in self.exprs.iter().enumerate() {
+            println!("{} {:?}",i,expr);
+        }
+    }
+
+    pub fn iter_expr_ids(&self) -> impl Iterator<Item = ExprId> {
+        (0..self.exprs.len()).map(|index| {
+            ExprId(index as u32)
+        })
+    }
+
+    pub fn expr_mut(&mut self, id: ExprId) -> &mut Expr<'vm> {
+        &mut self.exprs[id.0 as usize]
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,7 +141,7 @@ pub enum Stmt {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Expr<'vm> {
     pub kind: ExprKind<'vm>,
     pub ty: Type<'vm>,
@@ -135,6 +151,12 @@ pub struct Expr<'vm> {
 pub struct Pattern<'vm> {
     pub kind: PatternKind,
     pub ty: Type<'vm>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpVar{
+    pub index: u32,
+    pub is_ref: bool
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +177,10 @@ pub enum ExprKind<'vm> {
 
     /// Variable reference
     VarRef(u32),
+
+    /// Reference to capture.
+    /// Inserted right after building closure IR, and handled by the bytecode compiler.
+    UpVar(UpVar),
 
     /// Small literals: integer, float, char, or bool types
     LiteralValue(i128),
