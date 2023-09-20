@@ -181,7 +181,9 @@ impl BuiltinTrait {
                             _ => panic!(),
                         };
 
-                        let ir = closure.ir_for_trait(vm, fn_trait);
+                        let self_ty_internal = subs.list.last().unwrap().assert_ty();
+
+                        let ir = closure.ir_for_trait(vm, fn_trait, self_ty_internal);
 
                         let fn_args_ty = ir.sig.inputs[1].sub(subs);
                         let for_tys = SubList {

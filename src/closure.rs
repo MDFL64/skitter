@@ -5,7 +5,7 @@ use ahash::AHashMap;
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::FunctionSig,
-    types::{Mutability, SubList},
+    types::{Mutability, SubList, Type},
     vm::{Function, VM},
 };
 
@@ -50,11 +50,16 @@ impl<'vm> Closure<'vm> {
         self.ir_base.set(Arc::new(ir)).ok();
     }
 
-    pub fn ir_for_trait(&self, vm: &'vm VM<'vm>, kind: FnTrait) -> Arc<IRFunction<'vm>> {
+    pub fn ir_for_trait(
+        &self,
+        vm: &'vm VM<'vm>,
+        kind: FnTrait,
+        self_ty: Type<'vm>,
+    ) -> Arc<IRFunction<'vm>> {
         match kind {
             FnTrait::Fn => self
                 .ir_fn
-                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind)))
+                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
                 .clone(),
             FnTrait::FnMut => {
                 panic!();
@@ -95,6 +100,7 @@ fn build_ir_for_trait<'vm>(
     vm: &'vm VM<'vm>,
     ir_in: &IRFunction<'vm>,
     kind: FnTrait,
+    self_ty: Type<'vm>,
 ) -> IRFunction<'vm> {
     assert!(kind == FnTrait::Fn);
 
@@ -102,7 +108,10 @@ fn build_ir_for_trait<'vm>(
 
     new_ir.closure_kind = Some(kind);
 
-    let self_ty = vm.ty_ref(vm.ty_tuple(Vec::new()), Mutability::Const);
+    let self_ty = match kind {
+        FnTrait::Fn => vm.ty_ref(self_ty, Mutability::Const),
+        _ => panic!("todo self ty"),
+    };
 
     let args_tuple = vm.ty_tuple(ir_in.sig.inputs.clone());
 

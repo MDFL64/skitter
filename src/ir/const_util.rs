@@ -39,6 +39,8 @@ impl<'vm> IRFunction<'vm> {
         let expr = self.expr(id);
         match expr.kind {
             ExprKind::VarRef(_) => ConstStatus::Not,
+            ExprKind::UpVar(_) => ConstStatus::Not,
+
             ExprKind::LiteralValue(_) => ConstStatus::CanPromote,
             ExprKind::LiteralVoid => ConstStatus::Not, // ???
 

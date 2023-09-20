@@ -21,12 +21,13 @@ pub struct BytecodeCompiler<'vm, 'f> {
     locals: Vec<(u32, Slot)>,
     loops: Vec<LoopInfo>,
     loop_breaks: Vec<BreakInfo>,
-    closure: Option<ClosureInfo>,
+    closure: Option<ClosureInfo<'vm>>,
 }
 
-struct ClosureInfo {
+struct ClosureInfo<'vm> {
     kind: FnTrait,
     self_slot: Slot,
+    self_ty: Type<'vm>,
 }
 
 struct LoopInfo {
@@ -75,9 +76,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         // setup closure
         if let Some(closure_kind) = ir.closure_kind {
+            let self_ty_base = compiler.apply_subs(ir.pattern(ir.params[0]).ty);
+
+            let self_ty = match closure_kind {
+                FnTrait::Fn | FnTrait::FnMut => {
+                    if let TypeKind::Ref(sub_ty, _) = self_ty_base.kind() {
+                        *sub_ty
+                    } else {
+                        panic!("closure type assumption failed");
+                    }
+                }
+                FnTrait::FnOnce => self_ty_base,
+            };
+
             compiler.closure = Some(ClosureInfo {
                 kind: closure_kind,
                 self_slot: param_slots[0],
+                self_ty,
             })
         }
 
@@ -910,6 +925,44 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::VarRef(local_id) => {
                 let local_slot = self.find_local(*local_id);
                 Place::Local(local_slot)
+            }
+            ExprKind::UpVar(upvar) => {
+                let closure = self.closure.as_ref().expect("upvar in non-closure");
+
+                match closure.kind {
+                    FnTrait::Fn | FnTrait::FnMut => {
+                        println!("self ty = {}", closure.self_ty);
+                        println!("expr ty = {}", expr.ty);
+
+                        let ref_ty = self.vm.ty_ref(expr.ty, Mutability::Const);
+
+                        let field_offset =
+                            closure.self_ty.layout().field_offsets[0][upvar.index as usize];
+
+                        //self.out_bc.push(Instr::PointerOffset2(upvar_ptr, closure.self_slot, field_offset));
+
+                        if upvar.is_ref {
+                            let upvar_ref = self.stack.alloc(ref_ty);
+
+                            self.out_bc.push(
+                                bytecode_select::copy_from_ptr(
+                                    upvar_ref,
+                                    closure.self_slot,
+                                    ref_ty,
+                                    field_offset,
+                                )
+                                .unwrap(),
+                            );
+                            Place::Ptr(upvar_ref, 0)
+                        } else {
+                            // upvar_ptr is &T
+                            // can we even hit this path?
+                            // TODO include the field offset in the returned place?
+                            panic!("B");
+                        }
+                    }
+                    _ => panic!("fn once"),
+                }
             }
             ExprKind::Field {
                 lhs,
