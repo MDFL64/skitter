@@ -1,4 +1,5 @@
 use crate::{
+    closure::FnTrait,
     items::FunctionSig,
     persist::{Persist, PersistReader, PersistWriter},
     types::{ArraySize, ItemWithSubs, Mutability, Type},
@@ -48,6 +49,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
         IRFunction {
             sig,
             is_constant,
+            closure_kind: None,
             params,
             root_expr,
             exprs: self.exprs,
@@ -61,6 +63,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
 pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
     pub is_constant: bool,
+    pub closure_kind: Option<FnTrait>,
     pub root_expr: ExprId,
     pub params: Vec<PatternId>,
     exprs: Vec<Expr<'vm>>,
@@ -81,6 +84,7 @@ impl<'vm> IRFunction<'vm> {
         Self {
             sig: self.sig.clone(),
             is_constant: self.is_constant,
+            closure_kind: self.closure_kind,
             root_expr: self.root_expr,
             params: self.params.clone(),
             exprs: self.exprs.clone(),
@@ -95,15 +99,13 @@ impl<'vm> IRFunction<'vm> {
     }
 
     pub fn print(&self) {
-        for (i,expr) in self.exprs.iter().enumerate() {
-            println!("{} {:?}",i,expr);
+        for (i, expr) in self.exprs.iter().enumerate() {
+            println!("{} {:?}", i, expr);
         }
     }
 
     pub fn iter_expr_ids(&self) -> impl Iterator<Item = ExprId> {
-        (0..self.exprs.len()).map(|index| {
-            ExprId(index as u32)
-        })
+        (0..self.exprs.len()).map(|index| ExprId(index as u32))
     }
 
     pub fn expr_mut(&mut self, id: ExprId) -> &mut Expr<'vm> {
@@ -154,9 +156,9 @@ pub struct Pattern<'vm> {
 }
 
 #[derive(Debug, Clone)]
-pub struct UpVar{
+pub struct UpVar {
     pub index: u32,
-    pub is_ref: bool
+    pub is_ref: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -360,6 +362,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
                 output: sig_output,
             },
             is_constant,
+            closure_kind: None,
             root_expr,
 
             params,
@@ -369,6 +372,8 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        assert!(self.closure_kind.is_none());
+
         self.sig.inputs.persist_write(writer);
         self.sig.output.persist_write(writer);
 

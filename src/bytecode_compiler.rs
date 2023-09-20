@@ -1,6 +1,7 @@
 use crate::abi::POINTER_SIZE;
 use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
+use crate::closure::FnTrait;
 use crate::ir::const_util::ConstStatus;
 use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, Pattern,
@@ -20,6 +21,12 @@ pub struct BytecodeCompiler<'vm, 'f> {
     locals: Vec<(u32, Slot)>,
     loops: Vec<LoopInfo>,
     loop_breaks: Vec<BreakInfo>,
+    closure: Option<ClosureInfo>,
+}
+
+struct ClosureInfo {
+    kind: FnTrait,
+    self_slot: Slot,
 }
 
 struct LoopInfo {
@@ -53,6 +60,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             locals: Vec::new(),
             loops: Vec::new(),
             loop_breaks: Vec::new(),
+            closure: None,
         };
 
         let out_ty = compiler.apply_subs(ir.sig.output);
@@ -64,6 +72,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             .iter()
             .map(|pat| compiler.alloc_pattern(*pat))
             .collect();
+
+        // setup closure
+        if let Some(closure_kind) = ir.closure_kind {
+            compiler.closure = Some(ClosureInfo {
+                kind: closure_kind,
+                self_slot: param_slots[0],
+            })
+        }
 
         for (pat, slot) in ir.params.iter().zip(param_slots) {
             compiler.match_pattern(*pat, slot, None);
@@ -102,6 +118,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             locals: Vec::new(),
             loops: Vec::new(),
             loop_breaks: Vec::new(),
+            closure: None,
         };
 
         let place = compiler.expr_to_place(root_expr);
@@ -195,7 +212,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::NamedConst(_)
             | ExprKind::VarRef { .. }
             | ExprKind::Field { .. }
-            | ExprKind::Index { .. } => match self.expr_to_place(id) {
+            | ExprKind::Index { .. }
+            | ExprKind::UpVar(_) => match self.expr_to_place(id) {
                 Place::Local(local_slot) => {
                     if let Some(dst_slot) = dst_slot {
                         if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, expr_ty) {

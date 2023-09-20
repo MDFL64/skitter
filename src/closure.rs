@@ -9,7 +9,7 @@ use crate::{
     vm::{Function, VM},
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum FnTrait {
     Fn,
     FnMut,
@@ -88,8 +88,9 @@ impl<'vm> Eq for Closure<'vm> {}
 
 /// We make the following transformations to the IR:
 ///
-/// 1. Replace the signature's (args) with (self,(args))
-/// 2. Replace the param pattern's (args) with (self,(args))
+/// 1. Set the closure_kind.
+/// 2. Replace the signature's (args) with (self,(args))
+/// 3. Replace the param pattern's (args) with (self,(args))
 fn build_ir_for_trait<'vm>(
     vm: &'vm VM<'vm>,
     ir_in: &IRFunction<'vm>,
@@ -98,6 +99,8 @@ fn build_ir_for_trait<'vm>(
     assert!(kind == FnTrait::Fn);
 
     let mut new_ir = ir_in.clone_ir();
+
+    new_ir.closure_kind = Some(kind);
 
     let self_ty = vm.ty_ref(vm.ty_tuple(Vec::new()), Mutability::Const);
 

@@ -4,6 +4,7 @@ use colosseum::sync::Arena;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::closure::Closure;
+use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
 use crate::items::CrateId;
 use crate::items::Item;
@@ -179,7 +180,6 @@ impl<'vm> VM<'vm> {
             subs,
             native: Default::default(),
             bytecode: Default::default(),
-            sub_id: None,
         };
 
         let path = item.path.as_string();
@@ -262,8 +262,6 @@ pub struct Function<'vm> {
     /// Store a void pointer because function pointers can't be stored by this(?)
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>,
-    /// This is set for closures which refer to their root function item.
-    sub_id: Option<u32>,
 }
 
 impl<'vm> Function<'vm> {
