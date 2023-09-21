@@ -190,26 +190,36 @@ impl BuiltinTrait {
                             list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
                         };
 
-                        println!("FOR TYPES = {}", for_tys);
-
                         let mut res = trait_impl(for_tys);
 
                         match self {
                             BuiltinTrait::Fn => {
-                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
-                                    ItemPath::for_value("call"),
-                                    AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
-                                )]);
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call"),
+                                        AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                                    )]);
                             }
                             BuiltinTrait::FnMut => {
-                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
-                                    ItemPath::for_value("call_mut"),
-                                    AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
-                                )]);
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call_mut"),
+                                        AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                                    )]);
                             }
                             BuiltinTrait::FnOnce => {
-                                // TODO TODO must include output type as well!
-                                panic!();
+                                let output = ir.sig.output;
+                                // Probably not necessary, I REALLY need to commit to allowing generics
+                                // within the builtins system.
+                                assert!(output.is_concrete());
+
+                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
+                                    (
+                                        ItemPath::for_value("call_once"),
+                                        AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                                    ),
+                                    (ItemPath::for_type("Output"), AssocValue::Type(output)),
+                                ]);
                             }
                             _ => panic!(),
                         }

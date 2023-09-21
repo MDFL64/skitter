@@ -442,7 +442,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
                 replace_captures(&mut ir, &captures);
-                ir.print();
                 closure.set_ir_base(ir);
 
                 // assert capture types are correct!
@@ -666,10 +665,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     variant: variant.as_u32(),
                     field: field.as_u32(),
                 },
-                ProjectionKind::Deref => {
-                    println!("huh? {:?}",proj.ty);
-                    ExprKind::DeRef(base)
-                }
+                ProjectionKind::Deref => ExprKind::DeRef(base),
                 _ => panic!("todo projection {:?}", proj),
             };
 

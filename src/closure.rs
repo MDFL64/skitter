@@ -111,6 +111,7 @@ fn build_ir_for_trait<'vm>(
     let self_ty = match kind {
         FnTrait::Fn => vm.ty_ref(self_ty, Mutability::Const),
         FnTrait::FnMut => vm.ty_ref(self_ty, Mutability::Mut),
+        FnTrait::FnOnce => self_ty,
         _ => panic!("todo self ty"),
     };
 
