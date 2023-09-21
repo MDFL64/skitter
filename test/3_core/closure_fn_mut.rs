@@ -41,14 +41,27 @@ pub fn check_2() -> f64 {
     s.a as f64 + s.b
 }
 
+// loosely based on https://doc.rust-lang.org/beta/nightly-rustc/rustc_middle/ty/enum.BorrowKind.html#variant.UniqueImmBorrow
+// didn't end up testing the thing I wanted, but it did reveal another issue
 pub fn check_3() -> f32 {
-    // copied from https://doc.rust-lang.org/beta/nightly-rustc/rustc_middle/ty/enum.BorrowKind.html#variant.UniqueImmBorrow
     let mut z = 3;
-    let x: &mut isize = &mut z;
-    let y = || *x += 5;
-    y();
+    let mut x: &mut isize = &mut z;
 
-    z as f32
+    let mut a = 1;
+
+    let mutate_1 = || {
+        *x += 5;
+    };
+    mutate_1();
+
+    let mutate_2 = || {
+        *x += 5;
+        x = &mut a;
+        *x += 5;
+    };
+    mutate_2();
+
+    z as f32 + a as f32
 }
 
 pub fn main() {

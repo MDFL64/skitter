@@ -29,7 +29,7 @@ impl<'vm> IRFunction<'vm> {
             | ExprKind::Field { lhs: child, .. }
             | ExprKind::Index { lhs: child, .. } => self.is_const_alloc(child),
 
-            ExprKind::VarRef(..) => false,
+            ExprKind::VarRef(..) | ExprKind::UpVar(_) => false,
 
             _ => panic!("is_const_alloc {:?}", expr.kind),
         }
