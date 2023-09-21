@@ -666,6 +666,10 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     variant: variant.as_u32(),
                     field: field.as_u32(),
                 },
+                ProjectionKind::Deref => {
+                    println!("huh? {:?}",proj.ty);
+                    ExprKind::DeRef(base)
+                }
                 _ => panic!("todo projection {:?}", proj),
             };
 
@@ -688,6 +692,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     base_ty = self.ctx.vm.ty_ref(base_ty, Mutability::Const);
                     base = self.builder.add_expr(Expr {
                         kind: ExprKind::Ref(base, Mutability::Const),
+                        ty: base_ty,
+                    });
+                }
+                UpvarCapture::ByRef(BorrowKind::MutBorrow) => {
+                    base_ty = self.ctx.vm.ty_ref(base_ty, Mutability::Mut);
+                    base = self.builder.add_expr(Expr {
+                        kind: ExprKind::Ref(base, Mutability::Mut),
                         ty: base_ty,
                     });
                 }
@@ -1001,6 +1012,13 @@ fn match_capture(
                     } else {
                         None
                     }
+                } else {
+                    None
+                }
+            }
+            ProjectionKind::Deref => {
+                if let ExprKind::DeRef(arg) = expr {
+                    match_capture(ir, *arg, capture, capture_index, proj_index + 1)
                 } else {
                     None
                 }

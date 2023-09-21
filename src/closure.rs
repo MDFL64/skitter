@@ -61,12 +61,14 @@ impl<'vm> Closure<'vm> {
                 .ir_fn
                 .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
                 .clone(),
-            FnTrait::FnMut => {
-                panic!();
-            }
-            FnTrait::FnOnce => {
-                panic!();
-            }
+            FnTrait::FnMut => self
+                .ir_mut
+                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
+                .clone(),
+            FnTrait::FnOnce => self
+                .ir_once
+                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
+                .clone(),
         }
     }
 }
@@ -102,14 +104,13 @@ fn build_ir_for_trait<'vm>(
     kind: FnTrait,
     self_ty: Type<'vm>,
 ) -> IRFunction<'vm> {
-    assert!(kind == FnTrait::Fn);
-
     let mut new_ir = ir_in.clone_ir();
 
     new_ir.closure_kind = Some(kind);
 
     let self_ty = match kind {
         FnTrait::Fn => vm.ty_ref(self_ty, Mutability::Const),
+        FnTrait::FnMut => vm.ty_ref(self_ty, Mutability::Mut),
         _ => panic!("todo self ty"),
     };
 

@@ -193,10 +193,26 @@ impl BuiltinTrait {
                         println!("FOR TYPES = {}", for_tys);
 
                         let mut res = trait_impl(for_tys);
-                        res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
-                            ItemPath::for_value("call"),
-                            AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
-                        )]);
+
+                        match self {
+                            BuiltinTrait::Fn => {
+                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                                    ItemPath::for_value("call"),
+                                    AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                                )]);
+                            }
+                            BuiltinTrait::FnMut => {
+                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[(
+                                    ItemPath::for_value("call_mut"),
+                                    AssocValue::RawFunctionIR(ir, IRFlag::UseClosureSubs),
+                                )]);
+                            }
+                            BuiltinTrait::FnOnce => {
+                                // TODO TODO must include output type as well!
+                                panic!();
+                            }
+                            _ => panic!(),
+                        }
 
                         return Some(res);
                     }
