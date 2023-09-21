@@ -930,16 +930,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let closure = self.closure.as_ref().expect("upvar in non-closure");
 
                 match closure.kind {
+                    // self is a ref to a tuple-like env
                     FnTrait::Fn | FnTrait::FnMut => {
-                        println!("self ty = {}", closure.self_ty);
-                        println!("expr ty = {}", expr.ty);
-
                         let ref_ty = self.vm.ty_ref(expr.ty, Mutability::Const);
 
                         let field_offset =
                             closure.self_ty.layout().field_offsets[0][upvar.index as usize];
-
-                        //self.out_bc.push(Instr::PointerOffset2(upvar_ptr, closure.self_slot, field_offset));
 
                         if upvar.is_ref {
                             let upvar_ref = self.stack.alloc(ref_ty);
@@ -955,13 +951,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             );
                             Place::Ptr(upvar_ref, 0)
                         } else {
-                            // upvar_ptr is &T
-                            // can we even hit this path?
-                            // TODO include the field offset in the returned place?
-                            panic!("B");
+                            Place::Ptr(closure.self_slot, field_offset)
                         }
                     }
-                    _ => panic!("fn once"),
+                    // self is a tuple-like env (not a ref)
+                    FnTrait::FnOnce => {
+                        panic!("fn once");
+                    }
                 }
             }
             ExprKind::Field {

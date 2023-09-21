@@ -702,6 +702,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         ty: base_ty,
                     });
                 }
+                UpvarCapture::ByValue => (),
                 k => panic!("todo capture kind! {:?}", k),
             }
         }

@@ -35,6 +35,13 @@ pub fn add_4b(a: f32, b: f64, c: i16, d: i8) -> f32 {
     f()
 }
 
+pub fn add_move(a: f32, b: f32, c: f32, d: f32, e: f32) -> f32 {
+    let f = move || {
+        a + b + c + d + e
+    };
+    f()
+}
+
 pub fn main() {
     let add_5 = |x| {
         let z = 0;
@@ -52,5 +59,8 @@ pub fn main() {
     _builtin::print_float(res as _);
 
     let res = add_4b(10.101,5.52,1,3);
+    _builtin::print_float(res as _);
+
+    let res = add_move(-80.0,53.0,1001.0,2.999,23.0);
     _builtin::print_float(res as _);
 }
