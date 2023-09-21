@@ -42,6 +42,24 @@ pub fn add_move(a: f32, b: f32, c: f32, d: f32, e: f32) -> f32 {
     f()
 }
 
+pub fn nested() {
+    let z = 100;
+
+    let curry_yum = |x| {
+        |y| {
+            x + y + z
+        }
+    };
+
+    let add_105 = curry_yum(5);
+
+    let a = add_105(-20);
+    let b = add_105(20);
+
+    _builtin::print_int(a as _);
+    _builtin::print_int(b as _);
+}
+
 pub fn main() {
     let add_5 = |x| {
         let z = 0;
@@ -63,4 +81,6 @@ pub fn main() {
 
     let res = add_move(-80.0,53.0,1001.0,2.999,23.0);
     _builtin::print_float(res as _);
+
+    nested();
 }

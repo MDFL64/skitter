@@ -67,6 +67,7 @@ fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {
 }
 
 impl BuiltinTrait {
+    // TODO try and commit to generating the most generic impl possible? then we can try caching it?
     pub fn find_candidate<'vm>(
         &self,
         query_subs: &SubList<'vm>,
@@ -209,9 +210,6 @@ impl BuiltinTrait {
                             }
                             BuiltinTrait::FnOnce => {
                                 let output = ir.sig.output;
-                                // Probably not necessary, I REALLY need to commit to allowing generics
-                                // within the builtins system.
-                                assert!(output.is_concrete());
 
                                 res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                                     (
