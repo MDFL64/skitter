@@ -101,15 +101,9 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
-            TypeKind::Closure(_, subs) => {
-                let captures = subs
-                    .list
-                    .last()
-                    .expect("closure missing captures")
-                    .assert_ty();
-
-                assert!(captures.is_concrete());
-                captures.layout().clone()
+            TypeKind::Closure(_, sig, subs) => {
+                assert!(sig.env_ty.is_concrete());
+                sig.env_ty.layout().clone()
             }
             _ => panic!("can't layout: {:?}", kind),
         }

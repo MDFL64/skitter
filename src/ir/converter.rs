@@ -5,6 +5,7 @@ use rustc_middle::ty::TypeckResults;
 use std::str::FromStr;
 
 use crate::{
+    closure::ClosureSig,
     rustc_worker::RustCContext,
     types::{FloatWidth, Mutability, Sub, Type, TypeKind},
 };
@@ -442,26 +443,29 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
                 replace_captures(&mut ir, &captures);
-                closure.set_ir_base(ir);
+
+                let TypeKind::Closure(_, abstract_sig, abstract_subs) = ty.kind() else {
+                    panic!("closure type is incorrect");
+                };
+
+                assert!(abstract_subs.is_identity());
 
                 // assert capture types are correct!
                 {
                     let cap_ty_a = capture_exprs.iter().map(|id| self.builder.expr(*id).ty);
-
-                    if let TypeKind::Closure(_, closure_subs) = ty.kind() {
-                        let cap_ty_b = closure_subs.list.last().expect("no captures").assert_ty();
-                        if let TypeKind::Tuple(cap_ty_b) = cap_ty_b.kind() {
-                            assert!(cap_ty_a.len() == cap_ty_b.len());
-                            for (a, b) in cap_ty_a.zip(cap_ty_b) {
-                                assert!(a == *b);
-                            }
-                        } else {
-                            panic!("bad captures");
+                    if let TypeKind::Tuple(cap_ty_b) = abstract_sig.env_ty.kind() {
+                        assert!(cap_ty_a.len() == cap_ty_b.len());
+                        for (a, b) in cap_ty_a.zip(cap_ty_b) {
+                            assert!(a == *b);
                         }
                     } else {
-                        panic!("closure expression has wrong type");
+                        panic!("bad captures");
                     }
                 }
+
+                closure.set_abstract_sig(abstract_sig.clone());
+                closure.set_ir_base(ir);
+
 
                 ExprKind::Tuple(capture_exprs)
             }

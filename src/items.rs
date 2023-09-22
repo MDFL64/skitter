@@ -1018,7 +1018,7 @@ impl<'vm> Item<'vm> {
                     AssocValue::RawFunctionIR(ir, flag) => {
                         if *flag == IRFlag::UseClosureSubs {
                             let for_ty = for_tys.list[0].assert_ty();
-                            if let TypeKind::Closure(_, closure_subs) = for_ty.kind() {
+                            if let TypeKind::Closure(_, _, closure_subs) = for_ty.kind() {
                                 return Some((ir.clone(), closure_subs.clone()));
                             } else {
                                 panic!("attempt to use closure subs on non-closure");
@@ -1197,7 +1197,7 @@ enum SubSide {
     Rhs,
 }
 
-#[derive(Default)]
+#[derive(Default,Debug)]
 struct SubMap<'vm> {
     map: Vec<((SubSide, u32), Type<'vm>)>,
 }

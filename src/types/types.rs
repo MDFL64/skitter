@@ -3,7 +3,7 @@ use std::fmt::Display;
 use ahash::AHashMap;
 
 use crate::{
-    closure::Closure,
+    closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
 };
 
@@ -38,7 +38,7 @@ pub enum TypeKind<'vm> {
     Opaque,
     Dynamic,
     FunctionPointer(FunctionSig<'vm>),
-    Closure(&'vm Closure<'vm>, SubList<'vm>),
+    Closure(&'vm Closure<'vm>, ClosureSig<'vm>, SubList<'vm>),
 
     Param(u32),
     Unknown, //Error
@@ -212,10 +212,17 @@ impl<'vm> Type<'vm> {
 
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
-            TypeKind::Closure(closure, closure_subs) => {
+            TypeKind::Closure(closure, closure_sig, closure_subs) => {
                 let new_subs = closure_subs.sub(subs);
 
-                vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
+                let new_sig = ClosureSig {
+                    kind: closure_sig.kind,
+                    fn_ptr_ty: closure_sig.fn_ptr_ty.sub(subs),
+                    env_ty: closure_sig.env_ty.sub(subs)
+                };
+
+                vm.types
+                    .intern(TypeKind::Closure(closure, new_sig, new_subs), vm)
             }
             TypeKind::FunctionPointer(sig) => {
                 let new_sig = sig.sub(subs);
@@ -240,7 +247,9 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
-            TypeKind::Closure(_, subs) => subs.is_concrete(),
+            TypeKind::Closure(_, sig, subs) => {
+                sig.fn_ptr_ty.is_concrete() && sig.env_ty.is_concrete() && subs.is_concrete()
+            }
             TypeKind::Ref(child, _) => child.is_concrete(),
             TypeKind::Slice(child) => child.is_concrete(),
             TypeKind::FunctionPointer(sig) => {

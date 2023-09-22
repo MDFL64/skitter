@@ -7,7 +7,7 @@ use rustc_middle::ty::{
 };
 
 use crate::{
-    closure::Closure,
+    closure::{Closure, ClosureSig},
     items::{path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
     types::Sub,
@@ -130,7 +130,9 @@ impl<'vm> TypeContext<'vm> {
 
                 let subs = self.subs_from_rustc(subs, ctx);
 
-                TypeKind::Closure(closure, subs)
+                let (sig,subs) = ClosureSig::from_rustc_sub_repr(&subs);
+
+                TypeKind::Closure(closure, sig, subs)
             }
 
             TyKind::Param(param) => TypeKind::Param(param.index),

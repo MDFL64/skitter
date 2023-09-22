@@ -67,7 +67,9 @@ fn trait_impl<'vm>(for_types: SubList<'vm>) -> TraitImpl<'vm> {
 }
 
 impl BuiltinTrait {
-    // TODO try and commit to generating the most generic impl possible? then we can try caching it?
+    // currently we try to generate impls which are entirely concrete
+    // TODO try and commit to generating the most generic impl possible?
+    // then this might be more usable for actual trait resolution, and we can try caching it?
     pub fn find_candidate<'vm>(
         &self,
         query_subs: &SubList<'vm>,
@@ -174,7 +176,7 @@ impl BuiltinTrait {
 
                         return Some(res);
                     }
-                    TypeKind::Closure(closure, subs) => {
+                    TypeKind::Closure(closure, closure_sig, closure_subs) => {
                         let fn_trait = match self {
                             BuiltinTrait::FnOnce => FnTrait::FnOnce,
                             BuiltinTrait::FnMut => FnTrait::FnMut,
@@ -182,11 +184,11 @@ impl BuiltinTrait {
                             _ => panic!(),
                         };
 
-                        let self_ty_internal = subs.list.last().unwrap().assert_ty();
+                        let abstract_sig = closure.abstract_sig();
 
-                        let ir = closure.ir_for_trait(vm, fn_trait, self_ty_internal);
+                        let ir = closure.ir_for_trait(vm, fn_trait, abstract_sig.env_ty);
 
-                        let fn_args_ty = ir.sig.inputs[1].sub(subs);
+                        let fn_args_ty = ir.sig.inputs[1].sub(closure_subs);
                         let for_tys = SubList {
                             list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
                         };

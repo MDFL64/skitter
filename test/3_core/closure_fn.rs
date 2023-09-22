@@ -46,7 +46,7 @@ pub fn nested() {
     let z = 100;
 
     let curry_yum = |x| {
-        |y| {
+        move |y| {
             x + y + z
         }
     };

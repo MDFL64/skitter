@@ -5,21 +5,73 @@ use ahash::AHashMap;
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::FunctionSig,
-    types::{Mutability, SubList, Type},
+    types::{Mutability, SubList, Type, TypeKind, IntWidth, IntSign},
     vm::{Function, VM},
 };
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FnTrait {
     Fn,
     FnMut,
     FnOnce,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ClosureSig<'vm> {
+    /// What is the most general trait we can implement?
+    pub kind: FnTrait,
+    /// The function pointer type we can (possibly) cast to. Still present even if casting is impossible.
+    pub fn_ptr_ty: Type<'vm>,
+    /// A tuple representing the captured upvars
+    pub env_ty: Type<'vm>,
+}
+
+impl<'vm> ClosureSig<'vm> {
+    pub fn from_rustc_sub_repr(subs: &SubList<'vm>) -> (Self, SubList<'vm>) {
+        let mut subs = subs.clone();
+
+        let env_ty = subs
+            .list
+            .pop()
+            .expect("closure subs are too short")
+            .assert_ty();
+        let fn_ptr_ty = subs
+            .list
+            .pop()
+            .expect("closure subs are too short")
+            .assert_ty();
+        let kind_disc = subs
+            .list
+            .pop()
+            .expect("closure subs are too short")
+            .assert_ty();
+
+        // rustc uses a moderately insane repr for closures,
+        // the most insane part being an integer type to indicate the kind of closure
+
+        let kind = match kind_disc.kind() {
+            TypeKind::Int(IntWidth::I8,IntSign::Signed) => FnTrait::Fn,
+            TypeKind::Int(IntWidth::I16,IntSign::Signed) => FnTrait::FnMut,
+            TypeKind::Int(IntWidth::I32,IntSign::Signed) => FnTrait::FnOnce,
+            _ => panic!("invalid closure kind")
+        };
+
+        let sig = ClosureSig {
+            kind,
+            fn_ptr_ty,
+            env_ty,
+        };
+
+        (sig, subs)
+    }
+}
+
 /// Plays a similar role to function items. Contains IR and a table of monomorphizations.
 /// FUTURE CONSIDERATIONS: Unlike function items, the IR cannot be mutated once set.
 /// Closures will NOT support hot loading. Functions will create new closures on being hot loaded.
 pub struct Closure<'vm> {
+    abstract_sig: OnceLock<ClosureSig<'vm>>,
+
     ir_base: OnceLock<Arc<IRFunction<'vm>>>,
     ir_fn: OnceLock<Arc<IRFunction<'vm>>>,
     ir_mut: OnceLock<Arc<IRFunction<'vm>>>,
@@ -32,6 +84,8 @@ pub struct Closure<'vm> {
 impl<'vm> Closure<'vm> {
     pub fn new(unique_id: u32) -> Self {
         Self {
+            abstract_sig: Default::default(),
+
             ir_base: Default::default(),
             ir_fn: Default::default(),
             ir_mut: Default::default(),
@@ -48,6 +102,14 @@ impl<'vm> Closure<'vm> {
 
     pub fn set_ir_base(&self, ir: IRFunction<'vm>) {
         self.ir_base.set(Arc::new(ir)).ok();
+    }
+
+    pub fn abstract_sig(&self) -> ClosureSig<'vm> {
+        self.abstract_sig.get().expect("no sig for closure").clone()
+    }
+
+    pub fn set_abstract_sig(&self, sig: ClosureSig<'vm>) {
+        self.abstract_sig.set(sig).ok();
     }
 
     pub fn ir_for_trait(
@@ -95,9 +157,9 @@ impl<'vm> Eq for Closure<'vm> {}
 
 /// We make the following transformations to the IR:
 ///
-/// 1. Set the closure_kind.
-/// 2. Replace the signature's (args) with (self,(args))
-/// 3. Replace the param pattern's (args) with (self,(args))
+/// 1. Set the `closure_kind`.
+/// 2. Replace the signature's `(args)` with `(self,(args))`
+/// 3. Replace the param pattern's `(args)` with `(self,(args))`
 fn build_ir_for_trait<'vm>(
     vm: &'vm VM<'vm>,
     ir_in: &IRFunction<'vm>,

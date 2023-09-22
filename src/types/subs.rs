@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{items::GenericCounts, vm::VM};
 
-use super::Type;
+use super::{Type, TypeKind};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum Sub<'vm> {
@@ -78,6 +78,27 @@ impl<'vm> SubList<'vm> {
 
     pub fn is_concrete(&self) -> bool {
         self.list.iter().all(|sub| sub.is_concrete())
+    }
+
+    pub fn is_identity(&self) -> bool {
+        // in practice this is more of an "assert_is_identity" due to the amount of stuff that will blow it up
+
+        for (i,sub) in self.list.iter().enumerate() {
+            match sub {
+                Sub::Type(ty) => {
+                    if let TypeKind::Param(p) = ty.kind() {
+                        if *p != i as u32 {
+                            return false;
+                        }
+                    } else {
+                        panic!("is_identity? {}",ty);
+                    }
+                }
+                _ => panic!("is_identity? {:?}",sub)
+            }
+        }
+
+        true
     }
 }
 
