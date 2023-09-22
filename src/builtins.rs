@@ -186,7 +186,7 @@ impl BuiltinTrait {
 
                         let abstract_sig = closure.abstract_sig();
 
-                        let ir = closure.ir_for_trait(vm, fn_trait, abstract_sig.env_ty);
+                        let ir = closure.ir_for_trait(fn_trait, abstract_sig.env_ty);
 
                         let fn_args_ty = ir.sig.inputs[1].sub(closure_subs);
                         let for_tys = SubList {

@@ -1,4 +1,4 @@
 pub mod instr;
 mod vm;
 
-pub use vm::{Function, VM};
+pub use vm::{Function, FunctionSource, VM};

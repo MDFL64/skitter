@@ -6,7 +6,7 @@ use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::FunctionSig,
     types::{Mutability, SubList, Type, TypeKind, IntWidth, IntSign},
-    vm::{Function, VM},
+    vm::{Function, VM, FunctionSource},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -70,6 +70,9 @@ impl<'vm> ClosureSig<'vm> {
 /// FUTURE CONSIDERATIONS: Unlike function items, the IR cannot be mutated once set.
 /// Closures will NOT support hot loading. Functions will create new closures on being hot loaded.
 pub struct Closure<'vm> {
+    pub vm: &'vm VM<'vm>,
+    unique_id: u32,
+
     abstract_sig: OnceLock<ClosureSig<'vm>>,
 
     ir_base: OnceLock<Arc<IRFunction<'vm>>>,
@@ -78,12 +81,14 @@ pub struct Closure<'vm> {
     ir_once: OnceLock<Arc<IRFunction<'vm>>>,
 
     mono_instances: Mutex<AHashMap<SubList<'vm>, &'vm Function<'vm>>>,
-    unique_id: u32,
 }
 
 impl<'vm> Closure<'vm> {
-    pub fn new(unique_id: u32) -> Self {
+    pub fn new(unique_id: u32, vm: &'vm VM<'vm>) -> Self {
         Self {
+            vm,
+            unique_id,
+
             abstract_sig: Default::default(),
 
             ir_base: Default::default(),
@@ -92,7 +97,6 @@ impl<'vm> Closure<'vm> {
             ir_once: Default::default(),
 
             mono_instances: Default::default(),
-            unique_id,
         }
     }
 
@@ -114,24 +118,33 @@ impl<'vm> Closure<'vm> {
 
     pub fn ir_for_trait(
         &self,
-        vm: &'vm VM<'vm>,
         kind: FnTrait,
         self_ty: Type<'vm>,
     ) -> Arc<IRFunction<'vm>> {
         match kind {
             FnTrait::Fn => self
                 .ir_fn
-                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
+                .get_or_init(|| Arc::new(build_ir_for_trait(self.vm, &self.ir_base(), kind, self_ty)))
                 .clone(),
             FnTrait::FnMut => self
                 .ir_mut
-                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
+                .get_or_init(|| Arc::new(build_ir_for_trait(self.vm, &self.ir_base(), kind, self_ty)))
                 .clone(),
             FnTrait::FnOnce => self
                 .ir_once
-                .get_or_init(|| Arc::new(build_ir_for_trait(vm, &self.ir_base(), kind, self_ty)))
+                .get_or_init(|| Arc::new(build_ir_for_trait(self.vm, &self.ir_base(), kind, self_ty)))
                 .clone(),
         }
+    }
+
+    /// Get a monomorphic VM function from a function item.
+    pub fn func_mono(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
+        let mut mono_instances = self.mono_instances.lock().unwrap();
+        let result_func = mono_instances
+            .entry(subs.clone())
+            .or_insert_with(|| self.vm.alloc_function(FunctionSource::Closure(self), subs.clone()));
+
+        result_func
     }
 }
 

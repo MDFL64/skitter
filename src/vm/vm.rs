@@ -6,6 +6,7 @@ use crate::cache_provider::CacheProvider;
 use crate::closure::Closure;
 use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
+use crate::ir::IRFunction;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::persist::PersistReadContext;
@@ -20,6 +21,7 @@ use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::vm::instr::Slot;
 use crate::CratePath;
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::error::Error;
 use std::path::Path;
@@ -172,25 +174,28 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_function(
         &'vm self,
-        item: &'vm Item<'vm>,
+        source: FunctionSource<'vm>,
         subs: SubList<'vm>,
     ) -> &'vm Function<'vm> {
         let func = Function {
-            item,
+            source,
             subs,
             native: Default::default(),
             bytecode: Default::default(),
         };
 
-        let path = item.path.as_string();
-        if path.starts_with("::_builtin::") {
-            match path {
-                "::_builtin::print_int" => func.set_native(builtin_print_int),
-                "::_builtin::print_uint" => func.set_native(builtin_print_uint),
-                "::_builtin::print_float" => func.set_native(builtin_print_float),
-                "::_builtin::print_bool" => func.set_native(builtin_print_bool),
-                "::_builtin::print_char" => func.set_native(builtin_print_char),
-                _ => panic!("unknown builtin {}", path),
+        // hack to glue skitter builtins together
+        if let FunctionSource::Item(item) = source {
+            let path = item.path.as_string();
+            if path.starts_with("::_builtin::") {
+                match path {
+                    "::_builtin::print_int" => func.set_native(builtin_print_int),
+                    "::_builtin::print_uint" => func.set_native(builtin_print_uint),
+                    "::_builtin::print_float" => func.set_native(builtin_print_float),
+                    "::_builtin::print_bool" => func.set_native(builtin_print_bool),
+                    "::_builtin::print_char" => func.set_native(builtin_print_char),
+                    _ => panic!("unknown builtin {}", path),
+                }
             }
         }
 
@@ -212,7 +217,7 @@ impl<'vm> VM<'vm> {
     pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
 
-        self.arena_closures.alloc(Closure::new(n))
+        self.arena_closures.alloc(Closure::new(n,self))
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {
@@ -255,9 +260,40 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
     *(base.add(slot.index()) as *mut _)
 }
 
+#[derive(Copy,Clone)]
+pub enum FunctionSource<'vm> {
+    Item(&'vm Item<'vm>),
+    Closure(&'vm Closure<'vm>)
+}
+
+impl<'vm> FunctionSource<'vm> {
+    pub fn vm(&self) -> &'vm VM<'vm> {
+        match self {
+            Self::Item(item) => item.vm,
+            Self::Closure(closure) => closure.vm
+        }
+    }
+
+    pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
+        match self {
+            Self::Item(item) => item.ir(subs),
+            Self::Closure(closure) => {
+                (closure.ir_base(), Cow::Borrowed(subs))
+            }
+        }
+    }
+
+    pub fn debug_name(&self) -> &str {
+        match self {
+            Self::Item(item) => item.path.as_string(),
+            Self::Closure(closure) => "[closure]"
+        }
+    }
+}
+
 /// A monomorphized function which may contain bytecode or machine code
 pub struct Function<'vm> {
-    item: &'vm Item<'vm>,
+    source: FunctionSource<'vm>,
     subs: SubList<'vm>,
     /// Store a void pointer because function pointers can't be stored by this(?)
     native: AtomicPtr<std::ffi::c_void>,
@@ -298,11 +334,12 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let (ir, new_subs) = self.item.ir(&self.subs);
-            let path = self.item.path.as_string();
+            let vm = self.source.vm();
+            let (ir, new_subs) = self.source.ir(&self.subs);
+            let path = self.source.debug_name();
 
-            let bc = BytecodeCompiler::compile(self.item.vm, &ir, &new_subs, path);
-            let bc_ref = self.item.vm.alloc_bytecode(bc);
+            let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path);
+            let bc_ref = vm.alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);
         }
@@ -314,7 +351,7 @@ impl<'vm> std::fmt::Debug for Function<'vm> {
         write!(
             f,
             "Function(\"{}{}\")",
-            self.item.path.as_string(),
+            self.source.debug_name(),
             self.subs
         )
     }

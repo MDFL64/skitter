@@ -13,7 +13,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM},
+    vm::{Function, VM, FunctionSource},
 };
 use ahash::AHashMap;
 
@@ -742,7 +742,7 @@ impl<'vm> Item<'vm> {
         let mut mono_instances = mono_instances.lock().unwrap();
         let result_func = mono_instances
             .entry(subs.clone())
-            .or_insert_with(|| self.vm.alloc_function(self, subs.clone()));
+            .or_insert_with(|| self.vm.alloc_function(FunctionSource::Item(self), subs.clone()));
 
         result_func
     }
