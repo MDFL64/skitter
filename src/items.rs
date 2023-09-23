@@ -13,7 +13,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, VM, FunctionSource},
+    vm::{Function, FunctionSource, VM},
 };
 use ahash::AHashMap;
 
@@ -740,9 +740,10 @@ impl<'vm> Item<'vm> {
         };
 
         let mut mono_instances = mono_instances.lock().unwrap();
-        let result_func = mono_instances
-            .entry(subs.clone())
-            .or_insert_with(|| self.vm.alloc_function(FunctionSource::Item(self), subs.clone()));
+        let result_func = mono_instances.entry(subs.clone()).or_insert_with(|| {
+            self.vm
+                .alloc_function(FunctionSource::Item(self), subs.clone())
+        });
 
         result_func
     }
@@ -1197,7 +1198,7 @@ enum SubSide {
     Rhs,
 }
 
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 struct SubMap<'vm> {
     map: Vec<((SubSide, u32), Type<'vm>)>,
 }

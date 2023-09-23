@@ -217,7 +217,7 @@ impl<'vm> VM<'vm> {
     pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
 
-        self.arena_closures.alloc(Closure::new(n,self))
+        self.arena_closures.alloc(Closure::new(n, self))
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {
@@ -260,33 +260,31 @@ unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
     *(base.add(slot.index()) as *mut _)
 }
 
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub enum FunctionSource<'vm> {
     Item(&'vm Item<'vm>),
-    Closure(&'vm Closure<'vm>)
+    Closure(&'vm Closure<'vm>),
 }
 
 impl<'vm> FunctionSource<'vm> {
     pub fn vm(&self) -> &'vm VM<'vm> {
         match self {
             Self::Item(item) => item.vm,
-            Self::Closure(closure) => closure.vm
+            Self::Closure(closure) => closure.vm,
         }
     }
 
     pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
         match self {
             Self::Item(item) => item.ir(subs),
-            Self::Closure(closure) => {
-                (closure.ir_base(), Cow::Borrowed(subs))
-            }
+            Self::Closure(closure) => (closure.ir_base(), Cow::Borrowed(subs)),
         }
     }
 
     pub fn debug_name(&self) -> &str {
         match self {
             Self::Item(item) => item.path.as_string(),
-            Self::Closure(closure) => "[closure]"
+            Self::Closure(closure) => "[closure]",
         }
     }
 }
@@ -348,12 +346,7 @@ impl<'vm> Function<'vm> {
 
 impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Function(\"{}{}\")",
-            self.source.debug_name(),
-            self.subs
-        )
+        write!(f, "Function(\"{}{}\")", self.source.debug_name(), self.subs)
     }
 }
 

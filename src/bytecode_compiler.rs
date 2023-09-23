@@ -795,13 +795,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     // similar to the above
                     PointerCast::ClosureFnPointer => {
                         let src_ty = self.expr_ty(*source);
-                        if let TypeKind::Closure(closure,_,subs) = src_ty.kind() {
+                        if let TypeKind::Closure(closure, _, subs) = src_ty.kind() {
                             let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                             assert!(subs.is_concrete());
 
                             let func_ptr = closure.func_mono(subs) as *const _;
-                            
+
                             self.out_bc.push(bytecode_select::literal(
                                 func_ptr as i128,
                                 POINTER_SIZE.bytes(),

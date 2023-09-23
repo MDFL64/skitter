@@ -466,7 +466,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 closure.set_abstract_sig(abstract_sig.clone());
                 closure.set_ir_base(ir);
 
-
                 ExprKind::Tuple(capture_exprs)
             }
             hir::ExprKind::ConstBlock(..) | hir::ExprKind::InlineAsm(..) => {

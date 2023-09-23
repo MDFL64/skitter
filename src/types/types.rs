@@ -218,7 +218,7 @@ impl<'vm> Type<'vm> {
                 let new_sig = ClosureSig {
                     kind: closure_sig.kind,
                     fn_ptr_ty: closure_sig.fn_ptr_ty.sub(subs),
-                    env_ty: closure_sig.env_ty.sub(subs)
+                    env_ty: closure_sig.env_ty.sub(subs),
                 };
 
                 vm.types

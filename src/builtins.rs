@@ -138,8 +138,13 @@ impl BuiltinTrait {
                         let mut res = trait_impl(for_tys);
                         match self {
                             BuiltinTrait::FnOnce => {
-                                let call_ir =
-                                    glue_for_fn_trait(func_ty, func_ty, fn_args_ty, sig.output);
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::FnOnce,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
 
                                 res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
                                     (
@@ -150,9 +155,13 @@ impl BuiltinTrait {
                                 ]);
                             }
                             BuiltinTrait::FnMut => {
-                                let ref_ty = func_ty.ref_to(Mutability::Mut);
-                                let call_ir =
-                                    glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::FnMut,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
 
                                 res.assoc_values =
                                     trait_item.trait_build_assoc_values_for_impl(&[(
@@ -161,9 +170,83 @@ impl BuiltinTrait {
                                     )]);
                             }
                             BuiltinTrait::Fn => {
-                                let ref_ty = func_ty.ref_to(Mutability::Const);
-                                let call_ir =
-                                    glue_for_fn_trait(func_ty, ref_ty, fn_args_ty, sig.output);
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::Fn,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
+
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    )]);
+                            }
+                            _ => panic!(),
+                        }
+
+                        return Some(res);
+                    }
+                    TypeKind::FunctionPointer(sig) => {
+                        // todo how to handle generics?
+                        // make sure the sig is concrete. will see if this poses issues down the line
+                        {
+                            for in_ty in sig.inputs.iter() {
+                                assert!(in_ty.is_concrete());
+                            }
+                            assert!(sig.output.is_concrete());
+                        }
+
+                        let fn_args_ty = vm.ty_tuple(sig.inputs.clone());
+                        let for_tys = SubList {
+                            list: vec![Sub::Type(func_ty), Sub::Type(fn_args_ty)],
+                        };
+
+                        // BAD:?
+                        let mut res = trait_impl(for_tys);
+                        match self {
+                            BuiltinTrait::FnOnce => {
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::FnOnce,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
+
+                                res.assoc_values = trait_item.trait_build_assoc_values_for_impl(&[
+                                    (
+                                        ItemPath::for_value("call_once"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    ),
+                                    (ItemPath::for_type("Output"), AssocValue::Type(sig.output)),
+                                ]);
+                            }
+                            BuiltinTrait::FnMut => {
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::FnMut,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
+
+                                res.assoc_values =
+                                    trait_item.trait_build_assoc_values_for_impl(&[(
+                                        ItemPath::for_value("call_mut"),
+                                        AssocValue::RawFunctionIR(Arc::new(call_ir), IRFlag::None),
+                                    )]);
+                            }
+                            BuiltinTrait::Fn => {
+                                let call_ir = glue_for_fn_trait(
+                                    FnTrait::Fn,
+                                    func_ty,
+                                    fn_args_ty,
+                                    sig.output,
+                                    vm,
+                                );
 
                                 res.assoc_values =
                                     trait_item.trait_build_assoc_values_for_impl(&[(

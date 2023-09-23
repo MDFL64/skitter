@@ -1,19 +1,28 @@
 use crate::{
+    closure::FnTrait,
     ir::{BindingMode, Expr, ExprKind, IRFunctionBuilder, Pattern, PatternKind},
-    types::{Type, TypeKind},
+    types::{Mutability, Type, TypeKind},
+    vm::VM,
 };
 
 use super::IRFunction;
 
 /// used to generate glue code for Fn* traits on regular functions
 pub fn glue_for_fn_trait<'vm>(
+    kind: FnTrait,
     func_ty: Type<'vm>,
-    self_ty: Type<'vm>,
     args_ty: Type<'vm>,
     res_ty: Type<'vm>,
+    vm: &'vm VM<'vm>,
 ) -> IRFunction<'vm> {
     assert!(func_ty.is_concrete());
     assert!(args_ty.is_concrete());
+
+    let self_ty = match kind {
+        FnTrait::Fn => vm.ty_ref(func_ty, Mutability::Const),
+        FnTrait::FnMut => vm.ty_ref(func_ty, Mutability::Mut),
+        FnTrait::FnOnce => func_ty,
+    };
 
     let mut builder = IRFunctionBuilder::default();
 
@@ -37,10 +46,20 @@ pub fn glue_for_fn_trait<'vm>(
     };
 
     // build the actual ir
-    let func_expr = builder.add_expr(Expr {
-        kind: ExprKind::LiteralVoid,
-        ty: func_ty,
+    let mut func_expr = builder.add_expr(Expr {
+        kind: ExprKind::VarRef(0),
+        ty: self_ty,
     });
+
+    match kind {
+        FnTrait::Fn | FnTrait::FnMut => {
+            func_expr = builder.add_expr(Expr {
+                kind: ExprKind::DeRef(func_expr),
+                ty: func_ty,
+            });
+        }
+        FnTrait::FnOnce => (),
+    }
 
     let tuple_expr = builder.add_expr(Expr {
         kind: ExprKind::VarRef(1),

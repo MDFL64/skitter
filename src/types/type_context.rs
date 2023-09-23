@@ -130,7 +130,7 @@ impl<'vm> TypeContext<'vm> {
 
                 let subs = self.subs_from_rustc(subs, ctx);
 
-                let (sig,subs) = ClosureSig::from_rustc_sub_repr(&subs);
+                let (sig, subs) = ClosureSig::from_rustc_sub_repr(&subs);
 
                 TypeKind::Closure(closure, sig, subs)
             }
