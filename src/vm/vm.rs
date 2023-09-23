@@ -246,10 +246,6 @@ impl<'vm> VM<'vm> {
     pub fn ty_tuple(&'vm self, children: Vec<Type<'vm>>) -> Type<'vm> {
         self.types.intern(TypeKind::Tuple(children), self)
     }
-
-    pub fn ty_ref(&'vm self, ref_ty: Type<'vm>, mutability: Mutability) -> Type<'vm> {
-        self.types.intern(TypeKind::Ref(ref_ty, mutability), self)
-    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {

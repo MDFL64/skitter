@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     hash::{BuildHasher, Hash, Hasher},
     marker::PhantomData,
     sync::{Arc, OnceLock},
@@ -15,15 +16,15 @@ use crate::{
 pub trait LazyItem<'vm> {
     type Input;
 
-    fn input(&self) -> &Self::Input;
-
     fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self;
 }
 
 pub trait LazyKey<'vm>: LazyItem<'vm> {
     type Key;
 
-    fn key(input: &Self::Input) -> Option<&Self::Key>;
+    fn key_for_input(input: &Self::Input) -> Option<&Self::Key>;
+
+    fn key(&self) -> Option<&Self::Key>;
 }
 
 /// An array which is lazily parsed
@@ -49,8 +50,10 @@ where
     T::Input: Persist<'vm> + std::fmt::Debug + 'vm,
 {
     /// Returns the item count.
-    pub fn write<'a>(out_writer: &mut PersistWriter<'vm>, items: impl Iterator<Item = &'a T::Input>)
-    where
+    pub fn write<'a>(
+        out_writer: &mut PersistWriter<'vm>,
+        items: impl Iterator<Item = impl Borrow<T::Input>>,
+    ) where
         'vm: 'a,
     {
         let mut data_writer = out_writer.new_child_writer();
@@ -59,7 +62,7 @@ where
 
         for item in items {
             let offset = data_writer.offset();
-            item.persist_write(&mut data_writer);
+            item.borrow().persist_write(&mut data_writer);
             item_indices.push(offset);
         }
 
@@ -143,7 +146,7 @@ where
         let mut keys = Vec::new();
 
         let items = items.enumerate().map(|(i, item)| {
-            let key = <T as LazyKey>::key(item);
+            let key = <T as LazyKey>::key_for_input(item);
             if let Some(key) = key {
                 keys.push((key, i));
             }
@@ -263,7 +266,7 @@ where
 
         let item = self.array.get(final_index);
 
-        let item_key = <T as LazyKey>::key(item.input());
+        let item_key = <T as LazyKey>::key(item);
         assert!(item_key == Some(key));
 
         item

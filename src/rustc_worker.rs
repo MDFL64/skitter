@@ -1,5 +1,6 @@
 use std::{
     path::PathBuf,
+    rc::Rc,
     str::FromStr,
     sync::{Arc, Barrier, Mutex, OnceLock},
     time::Instant,
@@ -23,7 +24,7 @@ use crate::{
         ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
     },
     lazy_collections::{LazyArray, LazyTable},
-    persist::{Persist, PersistWriter},
+    persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
     types::{IntSign, IntWidth, ItemWithSubs, Type, TypeKind},
     vm::VM,
@@ -710,7 +711,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 crate_header.files.clear();
             }
 
-            let mut writer = PersistWriter::new(this_crate);
+            let write_context = Rc::new(PersistWriteContext::new(this_crate));
+            let mut writer = PersistWriter::new(write_context);
             persist_header_write(&mut writer);
             crate_header.persist_write(&mut writer);
 

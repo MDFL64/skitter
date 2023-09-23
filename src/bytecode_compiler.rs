@@ -954,7 +954,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 match closure.kind {
                     // self is a ref to a tuple-like env
                     FnTrait::Fn | FnTrait::FnMut => {
-                        let ref_ty = self.vm.ty_ref(expr.ty, Mutability::Const);
+                        let ref_ty = expr.ty.ref_to(Mutability::Const);
 
                         if upvar.is_ref {
                             let upvar_ref = self.stack.alloc(ref_ty);

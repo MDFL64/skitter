@@ -512,7 +512,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                         let arg = self.builder.add_expr(Expr {
                             kind: ExprKind::Ref(expr_id, Mutability::Const),
-                            ty: self.ctx.vm.ty_ref(adjust_ty_in, Mutability::Const),
+                            ty: adjust_ty_in.ref_to(Mutability::Const),
                         });
 
                         let kind = self.expr_deref_overload(func, arg, adjust_ty);
@@ -568,7 +568,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         // WARNING: ref mutability not necessarily correct
         // hopefully not an issue as the type shouldn't
         // be used for much
-        let ref_ty = self.ctx.vm.ty_ref(res_ty, Mutability::Const);
+        let ref_ty = res_ty.ref_to(Mutability::Const);
 
         let res = self.builder.add_expr(Expr {
             kind: ExprKind::Call {
@@ -688,14 +688,14 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 }*/
                 UpvarCapture::ByRef(BorrowKind::ImmBorrow) => {
-                    base_ty = self.ctx.vm.ty_ref(base_ty, Mutability::Const);
+                    base_ty = base_ty.ref_to(Mutability::Const);
                     base = self.builder.add_expr(Expr {
                         kind: ExprKind::Ref(base, Mutability::Const),
                         ty: base_ty,
                     });
                 }
                 UpvarCapture::ByRef(BorrowKind::MutBorrow) => {
-                    base_ty = self.ctx.vm.ty_ref(base_ty, Mutability::Mut);
+                    base_ty = base_ty.ref_to(Mutability::Mut);
                     base = self.builder.add_expr(Expr {
                         kind: ExprKind::Ref(base, Mutability::Mut),
                         ty: base_ty,

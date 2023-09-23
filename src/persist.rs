@@ -10,13 +10,22 @@ use ahash::AHashMap;
 use crate::{
     items::{CrateId, Item},
     lazy_collections::{LazyArray, LazyTable},
-    types::{Type, TypeKind},
+    types::{Type, TypeKind, WriterTypes},
     vm::VM,
 };
 
 pub struct PersistWriteContext<'vm> {
     pub this_crate: CrateId,
     pub types: RefCell<Vec<Type<'vm>>>,
+}
+
+impl<'vm> PersistWriteContext<'vm> {
+    pub fn new(this_crate: CrateId) -> Self {
+        Self {
+            this_crate,
+            types: Default::default(),
+        }
+    }
 }
 
 pub struct PersistWriter<'vm> {
@@ -26,13 +35,10 @@ pub struct PersistWriter<'vm> {
 }
 
 impl<'vm> PersistWriter<'vm> {
-    pub fn new(this_crate: CrateId) -> Self {
+    pub fn new(context: Rc<PersistWriteContext<'vm>>) -> Self {
         Self {
             output: vec![],
-            context: Rc::new(PersistWriteContext {
-                this_crate,
-                types: Default::default(),
-            }),
+            context,
         }
     }
 
@@ -44,10 +50,7 @@ impl<'vm> PersistWriter<'vm> {
     }
 
     pub fn iter_types(&self) -> WriterTypes<'vm> {
-        WriterTypes {
-            index: 0,
-            context: self.context.clone(),
-        }
+        WriterTypes::new(self.context.clone())
     }
 
     pub fn offset(&self) -> u32 {
@@ -408,21 +411,5 @@ where
         let a = A::persist_read(reader);
         let b = B::persist_read(reader);
         (a, b)
-    }
-}
-
-pub struct WriterTypes<'vm> {
-    context: Rc<PersistWriteContext<'vm>>,
-    index: usize,
-}
-
-impl<'vm> Iterator for WriterTypes<'vm> {
-    type Item = &'vm TypeKind<'vm>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let types = self.context.types.borrow();
-        let ty = types.get(self.index).copied();
-        self.index += 1;
-        ty.map(|ty| ty.kind())
     }
 }

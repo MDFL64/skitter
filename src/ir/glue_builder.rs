@@ -19,8 +19,8 @@ pub fn glue_for_fn_trait<'vm>(
     assert!(args_ty.is_concrete());
 
     let self_ty = match kind {
-        FnTrait::Fn => vm.ty_ref(func_ty, Mutability::Const),
-        FnTrait::FnMut => vm.ty_ref(func_ty, Mutability::Mut),
+        FnTrait::Fn => func_ty.ref_to(Mutability::Const),
+        FnTrait::FnMut => func_ty.ref_to(Mutability::Mut),
         FnTrait::FnOnce => func_ty,
     };
 

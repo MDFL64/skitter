@@ -1,21 +1,45 @@
+use std::{borrow::Cow, rc::Rc};
+
 use crate::{
     items::FunctionSig,
     lazy_collections::LazyItem,
-    persist::{Persist, PersistReader, PersistWriter},
+    persist::{Persist, PersistReader, PersistWriteContext, PersistWriter},
     types::{IntSign, IntWidth},
 };
 
 use super::{ArraySize, FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
 
 impl<'vm> LazyItem<'vm> for Type<'vm> {
-    type Input = TypeKind<'vm>;
-
-    fn input(&self) -> &Self::Input {
-        self.kind()
-    }
+    type Input = LazyTypeInput<'vm>;
 
     fn build(input: Self::Input, vm: &'vm crate::vm::VM<'vm>) -> Self {
-        vm.types.intern(input, vm)
+        assert!(input.impl_data.len() == 0);
+        if let Cow::Owned(kind) = input.kind {
+            vm.types.intern(kind, vm)
+        } else {
+            panic!("cannot construct lazy item from borrowed type kind");
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LazyTypeInput<'vm> {
+    kind: Cow<'vm, TypeKind<'vm>>,
+    impl_data: Cow<'vm, [u8]>,
+}
+
+impl<'vm> Persist<'vm> for LazyTypeInput<'vm> {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        panic!("todo lazy ty write");
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let kind = Cow::Owned(TypeKind::persist_read(reader));
+
+        Self {
+            kind,
+            impl_data: Cow::Borrowed(&[]),
+        }
     }
 }
 
@@ -323,5 +347,30 @@ impl<'vm> Persist<'vm> for ArraySize {
                 (*n).persist_write(writer);
             }
         }
+    }
+}
+
+pub struct WriterTypes<'vm> {
+    context: Rc<PersistWriteContext<'vm>>,
+    index: usize,
+}
+
+impl<'vm> WriterTypes<'vm> {
+    pub fn new(context: Rc<PersistWriteContext<'vm>>) -> Self {
+        Self { context, index: 0 }
+    }
+}
+
+impl<'vm> Iterator for WriterTypes<'vm> {
+    type Item = LazyTypeInput<'vm>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let types = self.context.types.borrow();
+        let ty = types.get(self.index).copied();
+        self.index += 1;
+        ty.map(|ty| LazyTypeInput {
+            kind: Cow::Borrowed(ty.kind()),
+            impl_data: Cow::Owned(ty.serialize_impl_data(&self.context)),
+        })
     }
 }

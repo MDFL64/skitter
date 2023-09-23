@@ -97,6 +97,16 @@ impl CrateId {
     }
 }
 
+impl<'vm> Persist<'vm> for CrateId {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        Self::new(Persist::persist_read(reader))
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer);
+    }
+}
+
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub struct ItemId(u32);
 
@@ -115,7 +125,7 @@ pub struct Item<'vm> {
     pub crate_id: CrateId,
     pub item_id: ItemId,
     pub path: ItemPath<'vm>,
-    pub saved_ir: Option<&'vm [u8]>,
+    pub saved_data: Option<&'vm [u8]>,
     kind: ItemKind<'vm>,
 }
 
@@ -132,7 +142,7 @@ impl<'vm> Item<'vm> {
             crate_id,
             item_id,
             path,
-            saved_ir: None,
+            saved_data: None,
             kind,
         }
     }
@@ -162,10 +172,6 @@ impl<'vm> Hash for Item<'vm> {
 impl<'vm> LazyItem<'vm> for &'vm Item<'vm> {
     type Input = Item<'vm>;
 
-    fn input(&self) -> &Self::Input {
-        self
-    }
-
     fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
         vm.alloc_item(input)
     }
@@ -174,7 +180,15 @@ impl<'vm> LazyItem<'vm> for &'vm Item<'vm> {
 impl<'vm> LazyKey<'vm> for &'vm Item<'vm> {
     type Key = ItemPath<'vm>;
 
-    fn key(input: &Self::Input) -> Option<&Self::Key> {
+    fn key(&self) -> Option<&Self::Key> {
+        if self.path.0 == NameSpace::DebugOnly {
+            None
+        } else {
+            Some(&self.path)
+        }
+    }
+
+    fn key_for_input(input: &Self::Input) -> Option<&Self::Key> {
         if input.path.0 == NameSpace::DebugOnly {
             None
         } else {
@@ -315,7 +329,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             _ => panic!(),
         };
 
-        let saved_ir = if ir.len() > 0 { Some(ir) } else { None };
+        let saved_data = if ir.len() > 0 { Some(ir) } else { None };
 
         Item {
             vm: reader.context.vm,
@@ -323,7 +337,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             item_id,
             path,
             kind,
-            saved_ir,
+            saved_data,
         }
     }
 }

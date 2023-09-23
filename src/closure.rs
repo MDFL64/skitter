@@ -187,8 +187,8 @@ fn build_ir_for_trait<'vm>(
     new_ir.closure_kind = Some(kind);
 
     let self_ty = match kind {
-        FnTrait::Fn => vm.ty_ref(self_ty, Mutability::Const),
-        FnTrait::FnMut => vm.ty_ref(self_ty, Mutability::Mut),
+        FnTrait::Fn => self_ty.ref_to(Mutability::Const),
+        FnTrait::FnMut => self_ty.ref_to(Mutability::Mut),
         FnTrait::FnOnce => self_ty,
         _ => panic!("todo self ty"),
     };

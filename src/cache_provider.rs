@@ -87,8 +87,8 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         let items = self.read_context.items.get().unwrap();
         let item = items.array.get(id.index());
 
-        if let Some(saved_ir) = item.saved_ir {
-            let mut reader = PersistReader::new(saved_ir, self.read_context.clone());
+        if let Some(saved_data) = item.saved_data {
+            let mut reader = PersistReader::new(saved_data, self.read_context.clone());
             let ir = IRFunction::persist_read(&mut reader);
             Arc::new(ir)
         } else {
@@ -100,7 +100,7 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         let items = self.read_context.items.get().unwrap();
         let item = items.array.get(id.index());
 
-        if let Some(saved_info) = item.saved_ir {
+        if let Some(saved_info) = item.saved_data {
             let mut reader = PersistReader::new(saved_info, self.read_context.clone());
             AdtInfo::persist_read(&mut reader)
         } else {

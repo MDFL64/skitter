@@ -87,14 +87,14 @@ fn run(args: &cli::CliArgs) {
     if args.test {
         /* currently not used
         let mut global_args = Vec::new();
-        
+
         if args.save {
             global_args.push(OsString::from("--save"));
         }
         if args.load {
             global_args.push(OsString::from("--load"));
         }*/
-        test::test(file_name, vec!());
+        test::test(file_name, vec![]);
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.verbose)));

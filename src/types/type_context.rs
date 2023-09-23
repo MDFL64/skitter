@@ -260,6 +260,7 @@ impl<'vm> TypeContext<'vm> {
                     layout: Default::default(),
                     assoc_values: Default::default(),
                     persist_id: Default::default(),
+                    impl_data: None,
                 });
                 Type(intern_ref, vm)
             })

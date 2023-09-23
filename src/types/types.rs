@@ -1,10 +1,11 @@
-use std::fmt::Display;
+use std::{fmt::Display, rc::Rc};
 
 use ahash::AHashMap;
 
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
+    persist::{Persist, PersistWriteContext, PersistWriter},
 };
 
 use super::{
@@ -118,6 +119,17 @@ impl<'vm> Type<'vm> {
         self.0
             .layout
             .get_or_init(|| super::layout::Layout::from(*self))
+    }
+
+    /// Generate serialized impl data. Should **only** be used when serializing a crate.
+    pub fn serialize_impl_data(&self, context: &Rc<PersistWriteContext<'vm>>) -> Vec<u8> {
+        if let Some(assoc_values) = self.0.assoc_values.get() {
+            let mut writer = PersistWriter::new(context.clone());
+            assoc_values.persist_write(&mut writer);
+            writer.flip()
+        } else {
+            vec![]
+        }
     }
 
     pub fn sign(&self) -> IntSign {
