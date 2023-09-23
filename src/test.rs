@@ -2,20 +2,97 @@ use std::{
     error::Error,
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
-    process::Command,
-    time::{Duration, Instant},
+    process::{Command, self},
+    time::{Duration, Instant}, collections::VecDeque, sync::{Mutex, LazyLock, Arc},
 };
 
-pub fn test(dir_name: &Path, global_args: &[&OsStr]) -> ! {
+struct SharedTestState {
+    count_success: i32,
+    time_skitter_total: Duration,
+    tests: VecDeque<TestInfo>
+}
+
+pub fn test(dir_name: &Path, global_args: Vec<OsString>) -> ! {
     use colored::Colorize;
+
+    println!();
+    println!("base skitter overhead = {:?}",get_base_overhead());
+    let worker_count = get_worker_count();
+    println!("using {} workers",worker_count);
+    println!();
 
     let mut test_files = Vec::new();
     gather_tests(dir_name, &mut test_files);
     test_files.sort();
 
-    let bin_name = Path::new("/tmp/skitter_test_1");
-    let mut count_success = 0;
     let count_total = test_files.len();
+
+    let global_test_state = Arc::new(Mutex::new(SharedTestState{
+        count_success: 0,
+        time_skitter_total: Duration::ZERO,
+        tests: test_files.into()
+    }));
+
+    let workers: Vec<_> = (0..worker_count).map(|worker_n| {
+        let global_args = global_args.clone();
+        let global_test_state = global_test_state.clone();
+
+        std::thread::spawn(move || {
+            let bin_name = format!("/tmp/skitter_test_{}",worker_n);
+            let bin_path = Path::new(&bin_name);
+
+            loop {
+                let file = {
+                    let mut state = global_test_state.lock().expect("test worker panicked");
+                    state.tests.pop_front()
+                };
+
+                if let Some(file) = file {
+
+                    let res = run_test(&file, bin_path, &global_args);
+                    let res_str: String = match res {
+                        Err(msg) => format!("{}", format!("FAIL: {}", msg).red()),
+                        Ok(res) => {
+                            {
+                                let mut state = global_test_state.lock().expect("test worker panicked");
+                                state.count_success += 1;
+                                state.time_skitter_total += res.time_skitter;
+                            }
+            
+                            let percent = format!("{:.1}%", res.fraction * 100.0);
+            
+                            let speedup_str = if res.fraction < 0.1 {
+                                percent.green()
+                            } else if res.fraction < 1.0 {
+                                percent.yellow()
+                            } else {
+                                percent.red()
+                            };
+            
+                            format!(
+                                "{} {} ({:?} / {:?})",
+                                "GOOD:".green(),
+                                speedup_str,
+                                res.time_skitter,
+                                res.time_rustc
+                            )
+                        }
+                    };
+            
+                    println!("{:40} {}", file.file.to_str().unwrap(), res_str);
+                } else {
+                    break;
+                }
+            }
+        })
+    }).collect();
+
+    for worker in workers {
+        worker.join().expect("test worker panicked");
+    }
+
+    /*let bin_name = Path::new("/tmp/skitter_test_1");
+    let mut count_success = 0;
     let mut time_skitter_total: Duration = Default::default();
     for file in test_files {
         let res = run_test(&file, bin_name, global_args);
@@ -47,10 +124,16 @@ pub fn test(dir_name: &Path, global_args: &[&OsStr]) -> ! {
         };
 
         println!("{:40} {}", file.file.to_str().unwrap(), res_str);
-    }
+    }*/
 
-    println!("=> {} / {} tests passed", count_success, count_total);
-    println!("=> skitter took {:?} total", time_skitter_total);
+    {
+        let state = global_test_state.lock().expect("test worker panicked");
+
+        println!();
+        println!("{} / {} tests passed", state.count_success, count_total);
+        println!("skitter took {:?} total", state.time_skitter_total);
+        println!();
+    }
 
     std::process::exit(0)
 }
@@ -120,7 +203,7 @@ const ERROR_CHARS: usize = 80;
 fn run_test(
     test_info: &TestInfo,
     bin_name: &Path,
-    global_args: &[&OsStr],
+    global_args: &[OsString],
 ) -> Result<TestResult, String> {
     // Rust compile
     let t = Instant::now();
@@ -245,10 +328,31 @@ fn time_command(cmd_name: &Path, args: &[&OsStr]) -> Result<TimeResult, Box<dyn 
     })
 }
 
-pub fn test_timer_overhead() {
-    for _ in 0..10 {
-        let program = std::env::current_exe().expect("failed to get skitter path");
-        let time = time_command(&program, &[]).unwrap().time;
-        println!("-> {:?}", time);
+fn get_base_overhead() -> Duration {
+    let program = std::env::current_exe().expect("failed to get skitter path");
+
+    let n = 5;
+
+    let sum: Duration = (0..n).map(|_| {
+        time_command(&program, &[]).unwrap().time
+    }).sum();
+    sum / n
+}
+
+/// NOTE: Individual tests may experience some slowdown with many workers.
+/// Both rustc and skitter are affected, so results aren't completely skewed,
+/// but you may want to use a single worker for more accurate timing.
+fn get_worker_count() -> usize {
+    if let Ok(val) = std::env::var("TEST_WORKERS") {
+        if let Ok(res) = val.parse::<usize>() {
+            return res;
+        }
     }
+
+    let res = if let Ok(n) = std::thread::available_parallelism() {
+        n.get()
+    } else {
+        1
+    };
+    res
 }

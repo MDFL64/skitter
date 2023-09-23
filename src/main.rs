@@ -85,15 +85,16 @@ fn run(args: &cli::CliArgs) {
     let file_name = Path::new(&args.file_name);
 
     if args.test {
-        test::test_timer_overhead();
+        /* currently not used
         let mut global_args = Vec::new();
+        
         if args.save {
-            global_args.push(OsStr::new("--save"));
+            global_args.push(OsString::from("--save"));
         }
         if args.load {
-            global_args.push(OsStr::new("--load"));
-        }
-        test::test(file_name, &global_args);
+            global_args.push(OsString::from("--load"));
+        }*/
+        test::test(file_name, vec!());
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.verbose)));
