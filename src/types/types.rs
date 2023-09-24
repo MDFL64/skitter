@@ -1,11 +1,11 @@
-use std::{fmt::Display, rc::Rc};
+use std::{fmt::Display, rc::Rc, sync::Arc};
 
 use ahash::AHashMap;
 
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
-    persist::{Persist, PersistWriteContext, PersistWriter},
+    persist::{Persist, PersistWriteContext, PersistWriter, PersistReadContext, PersistReader},
 };
 
 use super::{
@@ -123,13 +123,26 @@ impl<'vm> Type<'vm> {
 
     /// Generate serialized impl data. Should **only** be used when serializing a crate.
     pub fn serialize_impl_data(&self, context: &Rc<PersistWriteContext<'vm>>) -> Vec<u8> {
-        if let Some(assoc_values) = self.0.assoc_values.get() {
+        let data = if let Some(assoc_values) = self.0.assoc_values.get() {
             let mut writer = PersistWriter::new(context.clone());
             assoc_values.persist_write(&mut writer);
             writer.flip()
         } else {
             vec![]
-        }
+        };
+        println!("WRITE {} {}",self,data.len());
+        data
+    }
+
+    pub fn load_impls(&self, read_ctx: Arc<PersistReadContext<'vm>>) {
+        self.0.assoc_values.get_or_init(|| {
+            if self.0.impl_data.len() > 0 {
+                let mut reader = PersistReader::new(self.0.impl_data, read_ctx);
+                Persist::persist_read(&mut reader)
+            } else {
+                Default::default()
+            }
+        });
     }
 
     pub fn sign(&self) -> IntSign {

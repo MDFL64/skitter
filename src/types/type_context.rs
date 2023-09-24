@@ -249,7 +249,7 @@ impl<'vm> TypeContext<'vm> {
         parent_item.item.child_closure(path_indices)
     }
 
-    pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
+    pub fn intern_with_impl_data(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>, impl_data: &'vm [u8]) -> Type<'vm> {
         let mut inner = self.table.lock().unwrap();
         let entry = inner.entry(kind.clone());
 
@@ -260,10 +260,14 @@ impl<'vm> TypeContext<'vm> {
                     layout: Default::default(),
                     assoc_values: Default::default(),
                     persist_id: Default::default(),
-                    impl_data: None,
+                    impl_data
                 });
                 Type(intern_ref, vm)
             })
             .clone()
+    }
+
+    pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
+        self.intern_with_impl_data(kind,vm,&[])
     }
 }

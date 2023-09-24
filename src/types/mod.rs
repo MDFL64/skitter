@@ -28,5 +28,5 @@ struct InternedType<'vm> {
     assoc_values: OnceLock<AHashMap<String, (CrateId, AssocValue<'vm>)>>,
     persist_id: OnceLock<u32>,
     /// Serialized form of `assoc_values`.
-    impl_data: Option<&'vm [u8]>,
+    impl_data: &'vm [u8],
 }

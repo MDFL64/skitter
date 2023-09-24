@@ -109,6 +109,6 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
     }
 
     fn fill_inherent_impls(&self, ty: Type<'vm>) {
-        panic!("fill_inherent_impls")
+        ty.load_impls(self.read_context.clone());
     }
 }

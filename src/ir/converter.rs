@@ -684,9 +684,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             use rustc_middle::ty::{BorrowKind, UpvarCapture};
 
             match cap.info.capture_kind {
-                /*UpvarCapture::ByValue => {
-
-                }*/
                 UpvarCapture::ByRef(BorrowKind::ImmBorrow) => {
                     base_ty = base_ty.ref_to(Mutability::Const);
                     base = self.builder.add_expr(Expr {
@@ -694,6 +691,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         ty: base_ty,
                     });
                 }
+                UpvarCapture::ByRef(BorrowKind::UniqueImmBorrow) |
                 UpvarCapture::ByRef(BorrowKind::MutBorrow) => {
                     base_ty = base_ty.ref_to(Mutability::Mut);
                     base = self.builder.add_expr(Expr {
@@ -702,7 +700,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     });
                 }
                 UpvarCapture::ByValue => (),
-                k => panic!("todo capture kind! {:?}", k),
             }
         }
 

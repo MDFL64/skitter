@@ -91,10 +91,16 @@ impl<'vm> SubList<'vm> {
                             return false;
                         }
                     } else {
-                        panic!("is_identity? {}", ty);
+                        panic!("is_identity? ty: {}", ty);
                     }
                 }
-                _ => panic!("is_identity? {:?}", sub),
+                Sub::Const => {
+                    // TODO
+                }
+                Sub::Lifetime => {
+                    // don't care
+                }
+                _ => panic!("is_identity? {}", self),
             }
         }
 

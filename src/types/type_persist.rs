@@ -13,9 +13,12 @@ impl<'vm> LazyItem<'vm> for Type<'vm> {
     type Input = LazyTypeInput<'vm>;
 
     fn build(input: Self::Input, vm: &'vm crate::vm::VM<'vm>) -> Self {
-        assert!(input.impl_data.len() == 0);
         if let Cow::Owned(kind) = input.kind {
-            vm.types.intern(kind, vm)
+            if let Cow::Borrowed(impl_data) = input.impl_data {
+                vm.types.intern_with_impl_data(kind, vm, impl_data)
+            } else {
+                panic!("cannot construct lazy item from owned impl data");
+            }
         } else {
             panic!("cannot construct lazy item from borrowed type kind");
         }
@@ -30,15 +33,17 @@ pub struct LazyTypeInput<'vm> {
 
 impl<'vm> Persist<'vm> for LazyTypeInput<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        panic!("todo lazy ty write");
+        self.kind.persist_write(writer);
+        writer.write_byte_slice(&self.impl_data);
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let kind = Cow::Owned(TypeKind::persist_read(reader));
+        let data: &[u8] = reader.read_byte_slice();
 
         Self {
             kind,
-            impl_data: Cow::Borrowed(&[]),
+            impl_data: Cow::Borrowed(data),
         }
     }
 }
