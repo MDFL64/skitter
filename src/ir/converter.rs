@@ -691,8 +691,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         ty: base_ty,
                     });
                 }
-                UpvarCapture::ByRef(BorrowKind::UniqueImmBorrow) |
-                UpvarCapture::ByRef(BorrowKind::MutBorrow) => {
+                UpvarCapture::ByRef(BorrowKind::UniqueImmBorrow)
+                | UpvarCapture::ByRef(BorrowKind::MutBorrow) => {
                     base_ty = base_ty.ref_to(Mutability::Mut);
                     base = self.builder.add_expr(Expr {
                         kind: ExprKind::Ref(base, Mutability::Mut),

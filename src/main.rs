@@ -67,7 +67,7 @@ fn main() {
     let args = cli::CliArgs::parse();
 
     profiler::profile("top", || {
-        if args.repeat {
+        if args.debug_repeat {
             loop {
                 run(&args);
             }
@@ -85,16 +85,12 @@ fn run(args: &cli::CliArgs) {
     let file_name = Path::new(&args.file_name);
 
     if args.test {
-        /* currently not used
         let mut global_args = Vec::new();
 
-        if args.save {
-            global_args.push(OsString::from("--save"));
+        if args.no_load {
+            global_args.push(OsString::from("--no-load"));
         }
-        if args.load {
-            global_args.push(OsString::from("--load"));
-        }*/
-        test::test(file_name, vec![]);
+        test::test(file_name, global_args);
     }
 
     let vm: &VM = Box::leak(Box::new(VM::new(args.verbose)));
@@ -132,7 +128,15 @@ fn run(args: &cli::CliArgs) {
     if !crate_path.is_core() {
         let core_path = CratePath::new(OsStr::new("@core"));
 
-        let core_id = vm.add_cache_provider(&core_path).expect("core load failed");
+        let core_id = if args.no_load {
+            vm.add_rustc_provider(RustCWorkerConfig {
+                crate_path: core_path,
+                extern_crates: vec![],
+                save_file: false,
+            })
+        } else {
+            vm.add_cache_provider(&core_path).expect("core load failed")
+        };
 
         extern_crates.push(ExternCrate {
             id: core_id,
@@ -142,21 +146,11 @@ fn run(args: &cli::CliArgs) {
         vm.core_crate.set(core_id).unwrap();
     }
 
-    let main_crate = if args.load {
-        /*let crate_name = file_name.file_stem().unwrap().to_str().unwrap();
-
-        let source_path = file_name.canonicalize().unwrap();
-        let cache_path = cache_file_path(crate_name, &source_path);*/
-
-        vm.add_cache_provider(&crate_path)
-            .expect("cache load failed")
-    } else {
-        vm.add_rustc_provider(RustCWorkerConfig {
-            crate_path,
-            extern_crates,
-            save_file: args.save,
-        })
-    };
+    let main_crate = vm.add_rustc_provider(RustCWorkerConfig {
+        crate_path,
+        extern_crates,
+        save_file: args.save,
+    });
 
     let main_path = ItemPath::main();
 

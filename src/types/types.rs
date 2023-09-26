@@ -5,7 +5,7 @@ use ahash::AHashMap;
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
-    persist::{Persist, PersistWriteContext, PersistWriter, PersistReadContext, PersistReader},
+    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter},
 };
 
 use super::{
@@ -130,7 +130,7 @@ impl<'vm> Type<'vm> {
         } else {
             vec![]
         };
-        println!("WRITE {} {}",self,data.len());
+        println!("WRITE {} {}", self, data.len());
         data
     }
 
