@@ -642,7 +642,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
         // write the inherent impls we just gathered
         for (ty, items) in inherent_impls {
-            ty.set_impl(items);
+            // TODO
         }
 
         if worker_config.crate_path.is_core() {

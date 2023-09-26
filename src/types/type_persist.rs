@@ -10,41 +10,10 @@ use crate::{
 use super::{ArraySize, FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
 
 impl<'vm> LazyItem<'vm> for Type<'vm> {
-    type Input = LazyTypeInput<'vm>;
+    type Input = TypeKind<'vm>;
 
-    fn build(input: Self::Input, vm: &'vm crate::vm::VM<'vm>) -> Self {
-        if let Cow::Owned(kind) = input.kind {
-            if let Cow::Borrowed(impl_data) = input.impl_data {
-                vm.types.intern_with_impl_data(kind, vm, impl_data)
-            } else {
-                panic!("cannot construct lazy item from owned impl data");
-            }
-        } else {
-            panic!("cannot construct lazy item from borrowed type kind");
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct LazyTypeInput<'vm> {
-    kind: Cow<'vm, TypeKind<'vm>>,
-    impl_data: Cow<'vm, [u8]>,
-}
-
-impl<'vm> Persist<'vm> for LazyTypeInput<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.kind.persist_write(writer);
-        writer.write_byte_slice(&self.impl_data);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let kind = Cow::Owned(TypeKind::persist_read(reader));
-        let data: &[u8] = reader.read_byte_slice();
-
-        Self {
-            kind,
-            impl_data: Cow::Borrowed(data),
-        }
+    fn build(kind: Self::Input, vm: &'vm crate::vm::VM<'vm>) -> Self {
+        vm.types.intern(kind, vm)
     }
 }
 
@@ -367,15 +336,12 @@ impl<'vm> WriterTypes<'vm> {
 }
 
 impl<'vm> Iterator for WriterTypes<'vm> {
-    type Item = LazyTypeInput<'vm>;
+    type Item = &'vm TypeKind<'vm>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let types = self.context.types.borrow();
         let ty = types.get(self.index).copied();
         self.index += 1;
-        ty.map(|ty| LazyTypeInput {
-            kind: Cow::Borrowed(ty.kind()),
-            impl_data: Cow::Owned(ty.serialize_impl_data(&self.context)),
-        })
+        ty.map(|ty| ty.kind())
     }
 }

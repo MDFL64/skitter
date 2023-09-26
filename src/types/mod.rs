@@ -25,8 +25,5 @@ pub struct Type<'vm>(&'vm InternedType<'vm>, &'vm VM<'vm>);
 struct InternedType<'vm> {
     kind: TypeKind<'vm>,
     layout: OnceLock<layout::Layout>,
-    assoc_values: OnceLock<AHashMap<String, (CrateId, AssocValue<'vm>)>>,
     persist_id: OnceLock<u32>,
-    /// Serialized form of `assoc_values`.
-    impl_data: &'vm [u8],
 }

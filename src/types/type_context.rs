@@ -187,7 +187,8 @@ impl<'vm> TypeContext<'vm> {
                 let ident = ctx.tcx.item_name(did);
                 match subject {
                     ImplSubject::Inherent(ty) => {
-                        let ty = self.type_from_rustc(ty, ctx);
+                        panic!("todo inherent impl lookup")
+                        /*let ty = self.type_from_rustc(ty, ctx);
                         if let Some((crate_id, ir_source)) = ty.find_assoc_value(ident.as_str()) {
                             let crate_items = ctx.vm.crate_provider(crate_id);
                             if let AssocValue::Item(item_id) = ir_source {
@@ -197,7 +198,7 @@ impl<'vm> TypeContext<'vm> {
                             }
                         } else {
                             panic!("couldn't find inherent impl {}::{}", ty, ident);
-                        }
+                        }*/
                     }
                     ImplSubject::Trait(trait_ref) => {
                         panic!("todo trait ref");
@@ -249,12 +250,7 @@ impl<'vm> TypeContext<'vm> {
         parent_item.item.child_closure(path_indices)
     }
 
-    pub fn intern_with_impl_data(
-        &'vm self,
-        kind: TypeKind<'vm>,
-        vm: &'vm VM<'vm>,
-        impl_data: &'vm [u8],
-    ) -> Type<'vm> {
+    pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
         let mut inner = self.table.lock().unwrap();
         let entry = inner.entry(kind.clone());
 
@@ -263,16 +259,10 @@ impl<'vm> TypeContext<'vm> {
                 let intern_ref = self.arena.alloc(InternedType {
                     kind,
                     layout: Default::default(),
-                    assoc_values: Default::default(),
                     persist_id: Default::default(),
-                    impl_data,
                 });
                 Type(intern_ref, vm)
             })
             .clone()
-    }
-
-    pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {
-        self.intern_with_impl_data(kind, vm, &[])
     }
 }

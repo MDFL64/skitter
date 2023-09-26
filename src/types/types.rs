@@ -121,30 +121,6 @@ impl<'vm> Type<'vm> {
             .get_or_init(|| super::layout::Layout::from(*self))
     }
 
-    /// Generate serialized impl data. Should **only** be used when serializing a crate.
-    pub fn serialize_impl_data(&self, context: &Rc<PersistWriteContext<'vm>>) -> Vec<u8> {
-        let data = if let Some(assoc_values) = self.0.assoc_values.get() {
-            let mut writer = PersistWriter::new(context.clone());
-            assoc_values.persist_write(&mut writer);
-            writer.flip()
-        } else {
-            vec![]
-        };
-        println!("WRITE {} {}", self, data.len());
-        data
-    }
-
-    pub fn load_impls(&self, read_ctx: Arc<PersistReadContext<'vm>>) {
-        self.0.assoc_values.get_or_init(|| {
-            if self.0.impl_data.len() > 0 {
-                let mut reader = PersistReader::new(self.0.impl_data, read_ctx);
-                Persist::persist_read(&mut reader)
-            } else {
-                Default::default()
-            }
-        });
-    }
-
     pub fn sign(&self) -> IntSign {
         match self.kind() {
             TypeKind::Int(_, sign) => *sign,
@@ -319,30 +295,8 @@ impl<'vm> Type<'vm> {
         }
     }
 
-    pub fn set_impl(&self, new_assoc_items: AHashMap<String, (CrateId, AssocValue<'vm>)>) {
-        let res = self.0.assoc_values.set(new_assoc_items);
-        assert!(res.is_ok());
-    }
-
-    pub fn find_assoc_value(&self, name: &str) -> Option<(CrateId, AssocValue<'vm>)> {
-        if let Some(assoc_values) = self.0.assoc_values.get() {
-            assoc_values.get(name).cloned()
-        } else {
-            let impl_crate_id = self.find_impl_crate();
-            let impl_crate = self.1.crate_provider(impl_crate_id);
-
-            impl_crate.fill_inherent_impls(*self);
-
-            // Try one more time:
-            if let Some(assoc_values) = self.0.assoc_values.get() {
-                assoc_values.get(name).cloned()
-            } else {
-                None
-            }
-        }
-    }
-
     /// Find the crate that the type is defined in. Used to request inherent impl setup.
+    /// TODO: Some primitive types may have inherent impls in multiple crates (core,alloc,std)
     fn find_impl_crate(&self) -> CrateId {
         match self.kind() {
             // primitive types have impls in core
