@@ -8,12 +8,12 @@ use std::{
 use crate::{
     crate_provider::CrateProvider,
     ir::IRFunction,
-    items::{AdtInfo, CrateId, Item, ItemId, ItemPath},
+    items::{AdtInfo, CrateId, Item, ItemId, ItemPath, AssocValue},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
     profiler::profile,
-    types::Type,
+    types::{Type, SubList},
     vm::VM,
     CratePath,
 };
@@ -62,12 +62,6 @@ impl<'vm> CacheProvider<'vm> {
             .set(types)
             .map_err(|_| "double-assign to types")?;
 
-        let impl_count = usize::persist_read(&mut reader);
-        for _ in 0..impl_count {
-            let trait_item = reader.read_item_ref();
-            trait_item.read_trait_impl(&mut reader);
-        }
-
         Ok(Self { read_context })
     }
 }
@@ -110,5 +104,9 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
 
     fn fill_inherent_impls(&self, ty: Type<'vm>) {
         panic!("todo fill inherent");
+    }
+
+    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]> {
+        panic!("todo parse trait impl");
     }
 }

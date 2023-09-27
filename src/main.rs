@@ -31,6 +31,7 @@ mod closure;
 mod crate_provider;
 mod ir;
 mod items;
+mod impls;
 mod lazy_collections;
 mod persist;
 mod persist_header;

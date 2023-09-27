@@ -84,7 +84,7 @@ enum NameSpace {
     DebugOnly,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct CrateId(u32);
 
 impl CrateId {
@@ -107,7 +107,7 @@ impl<'vm> Persist<'vm> for CrateId {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct ItemId(u32);
 
 impl ItemId {
@@ -452,7 +452,6 @@ pub enum ItemKind<'vm> {
     },
     Trait {
         assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
-        impl_list: RwLock<Vec<TraitImpl<'vm>>>,
         builtin: OnceLock<BuiltinTrait>,
     },
 }
@@ -627,6 +626,12 @@ pub struct GenericCounts {
     pub consts: u32,
 }
 
+impl GenericCounts {
+    pub fn total(&self) -> u32 {
+        self.lifetimes + self.types + self.consts
+    }
+}
+
 impl<'vm> ItemKind<'vm> {
     pub fn new_function() -> Self {
         Self::Function {
@@ -723,7 +728,6 @@ impl<'vm> ItemKind<'vm> {
     pub fn new_trait() -> Self {
         Self::Trait {
             assoc_value_map: Default::default(),
-            impl_list: Default::default(),
             builtin: Default::default(),
         }
     }
@@ -740,7 +744,6 @@ impl<'vm> ItemKind<'vm> {
 
         Self::Trait {
             assoc_value_map: assoc_value_map.into(),
-            impl_list: Default::default(),
             builtin: builtin_lock,
         }
     }
@@ -943,17 +946,6 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn add_trait_impl(&self, info: TraitImpl<'vm>) -> usize {
-        let ItemKind::Trait{impl_list,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
-
-        let mut impl_list = impl_list.write().unwrap();
-        let index = impl_list.len();
-        impl_list.push(info);
-        index
-    }
-
     pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {
         let ItemKind::Trait{builtin,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -999,7 +991,8 @@ impl<'vm> Item<'vm> {
         let crate_items = self.vm.crate_provider(self.crate_id);
         let trait_item = crate_items.item_by_id(virtual_info.trait_id);
 
-        trait_item
+        panic!("resolve_associated_ty");
+        /*trait_item
             .find_trait_impl(subs, &mut None, |trait_impl, subs| {
                 let ty = &trait_impl.assoc_values[virtual_info.member_index as usize];
 
@@ -1011,7 +1004,7 @@ impl<'vm> Item<'vm> {
             })
             .unwrap_or_else(|| {
                 panic!("failed to find {} for {}", self.path.as_string(), subs);
-            })
+            })*/
     }
 
     fn find_trait_item_ir(
@@ -1019,7 +1012,33 @@ impl<'vm> Item<'vm> {
         for_tys: &SubList<'vm>,
         member_index: u32,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
-        self.find_trait_impl(for_tys, &mut None, |trait_impl, subs| {
+
+        if let Some(result) = self.find_trait_impl(for_tys) {
+            let crate_items = self.vm.crate_provider(result.crate_id);
+            let ir_source = &result.assoc_values[member_index as usize];
+
+            if let Some(ir_source) = ir_source {
+                match ir_source {
+                    AssocValue::Item(fn_item_id) => {
+                        let fn_item = crate_items.item_by_id(*fn_item_id);
+                        let subs = SubList{list: vec!()};
+
+                        let (ir, _) = fn_item.ir(&subs);
+                        Some((ir, subs))
+                    }
+                    AssocValue::RawFunctionIR(ir, flag) => {
+                        panic!("raw ir");
+                    }
+                    AssocValue::Type(_) => panic!("attempt to fetch IR for associated type"),
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+
+        /*self.find_trait_impl(for_tys, &mut None, |trait_impl, subs| {
             let crate_items = self.vm.crate_provider(trait_impl.crate_id);
             let ir_source = &trait_impl.assoc_values[member_index as usize];
 
@@ -1050,84 +1069,33 @@ impl<'vm> Item<'vm> {
         })
         .unwrap_or_else(|| {
             panic!("failed to find {} for {}", self.path.as_string(), for_tys);
-        })
+        })*/
     }
 
     pub fn trait_has_impl(
         &self,
-        for_tys: &SubList<'vm>,
-        update_tys: &mut Option<&mut SubList<'vm>>,
+        for_tys: &SubList<'vm>
     ) -> bool {
-        self.find_trait_impl(for_tys, update_tys, |_, _| ())
-            .is_some()
-    }
-
-    pub fn write_trait_impl(&self, index: usize, writer: &mut PersistWriter<'vm>) {
-        let ItemKind::Trait{impl_list,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
-
-        let impl_list = impl_list.read().unwrap();
-        let impl_ref = &impl_list[index];
-
-        // write a ref to the trait item
-        writer.write_item_ref(self);
-
-        impl_ref.for_types.persist_write(writer);
-        impl_ref.bounds.persist_write(writer);
-
-        impl_ref.generics.lifetimes.persist_write(writer);
-        impl_ref.generics.types.persist_write(writer);
-        impl_ref.generics.consts.persist_write(writer);
-
-        impl_ref.assoc_values.persist_write(writer);
-    }
-
-    pub fn read_trait_impl(&self, reader: &mut PersistReader<'vm>) {
-        let for_types = SubList::persist_read(reader);
-        let bounds = Vec::<BoundKind>::persist_read(reader);
-
-        let generics = {
-            let lifetimes = u32::persist_read(reader);
-            let types = u32::persist_read(reader);
-            let consts = u32::persist_read(reader);
-            GenericCounts {
-                lifetimes,
-                types,
-                consts,
-            }
-        };
-
-        let assoc_values = Vec::<Option<AssocValue>>::persist_read(reader);
-
-        // build the impl and add it to our list
-
-        let ItemKind::Trait{impl_list,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
-
-        let mut impl_list = impl_list.write().unwrap();
-
-        impl_list.push(TraitImpl {
-            crate_id: reader.context.this_crate,
-            for_types,
-            bounds,
-            generics,
-            assoc_values,
-        });
+        self.find_trait_impl(for_tys).is_some()
     }
 
     /// Find a trait implementation for a given list of types.
-    pub fn find_trait_impl<T>(
+    pub fn find_trait_impl(
         &self,
-        for_tys: &SubList<'vm>,
-        update_tys: &mut Option<&mut SubList<'vm>>,
-        callback: impl FnOnce(&TraitImpl<'vm>, SubList<'vm>) -> T,
-    ) -> Option<T> {
-        let ItemKind::Trait{impl_list,builtin,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
+        for_tys: &SubList<'vm>
+    ) -> Option<ImplResult<'vm>> {
 
+        let crate_id = self.crate_id;
+        let crate_provider = self.vm.crate_provider(crate_id);
+
+        crate_provider.trait_impl(self, for_tys).map(|assoc_values| {
+            ImplResult{
+                crate_id,
+                assoc_values
+            }
+        })
+
+        /*
         if let Some(builtin) = builtin.get() {
             let builtin_res = builtin.find_candidate(for_tys, self.vm, self);
             if let Some(candidate) = builtin_res {
@@ -1136,20 +1104,10 @@ impl<'vm> Item<'vm> {
                 }
             }
         }
-
-        let impl_list = impl_list.read().unwrap();
-
-        for candidate in impl_list.iter() {
-            if let Some(trait_subs) = self.check_trait_impl(for_tys, candidate, update_tys) {
-                return Some(callback(candidate, trait_subs));
-            }
-        }
-
-        None
+        */
     }
 
-    /// Builds a sub list for the impl, and checks it against the impl bounds.
-    fn check_trait_impl(
+    /*fn check_trait_impl(
         &self,
         for_tys: &SubList<'vm>,
         candidate: &TraitImpl<'vm>,
@@ -1203,7 +1161,12 @@ impl<'vm> Item<'vm> {
         } else {
             None
         }
-    }
+    }*/
+}
+
+struct ImplResult<'vm> {
+    crate_id: CrateId,
+    assoc_values: &'vm [Option<AssocValue<'vm>>]
 }
 
 #[derive(PartialEq, Debug)]
@@ -1248,16 +1211,6 @@ impl<'vm> SubMap<'vm> {
             }
         }
     }
-    /*fn get(&self, side: SubSide, n: u32) -> Option<Type<'vm>> {
-        let key = (side,n);
-        for (ek,ev) in &self.map {
-            if *ek == key {
-                return Some(*ev);
-            }
-        }
-        println!("warning! failed to resolve substitution: {:?} / {:?}",self.map,key);
-        None
-    }*/
 }
 
 /// Compares a list of concrete types to a candidate type.

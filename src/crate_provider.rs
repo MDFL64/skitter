@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     ir::IRFunction,
-    items::{AdtInfo, Item, ItemId, ItemPath},
-    types::Type,
+    items::{AdtInfo, Item, ItemId, ItemPath, AssocValue},
+    types::{Type, SubList},
 };
 
 pub trait CrateProvider<'vm>: Send + Sync + 'vm {
@@ -22,4 +22,6 @@ pub trait CrateProvider<'vm>: Send + Sync + 'vm {
     /// The type must be declared in this crate, with the exception
     /// of primitive types, which have impls in core.
     fn fill_inherent_impls(&self, ty: Type<'vm>);
+
+    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]>;
 }

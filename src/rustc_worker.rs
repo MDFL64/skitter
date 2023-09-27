@@ -26,9 +26,9 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
-    types::{IntSign, IntWidth, ItemWithSubs, Type, TypeKind},
+    types::{IntSign, IntWidth, ItemWithSubs, Type, TypeKind, SubList, Sub},
     vm::VM,
-    CratePath,
+    CratePath, impls::{ImplBounds, Impls},
 };
 
 /////////////////////////
@@ -220,6 +220,12 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
     fn fill_inherent_impls(&self, _: Type<'vm>) {
         // All we need to do is wait for initialization.
         self.call(|_| {}).wait();
+    }
+
+    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]> {
+        let items = self.items();
+        let impls = items.impls.get().expect("no impls available");
+        impls.find_trait(trait_item, for_tys)
     }
 }
 
@@ -514,86 +520,98 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             });
         }
 
-        let mut inherent_impls: AHashMap<Type<'vm>, AHashMap<String, (CrateId, AssocValue<'vm>)>> =
-            Default::default();
+        let mut impls = Impls::default();
 
         // fill impls
-        let mut impl_ids = Vec::new();
-
         for impl_item in impl_items {
-            match impl_item.subject {
-                ImplSubject::Inherent(ty) => {
-                    assert!(impl_item.assoc_tys.len() == 0);
-                    let ty = vm.types.type_from_rustc(ty, &ctx);
 
-                    // Skip implementations on types which do not work correctly at the moment.
-                    if !ty.kind().is_dummy() {
-                        let table = inherent_impls.entry(ty).or_default();
-
-                        for (key, value) in impl_item.assoc_values {
-                            let old = table.insert(key.clone(), (this_crate, value));
-                            if !old.is_none() {
-                                panic!("duplicate def = {} {}", ty, key);
+            // Build bounds.
+            let mut bounds: Vec<BoundKind> = Vec::new();
+            {
+                let predicates = tcx.predicates_of(impl_item.did);
+                for (p, _) in predicates.predicates {
+                    let p = p.kind().skip_binder();
+                    if let rustc_middle::ty::PredicateKind::Clause(p) = p {
+                        if let rustc_middle::ty::Clause::Trait(p) = p {
+                            if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
+                                let trait_bound = vm.types.def_from_rustc(
+                                    p.trait_ref.def_id,
+                                    p.trait_ref.substs,
+                                    &ctx,
+                                );
+                                bounds.push(BoundKind::Trait(trait_bound));
                             }
+                        } else if let rustc_middle::ty::Clause::Projection(p) = p {
+                            let assoc_ty = vm.types.def_from_rustc(
+                                p.projection_ty.def_id,
+                                p.projection_ty.substs,
+                                &ctx,
+                            );
+                            if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
+                                let eq_ty = vm.types.type_from_rustc(ty, &ctx);
+                                bounds.push(BoundKind::Projection(assoc_ty, eq_ty));
+                            }
+                            // TODO CONSTS
                         }
                     }
                 }
+            }
+
+            // Build generics summary.
+            let mut generic_counts = GenericCounts::default();
+            {
+                let rustc_generics = tcx.generics_of(impl_item.did);
+    
+                for gp in &rustc_generics.params {
+                    use rustc_middle::ty::GenericParamDefKind;
+                    match gp.kind {
+                        GenericParamDefKind::Lifetime => generic_counts.lifetimes += 1,
+                        GenericParamDefKind::Type { .. } => generic_counts.types += 1,
+                        GenericParamDefKind::Const { .. } => generic_counts.consts += 1,
+                    }
+                }
+            }
+
+            let for_tys = match impl_item.subject {
+                ImplSubject::Inherent(ty) => {
+                    let ty = vm.types.type_from_rustc(ty, &ctx);
+                    SubList{
+                        list: vec!(Sub::Type(ty))
+                    }
+                }
                 ImplSubject::Trait(trait_ref) => {
-                    /*let assoc_tys: AHashMap<_, _> = impl_item
-                    .assoc_tys
-                    .into_iter()
-                    .map(|(name, local_id)| {
-                        let ty = tcx.type_of(local_id).skip_binder();
-                        let ty = vm.types.type_from_rustc(ty, &ctx);
-                        (name, ty)
-                    })
-                    .collect();*/
+                    vm.types.subs_from_rustc(trait_ref.substs, &ctx)
+                }
+            };
 
+            let key_ty = for_tys.list[0].assert_ty();
+
+            let bounds = ImplBounds{
+                for_tys,
+                bounds,
+                generic_counts
+            };
+
+            let bounds_id = impls.add_bounds(bounds);
+
+            match impl_item.subject {
+                ImplSubject::Inherent(_) => {
+                    if key_ty.kind().is_dummy() {
+                        continue;
+                    }
+
+                    assert!(impl_item.assoc_tys.len() == 0);
+
+                    for (member_key,val) in impl_item.assoc_values {
+                        let mut full_key = key_ty.impl_key().expect("inherent impls should always have a valid key").to_owned();
+                        full_key.push_str(":");
+                        full_key.push_str(&member_key);
+
+                        impls.add_inherent(full_key, bounds_id, val);
+                    }
+                }
+                ImplSubject::Trait(trait_ref) => {
                     let trait_did = trait_ref.def_id;
-
-                    // Convert bounds.
-                    let mut bounds: Vec<BoundKind> = Vec::new();
-                    let predicates = tcx.predicates_of(impl_item.did);
-                    for (p, _) in predicates.predicates {
-                        let p = p.kind().skip_binder();
-                        if let rustc_middle::ty::PredicateKind::Clause(p) = p {
-                            if let rustc_middle::ty::Clause::Trait(p) = p {
-                                if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
-                                    let trait_bound = vm.types.def_from_rustc(
-                                        p.trait_ref.def_id,
-                                        p.trait_ref.substs,
-                                        &ctx,
-                                    );
-                                    bounds.push(BoundKind::Trait(trait_bound));
-                                }
-                            } else if let rustc_middle::ty::Clause::Projection(p) = p {
-                                let assoc_ty = vm.types.def_from_rustc(
-                                    p.projection_ty.def_id,
-                                    p.projection_ty.substs,
-                                    &ctx,
-                                );
-                                if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
-                                    let eq_ty = vm.types.type_from_rustc(ty, &ctx);
-                                    bounds.push(BoundKind::Projection(assoc_ty, eq_ty));
-                                }
-                                // TODO CONSTS
-                            }
-                        }
-                    }
-
-                    // Build generics summary.
-                    let rustc_generics = tcx.generics_of(impl_item.did);
-
-                    let mut generics = GenericCounts::default();
-
-                    for gp in &rustc_generics.params {
-                        use rustc_middle::ty::GenericParamDefKind;
-                        match gp.kind {
-                            GenericParamDefKind::Lifetime => generics.lifetimes += 1,
-                            GenericParamDefKind::Type { .. } => generics.types += 1,
-                            GenericParamDefKind::Const { .. } => generics.consts += 1,
-                        }
-                    }
 
                     let trait_item = if let Some(trait_item) = ctx.item_by_did(trait_did) {
                         trait_item
@@ -606,8 +624,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                             .item_by_path(&trait_path)
                             .expect("couldn't find trait")
                     };
-
-                    let for_types = vm.types.subs_from_rustc(trait_ref.substs, &ctx);
 
                     let assoc_value_count =
                         impl_item.assoc_values.len() + impl_item.assoc_tys.len();
@@ -622,28 +638,18 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         assoc_value_source.push((ItemPath::for_type(key), AssocValue::Type(ty)));
                     }
 
+                    let mut subject_key = key_ty.impl_key();
+
                     let assoc_values =
                         trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
 
-                    let index = trait_item.add_trait_impl(TraitImpl {
-                        crate_id: this_crate,
-                        for_types,
-                        assoc_values,
-                        bounds,
-                        generics,
-                    });
-
-                    if worker_config.save_file {
-                        impl_ids.push((trait_item, index));
-                    }
+                    impls.add_trait(trait_item,subject_key,bounds_id,assoc_values);
                 }
             }
+
         }
 
-        // write the inherent impls we just gathered
-        for (ty, items) in inherent_impls {
-            // TODO
-        }
+        ctx.items.impls.set(impls).ok();
 
         if worker_config.crate_path.is_core() {
             let lang_items = tcx.lang_items();
@@ -719,7 +725,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);
 
-            let trait_impl_bytes = {
+            /*let trait_impl_bytes = {
                 let mut writer = writer.new_child_writer();
 
                 impl_ids.len().persist_write(&mut writer);
@@ -728,13 +734,14 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 }
 
                 writer.flip()
-            };
+            };*/
+            panic!("todo impls");
 
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);
 
             // write trait impls
-            writer.write_bytes(&trait_impl_bytes);
+            //writer.write_bytes(&trait_impl_bytes);
 
             let cache_path = worker_config.crate_path.cache_path();
             std::fs::write(cache_path, writer.flip()).expect("save failed");
@@ -809,6 +816,7 @@ struct RustCItems<'vm> {
     items: Vec<RustCItem<'vm>>,
     map_paths: AHashMap<ItemPath<'vm>, ItemId>,
     map_defs: AHashMap<LocalDefId, ItemId>,
+    impls: OnceLock<Impls<'vm>>
 }
 
 struct RustCItem<'vm> {
@@ -823,6 +831,7 @@ impl<'vm> RustCItems<'vm> {
             items: vec![],
             map_paths: AHashMap::new(),
             map_defs: AHashMap::new(),
+            impls: Default::default()
         }
     }
 

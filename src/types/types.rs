@@ -307,6 +307,23 @@ impl<'vm> Type<'vm> {
         }
     }
 
+    pub fn impl_key(&self) -> Option<&'vm str> {
+        match self.kind() {
+            TypeKind::Bool => Some("@bool"),
+            TypeKind::Char => Some("@char"),
+            TypeKind::Int(..) => Some("@int"),
+            TypeKind::Float(_) => Some("@float"),
+
+            TypeKind::StringSlice => Some("@string"),
+            TypeKind::Array(..) => Some("@array"),
+            TypeKind::Slice(_) => Some("@slice"),
+            TypeKind::Ptr(..) => Some("@pointer"),
+
+            TypeKind::Adt(item) => Some(item.item.path.as_string()),
+            _ => panic!("todo impl key: {}",self)
+        }
+    }
+
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
         let TypeKind::Adt(ItemWithSubs{item,..}) = self.kind() else {
             panic!("adt_info: not an adt");
