@@ -313,13 +313,23 @@ impl<'vm> Type<'vm> {
             TypeKind::Char => Some("@char"),
             TypeKind::Int(..) => Some("@int"),
             TypeKind::Float(_) => Some("@float"),
+            TypeKind::Never => Some("@never"),
 
-            TypeKind::StringSlice => Some("@string"),
+            TypeKind::StringSlice => Some("@str"),
             TypeKind::Array(..) => Some("@array"),
             TypeKind::Slice(_) => Some("@slice"),
-            TypeKind::Ptr(..) => Some("@pointer"),
+            TypeKind::Tuple(..) => Some("@tuple"),
+            TypeKind::Ptr(..) => Some("@ptr"),
+            // TODO impls on refs may be common enough to special-case
+            TypeKind::Ref(..) => Some("@ref"),
+            TypeKind::Dynamic => Some("@dyn"),
 
             TypeKind::Adt(item) => Some(item.item.path.as_string()),
+
+            // impls on closures shouldn't be possible
+            TypeKind::Closure(..) |
+            TypeKind::Param(_) => None,
+
             _ => panic!("todo impl key: {}",self)
         }
     }

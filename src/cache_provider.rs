@@ -106,7 +106,7 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         panic!("todo fill inherent");
     }
 
-    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]> {
+    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
         panic!("todo parse trait impl");
     }
 }

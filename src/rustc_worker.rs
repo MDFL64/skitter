@@ -222,7 +222,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         self.call(|_| {}).wait();
     }
 
-    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]> {
+    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
         let items = self.items();
         let impls = items.impls.get().expect("no impls available");
         impls.find_trait(trait_item, for_tys)

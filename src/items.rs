@@ -1166,7 +1166,7 @@ impl<'vm> Item<'vm> {
 
 struct ImplResult<'vm> {
     crate_id: CrateId,
-    assoc_values: &'vm [Option<AssocValue<'vm>>]
+    assoc_values: Arc<[Option<AssocValue<'vm>>]>
 }
 
 #[derive(PartialEq, Debug)]

@@ -1,8 +1,8 @@
-use std::hash::Hash;
+use std::{hash::Hash, sync::Arc};
 
 use ahash::AHashMap;
 
-use crate::{items::{BoundKind, GenericCounts, AssocValue, CrateId, ItemId, Item}, types::{SubList, Sub, Type}, lazy_collections::LazyKey};
+use crate::{items::{BoundKind, GenericCounts, AssocValue, CrateId, ItemId, Item}, types::{SubList, Sub, Type, TypeKind}, lazy_collections::LazyKey, vm::VM};
 
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
@@ -37,7 +37,7 @@ impl Hash for TraitKey {
 
 struct TraitValue<'vm> {
     bounds_id: u32,
-    values: Vec<Option<AssocValue<'vm>>>,
+    values: Arc<[Option<AssocValue<'vm>>]>,
 }
 
 impl<'vm> Impls<'vm> {
@@ -66,11 +66,11 @@ impl<'vm> Impls<'vm> {
 
         list.push(TraitValue {
             bounds_id,
-            values: assoc_values
+            values: assoc_values.into()
         });
     }
 
-    pub fn find_trait(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]> {
+    pub fn find_trait(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
         let key_trait = TraitKey{
             crate_id: trait_item.crate_id,
             item_id: trait_item.item_id
@@ -81,8 +81,8 @@ impl<'vm> Impls<'vm> {
             if let Some(list) = sub_table.get(&key_ty) {
                 for value in list {
                     let bounds = &self.bounds_table[value.bounds_id as usize];
-                    if bounds.check(for_tys) {
-                        return Some(&value.values);
+                    if bounds.check(for_tys,trait_item.vm) {
+                        return Some(value.values.clone());
                     }
                 }
             }
@@ -92,19 +92,17 @@ impl<'vm> Impls<'vm> {
 }
 
 impl<'vm> ImplBounds<'vm> {
-    pub fn check(&self, for_tys: &SubList<'vm>) -> bool {
+    pub fn check(&self, for_tys: &SubList<'vm>, vm: &'vm VM<'vm>) -> bool {
         let mut sub_map = SubMap::default();
 
         if Self::match_subs(&self.for_tys,for_tys, &mut sub_map) {
             sub_map.assert_empty(SubSide::Lhs);
             sub_map.assert_empty(SubSide::Rhs);
 
+            let result_subs = SubList::from_summary(&self.generic_counts, vm);
+
             if self.bounds.len() > 0 {
                 panic!("todo impl bounds");
-            }
-
-            if self.generic_counts.total() > 0 {
-                panic!("todo generics");
             }
 
             true
@@ -139,8 +137,59 @@ impl<'vm> ImplBounds<'vm> {
             return true;
         }
 
-        println!("{} = {}",lhs,rhs);
-        panic!();
+        match (lhs.kind(), rhs.kind()) {
+            (TypeKind::Adt(a), TypeKind::Adt(b)) => {
+                (a.item == b.item) && Self::match_subs(&a.subs, &b.subs, res_map)
+            }
+            (TypeKind::Ptr(in_ref, in_mut), TypeKind::Ptr(trait_ref, trait_mut)) => {
+                (in_mut == trait_mut) && Self::match_types(*in_ref, *trait_ref, res_map)
+            }
+            (TypeKind::Ref(in_ref, in_mut), TypeKind::Ref(trait_ref, trait_mut)) => {
+                (in_mut == trait_mut) && Self::match_types(*in_ref, *trait_ref, res_map)
+            }
+            (TypeKind::Slice(in_elem), TypeKind::Slice(trait_elem)) => {
+                Self::match_types(*in_elem, *trait_elem, res_map)
+            }
+            (TypeKind::Tuple(lhs_children), TypeKind::Tuple(rhs_children)) => {
+                if lhs_children.len() != rhs_children.len() {
+                    false
+                } else {
+                    for (lhs_child, rhs_child) in lhs_children.iter().zip(rhs_children) {
+                        if !Self::match_types(*lhs_child, *rhs_child, res_map) {
+                            return false;
+                        }
+                    }
+                    true
+                }
+            }
+    
+            (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
+                panic!("fixme? this looks annoying");
+            }
+    
+            (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs),
+            (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs),
+    
+            (TypeKind::Adt(_), _)
+            | (_, TypeKind::Adt(_))
+            | (TypeKind::Ptr(..), _)
+            | (_, TypeKind::Ptr(..))
+            | (TypeKind::Ref(..), _)
+            | (_, TypeKind::Ref(..))
+            | (TypeKind::Bool, _)
+            | (_, TypeKind::Bool)
+            | (TypeKind::Char, _)
+            | (_, TypeKind::Char)
+            | (TypeKind::Never, _)
+            | (_, TypeKind::Never)
+            | (TypeKind::Int(..), _)
+            | (_, TypeKind::Int(..))
+            | (TypeKind::Float(..), _)
+            | (_, TypeKind::Float(..)) => false,
+            _ => {
+                panic!("match types {} == {}", lhs, rhs)
+            }
+        }
     }
 }
 

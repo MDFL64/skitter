@@ -23,5 +23,5 @@ pub trait CrateProvider<'vm>: Send + Sync + 'vm {
     /// of primitive types, which have impls in core.
     fn fill_inherent_impls(&self, ty: Type<'vm>);
 
-    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<&[Option<AssocValue<'vm>>]>;
+    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>>;
 }
