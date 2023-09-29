@@ -6,14 +6,14 @@ use std::{
 };
 
 use crate::{
-    crate_provider::CrateProvider,
+    crate_provider::{CrateProvider, TraitImplResult},
     ir::IRFunction,
-    items::{AdtInfo, CrateId, Item, ItemId, ItemPath, AssocValue},
+    items::{AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
     profiler::profile,
-    types::{Type, SubList},
+    types::{SubList, Type},
     vm::VM,
     CratePath,
 };
@@ -106,7 +106,11 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         panic!("todo fill inherent");
     }
 
-    fn trait_impl(&self, trait_item: &Item, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
+    fn trait_impl(
+        &self,
+        trait_item: &Item,
+        for_tys: &SubList<'vm>,
+    ) -> Option<TraitImplResult<'vm>> {
         panic!("todo parse trait impl");
     }
 }

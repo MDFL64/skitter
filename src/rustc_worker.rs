@@ -17,7 +17,8 @@ use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    crate_provider::CrateProvider,
+    crate_provider::{CrateProvider, TraitImplResult},
+    impls::{ImplBounds, Impls},
     ir::{converter::IRFunctionConverter, IRFunction},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
@@ -26,9 +27,9 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
-    types::{IntSign, IntWidth, ItemWithSubs, Type, TypeKind, SubList, Sub},
+    types::{IntSign, IntWidth, ItemWithSubs, Sub, SubList, Type, TypeKind},
     vm::VM,
-    CratePath, impls::{ImplBounds, Impls},
+    CratePath,
 };
 
 /////////////////////////
@@ -222,7 +223,11 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         self.call(|_| {}).wait();
     }
 
-    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
+    fn trait_impl(
+        &self,
+        trait_item: &Item<'vm>,
+        for_tys: &SubList<'vm>,
+    ) -> Option<TraitImplResult<'vm>> {
         let items = self.items();
         let impls = items.impls.get().expect("no impls available");
         impls.find_trait(trait_item, for_tys)
@@ -520,11 +525,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             });
         }
 
-        let mut impls = Impls::default();
+        let mut impls = Impls::new(this_crate);
 
         // fill impls
         for impl_item in impl_items {
-
             // Build bounds.
             let mut bounds: Vec<BoundKind> = Vec::new();
             {
@@ -561,7 +565,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let mut generic_counts = GenericCounts::default();
             {
                 let rustc_generics = tcx.generics_of(impl_item.did);
-    
+
                 for gp in &rustc_generics.params {
                     use rustc_middle::ty::GenericParamDefKind;
                     match gp.kind {
@@ -575,21 +579,19 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let for_tys = match impl_item.subject {
                 ImplSubject::Inherent(ty) => {
                     let ty = vm.types.type_from_rustc(ty, &ctx);
-                    SubList{
-                        list: vec!(Sub::Type(ty))
+                    SubList {
+                        list: vec![Sub::Type(ty)],
                     }
                 }
-                ImplSubject::Trait(trait_ref) => {
-                    vm.types.subs_from_rustc(trait_ref.substs, &ctx)
-                }
+                ImplSubject::Trait(trait_ref) => vm.types.subs_from_rustc(trait_ref.substs, &ctx),
             };
 
             let key_ty = for_tys.list[0].assert_ty();
 
-            let bounds = ImplBounds{
+            let bounds = ImplBounds {
                 for_tys,
                 bounds,
-                generic_counts
+                generic_counts,
             };
 
             let bounds_id = impls.add_bounds(bounds);
@@ -602,8 +604,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                     assert!(impl_item.assoc_tys.len() == 0);
 
-                    for (member_key,val) in impl_item.assoc_values {
-                        let mut full_key = key_ty.impl_key().expect("inherent impls should always have a valid key").to_owned();
+                    for (member_key, val) in impl_item.assoc_values {
+                        let mut full_key = key_ty
+                            .impl_key()
+                            .expect("inherent impls should always have a valid key")
+                            .to_owned();
                         full_key.push_str(":");
                         full_key.push_str(&member_key);
 
@@ -643,10 +648,9 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     let assoc_values =
                         trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);
 
-                    impls.add_trait(trait_item,subject_key,bounds_id,assoc_values);
+                    impls.add_trait(trait_item, subject_key, bounds_id, assoc_values);
                 }
             }
-
         }
 
         ctx.items.impls.set(impls).ok();
@@ -816,7 +820,7 @@ struct RustCItems<'vm> {
     items: Vec<RustCItem<'vm>>,
     map_paths: AHashMap<ItemPath<'vm>, ItemId>,
     map_defs: AHashMap<LocalDefId, ItemId>,
-    impls: OnceLock<Impls<'vm>>
+    impls: OnceLock<Impls<'vm>>,
 }
 
 struct RustCItem<'vm> {
@@ -831,7 +835,7 @@ impl<'vm> RustCItems<'vm> {
             items: vec![],
             map_paths: AHashMap::new(),
             map_defs: AHashMap::new(),
-            impls: Default::default()
+            impls: Default::default(),
         }
     }
 

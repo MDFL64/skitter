@@ -2,7 +2,13 @@ use std::{hash::Hash, sync::Arc};
 
 use ahash::AHashMap;
 
-use crate::{items::{BoundKind, GenericCounts, AssocValue, CrateId, ItemId, Item}, types::{SubList, Sub, Type, TypeKind}, lazy_collections::LazyKey, vm::VM};
+use crate::{
+    crate_provider::TraitImplResult,
+    items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
+    lazy_collections::LazyKey,
+    types::{Sub, SubList, Type, TypeKind},
+    vm::VM,
+};
 
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
@@ -10,22 +16,33 @@ pub struct ImplBounds<'vm> {
     pub generic_counts: GenericCounts,
 }
 
-#[derive(Default)]
 pub struct Impls<'vm> {
-    inherent_table: AHashMap<String,Vec<InherentMember<'vm>>>,
-    trait_table: AHashMap<TraitKey,AHashMap<Option<&'vm str>,Vec<TraitValue<'vm>>>>,
+    crate_id: CrateId,
+    inherent_table: AHashMap<String, Vec<InherentMember<'vm>>>,
+    trait_table: AHashMap<TraitKey, AHashMap<Option<&'vm str>, Vec<TraitValue<'vm>>>>,
     bounds_table: Vec<ImplBounds<'vm>>,
+}
+
+impl<'vm> Impls<'vm> {
+    pub fn new(crate_id: CrateId) -> Self {
+        Self {
+            crate_id,
+            inherent_table: Default::default(),
+            trait_table: Default::default(),
+            bounds_table: Default::default(),
+        }
+    }
 }
 
 struct InherentMember<'vm> {
     bounds_id: u32,
-    value: AssocValue<'vm>
+    value: AssocValue<'vm>,
 }
 
 #[derive(PartialEq, Eq)]
 struct TraitKey {
     crate_id: CrateId,
-    item_id: ItemId
+    item_id: ItemId,
 }
 
 impl Hash for TraitKey {
@@ -49,16 +66,19 @@ impl<'vm> Impls<'vm> {
 
     pub fn add_inherent(&mut self, key: String, bounds_id: u32, value: AssocValue<'vm>) {
         let list = self.inherent_table.entry(key).or_default();
-        list.push(InherentMember{
-            bounds_id,
-            value
-        });
+        list.push(InherentMember { bounds_id, value });
     }
 
-    pub fn add_trait(&mut self, trait_item: &Item, key: Option<&'vm str>, bounds_id: u32, assoc_values: Vec<Option<AssocValue<'vm>>>) {
-        let trait_key = TraitKey{
+    pub fn add_trait(
+        &mut self,
+        trait_item: &Item,
+        key: Option<&'vm str>,
+        bounds_id: u32,
+        assoc_values: Vec<Option<AssocValue<'vm>>>,
+    ) {
+        let trait_key = TraitKey {
             crate_id: trait_item.crate_id,
-            item_id: trait_item.item_id
+            item_id: trait_item.item_id,
         };
 
         let sub_table = self.trait_table.entry(trait_key).or_default();
@@ -66,14 +86,18 @@ impl<'vm> Impls<'vm> {
 
         list.push(TraitValue {
             bounds_id,
-            values: assoc_values.into()
+            values: assoc_values.into(),
         });
     }
 
-    pub fn find_trait(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<Arc<[Option<AssocValue<'vm>>]>> {
-        let key_trait = TraitKey{
+    pub fn find_trait(
+        &self,
+        trait_item: &Item<'vm>,
+        for_tys: &SubList<'vm>,
+    ) -> Option<TraitImplResult<'vm>> {
+        let key_trait = TraitKey {
             crate_id: trait_item.crate_id,
-            item_id: trait_item.item_id
+            item_id: trait_item.item_id,
         };
 
         if let Some(sub_table) = self.trait_table.get(&key_trait) {
@@ -81,8 +105,12 @@ impl<'vm> Impls<'vm> {
             if let Some(list) = sub_table.get(&key_ty) {
                 for value in list {
                     let bounds = &self.bounds_table[value.bounds_id as usize];
-                    if bounds.check(for_tys,trait_item.vm) {
-                        return Some(value.values.clone());
+                    if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
+                        return Some(TraitImplResult {
+                            crate_id: self.crate_id,
+                            assoc_values: value.values.clone(),
+                            impl_subs,
+                        });
                     }
                 }
             }
@@ -92,22 +120,33 @@ impl<'vm> Impls<'vm> {
 }
 
 impl<'vm> ImplBounds<'vm> {
-    pub fn check(&self, for_tys: &SubList<'vm>, vm: &'vm VM<'vm>) -> bool {
+    pub fn check(&self, for_tys: &SubList<'vm>, vm: &'vm VM<'vm>) -> Option<SubList<'vm>> {
         let mut sub_map = SubMap::default();
 
-        if Self::match_subs(&self.for_tys,for_tys, &mut sub_map) {
-            sub_map.assert_empty(SubSide::Lhs);
+        if Self::match_subs(&self.for_tys, for_tys, &mut sub_map) {
+            let mut result_subs = SubList::from_summary(&self.generic_counts, vm);
+
+            sub_map.apply_to(SubSide::Lhs, &mut result_subs);
             sub_map.assert_empty(SubSide::Rhs);
 
-            let result_subs = SubList::from_summary(&self.generic_counts, vm);
+            //result_subs
+
+            //println!("{}",result_subs);
+
+            /*if let Some(update_subs) = update_subs {
+                sub_map.apply_to(SubSide::Lhs, update_subs);
+            } else {
+                sub_map.assert_empty(SubSide::Lhs);
+            }*/
+            //sub_map.assert_empty(SubSide::Lhs);
 
             if self.bounds.len() > 0 {
-                panic!("todo impl bounds");
+                println!("todo impl bounds");
             }
 
-            true
+            Some(result_subs)
         } else {
-            false
+            None
         }
     }
 
@@ -162,14 +201,14 @@ impl<'vm> ImplBounds<'vm> {
                     true
                 }
             }
-    
+
             (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
                 panic!("fixme? this looks annoying");
             }
-    
+
             (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs),
             (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs),
-    
+
             (TypeKind::Adt(_), _)
             | (_, TypeKind::Adt(_))
             | (TypeKind::Ptr(..), _)

@@ -8,6 +8,7 @@ use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
     closure::Closure,
+    crate_provider::TraitImplResult,
     ir::{glue_builder::glue_for_ctor, IRFunction},
     lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
@@ -991,20 +992,17 @@ impl<'vm> Item<'vm> {
         let crate_items = self.vm.crate_provider(self.crate_id);
         let trait_item = crate_items.item_by_id(virtual_info.trait_id);
 
-        panic!("resolve_associated_ty");
-        /*trait_item
-            .find_trait_impl(subs, &mut None, |trait_impl, subs| {
-                let ty = &trait_impl.assoc_values[virtual_info.member_index as usize];
+        let trait_impl = trait_item
+            .find_trait_impl(subs)
+            .expect("failed to resolve impl for associated type");
 
-                if let Some(AssocValue::Type(ty)) = ty {
-                    ty.sub(&subs)
-                } else {
-                    panic!("failed to find associated type")
-                }
-            })
-            .unwrap_or_else(|| {
-                panic!("failed to find {} for {}", self.path.as_string(), subs);
-            })*/
+        let res_val = &trait_impl.assoc_values[virtual_info.member_index as usize];
+
+        if let Some(AssocValue::Type(ty)) = res_val {
+            ty.sub(&trait_impl.impl_subs)
+        } else {
+            panic!("failed to find associated type")
+        }
     }
 
     fn find_trait_item_ir(
@@ -1012,7 +1010,6 @@ impl<'vm> Item<'vm> {
         for_tys: &SubList<'vm>,
         member_index: u32,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
-
         if let Some(result) = self.find_trait_impl(for_tys) {
             let crate_items = self.vm.crate_provider(result.crate_id);
             let ir_source = &result.assoc_values[member_index as usize];
@@ -1021,7 +1018,7 @@ impl<'vm> Item<'vm> {
                 match ir_source {
                     AssocValue::Item(fn_item_id) => {
                         let fn_item = crate_items.item_by_id(*fn_item_id);
-                        let subs = SubList{list: vec!()};
+                        let subs = SubList { list: vec![] };
 
                         let (ir, _) = fn_item.ir(&subs);
                         Some((ir, subs))
@@ -1072,28 +1069,30 @@ impl<'vm> Item<'vm> {
         })*/
     }
 
-    pub fn trait_has_impl(
-        &self,
-        for_tys: &SubList<'vm>
-    ) -> bool {
+    pub fn trait_has_impl(&self, for_tys: &SubList<'vm>) -> bool {
         self.find_trait_impl(for_tys).is_some()
     }
 
     /// Find a trait implementation for a given list of types.
-    pub fn find_trait_impl(
-        &self,
-        for_tys: &SubList<'vm>
-    ) -> Option<ImplResult<'vm>> {
+    pub fn find_trait_impl(&self, for_tys: &SubList<'vm>) -> Option<TraitImplResult<'vm>> {
+        let ItemKind::Trait{builtin,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
 
+        if let Some(builtin) = builtin.get() {
+            let builtin_res = builtin.find_candidate(for_tys, self.vm, self);
+            if let Some(candidate) = builtin_res {
+                panic!("todo fix builtins");
+            }
+        }
+
+        // currently, assume the impl is in the same crate as the trait
+        // TODO check multiple crates, based on trait and type
         let crate_id = self.crate_id;
+
         let crate_provider = self.vm.crate_provider(crate_id);
 
-        crate_provider.trait_impl(self, for_tys).map(|assoc_values| {
-            ImplResult{
-                crate_id,
-                assoc_values
-            }
-        })
+        crate_provider.trait_impl(self, for_tys)
 
         /*
         if let Some(builtin) = builtin.get() {
@@ -1162,11 +1161,6 @@ impl<'vm> Item<'vm> {
             None
         }
     }*/
-}
-
-struct ImplResult<'vm> {
-    crate_id: CrateId,
-    assoc_values: Arc<[Option<AssocValue<'vm>>]>
 }
 
 #[derive(PartialEq, Debug)]

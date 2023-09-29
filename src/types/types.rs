@@ -327,10 +327,9 @@ impl<'vm> Type<'vm> {
             TypeKind::Adt(item) => Some(item.item.path.as_string()),
 
             // impls on closures shouldn't be possible
-            TypeKind::Closure(..) |
-            TypeKind::Param(_) => None,
+            TypeKind::Closure(..) | TypeKind::Param(_) => None,
 
-            _ => panic!("todo impl key: {}",self)
+            _ => panic!("todo impl key: {}", self),
         }
     }
 
