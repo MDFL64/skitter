@@ -613,6 +613,7 @@ pub enum IRFlag {
     UseClosureSubs,
 }
 
+#[derive(Debug)]
 pub enum BoundKind<'vm> {
     /// Is the trait item implemented for the given subs?
     Trait(ItemWithSubs<'vm>),
@@ -1018,13 +1019,22 @@ impl<'vm> Item<'vm> {
                 match ir_source {
                     AssocValue::Item(fn_item_id) => {
                         let fn_item = crate_items.item_by_id(*fn_item_id);
-                        let subs = SubList { list: vec![] };
+                        let subs = result.impl_subs;
 
                         let (ir, _) = fn_item.ir(&subs);
                         Some((ir, subs))
                     }
                     AssocValue::RawFunctionIR(ir, flag) => {
-                        panic!("raw ir");
+                        if *flag == IRFlag::UseClosureSubs {
+                            let for_ty = for_tys.list[0].assert_ty();
+                            if let TypeKind::Closure(_, _, closure_subs) = for_ty.kind() {
+                                return Some((ir.clone(), closure_subs.clone()));
+                            } else {
+                                panic!("attempt to use closure subs on non-closure");
+                            }
+                        } else {
+                            return Some((ir.clone(), result.impl_subs));
+                        }
                     }
                     AssocValue::Type(_) => panic!("attempt to fetch IR for associated type"),
                 }
@@ -1080,9 +1090,9 @@ impl<'vm> Item<'vm> {
         };
 
         if let Some(builtin) = builtin.get() {
-            let builtin_res = builtin.find_candidate(for_tys, self.vm, self);
-            if let Some(candidate) = builtin_res {
-                panic!("todo fix builtins");
+            let builtin_res = builtin.find_impl(for_tys, self.vm, self);
+            if builtin_res.is_some() {
+                return builtin_res;
             }
         }
 
@@ -1093,17 +1103,6 @@ impl<'vm> Item<'vm> {
         let crate_provider = self.vm.crate_provider(crate_id);
 
         crate_provider.trait_impl(self, for_tys)
-
-        /*
-        if let Some(builtin) = builtin.get() {
-            let builtin_res = builtin.find_candidate(for_tys, self.vm, self);
-            if let Some(candidate) = builtin_res {
-                if let Some(trait_subs) = self.check_trait_impl(for_tys, &candidate, update_tys) {
-                    return Some(callback(&candidate, trait_subs));
-                }
-            }
-        }
-        */
     }
 
     /*fn check_trait_impl(

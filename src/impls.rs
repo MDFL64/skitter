@@ -129,19 +129,29 @@ impl<'vm> ImplBounds<'vm> {
             sub_map.apply_to(SubSide::Lhs, &mut result_subs);
             sub_map.assert_empty(SubSide::Rhs);
 
-            //result_subs
+            // this is an ATTEMPT to deal with GATs -- it may not be entirely correct
+            if for_tys.list.len() > self.for_tys.list.len() {
+                let start = self.for_tys.list.len();
+                let end = for_tys.list.len();
+                for i in (start..end) {
+                    let sub = for_tys.list[i].clone();
+                    result_subs.list.push(sub);
+                }
+            }
 
-            //println!("{}",result_subs);
+            for bound in self.bounds.iter() {
+                match bound {
+                    BoundKind::Trait(trait_bound) => {
+                        let types_to_check = trait_bound.subs.sub(&result_subs);
 
-            /*if let Some(update_subs) = update_subs {
-                sub_map.apply_to(SubSide::Lhs, update_subs);
-            } else {
-                sub_map.assert_empty(SubSide::Lhs);
-            }*/
-            //sub_map.assert_empty(SubSide::Lhs);
+                        let has_impl = trait_bound.item.trait_has_impl(&types_to_check); // &mut Some(&mut result_subs));
 
-            if self.bounds.len() > 0 {
-                println!("todo impl bounds");
+                        if !has_impl {
+                            return None;
+                        }
+                    }
+                    _ => panic!("todo check bound {:?}", bound),
+                }
             }
 
             Some(result_subs)
@@ -151,9 +161,7 @@ impl<'vm> ImplBounds<'vm> {
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
-        if lhs.list.len() != rhs.list.len() {
-            return false;
-        }
+        // leave the length unchecked, GAT lookups may have differing lengths
         for pair in lhs.list.iter().zip(&rhs.list) {
             match pair {
                 (Sub::Type(lhs_ty), Sub::Type(rhs_ty)) => {
