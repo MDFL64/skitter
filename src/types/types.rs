@@ -5,7 +5,7 @@ use ahash::AHashMap;
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
-    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter},
+    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter}, vm::VM,
 };
 
 use super::{
@@ -113,6 +113,10 @@ impl ArraySize {
 impl<'vm> Type<'vm> {
     pub fn kind(&self) -> &'vm TypeKind<'vm> {
         &self.0.kind
+    }
+
+    pub fn vm(&self) -> &'vm VM<'vm> {
+        self.1
     }
 
     pub fn layout(&self) -> &'vm Layout {

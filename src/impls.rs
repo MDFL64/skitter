@@ -10,6 +10,44 @@ use crate::{
     vm::VM,
 };
 
+/// Find candidate crates for a trait impl on this type.
+/// 
+/// TODO smallvec
+pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<CrateId> {
+    let mut res = vec!(trait_crate);
+
+    for sub in for_tys.list.iter() {
+        match sub {
+            Sub::Type(ty) => {
+                let cid = find_source_crate(*ty);
+                if !res.contains(&cid) {
+                    res.push(cid);
+                }
+            }
+            _ => ()
+        }
+    }
+
+    res
+}
+
+fn find_source_crate(ty: Type) -> CrateId {
+    match ty.kind() {
+        TypeKind::Adt(item) => {
+            item.item.crate_id
+        }
+        TypeKind::Ref(child,_) => {
+            find_source_crate(*child)
+        }
+        TypeKind::Bool |
+        TypeKind::Float(_) |
+        TypeKind::Int(..) => {
+            *ty.vm().core_crate.get().unwrap()
+        }
+        _ => panic!("source crate {}",ty)
+    }
+}
+
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
     pub bounds: Vec<BoundKind<'vm>>,
@@ -102,6 +140,7 @@ impl<'vm> Impls<'vm> {
 
         if let Some(sub_table) = self.trait_table.get(&key_trait) {
             let key_ty = for_tys.list[0].assert_ty().impl_key();
+
             if let Some(list) = sub_table.get(&key_ty) {
                 for value in list {
                     let bounds = &self.bounds_table[value.bounds_id as usize];
@@ -111,6 +150,22 @@ impl<'vm> Impls<'vm> {
                             assoc_values: value.values.clone(),
                             impl_subs,
                         });
+                    }
+                }
+            }
+
+            // retry with a 'None' key
+            if key_ty != None {
+                if let Some(list) = sub_table.get(&None) {
+                    for value in list {
+                        let bounds = &self.bounds_table[value.bounds_id as usize];
+                        if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
+                            return Some(TraitImplResult {
+                                crate_id: self.crate_id,
+                                assoc_values: value.values.clone(),
+                                impl_subs,
+                            });
+                        }
                     }
                 }
             }

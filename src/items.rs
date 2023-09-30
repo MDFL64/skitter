@@ -14,7 +14,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, FunctionSource, VM},
+    vm::{Function, FunctionSource, VM}, impls::find_trait_impl_crate,
 };
 use ahash::AHashMap;
 
@@ -1096,13 +1096,18 @@ impl<'vm> Item<'vm> {
             }
         }
 
-        // currently, assume the impl is in the same crate as the trait
-        // TODO check multiple crates, based on trait and type
-        let crate_id = self.crate_id;
+        let candidate_crate_ids = find_trait_impl_crate(for_tys,self.crate_id);
+        
+        for crate_id in candidate_crate_ids {
+            let crate_provider = self.vm.crate_provider(crate_id);
 
-        let crate_provider = self.vm.crate_provider(crate_id);
+            let res = crate_provider.trait_impl(self, for_tys);
+            if res.is_some() {
+                return res;
+            }
+        }
 
-        crate_provider.trait_impl(self, for_tys)
+        None
     }
 
     /*fn check_trait_impl(
