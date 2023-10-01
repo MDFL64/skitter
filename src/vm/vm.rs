@@ -3,6 +3,7 @@ use colosseum::sync::Arena;
 
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
+use crate::cli::CliArgs;
 use crate::closure::Closure;
 use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
@@ -39,6 +40,7 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub types: TypeContext<'vm>,
     pub is_verbose: bool,
+    pub lookup_local_impls: bool,
     pub core_crate: OnceLock<CrateId>,
     common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
@@ -102,11 +104,13 @@ impl<'vm> VMThread<'vm> {
 }
 
 impl<'vm> VM<'vm> {
-    pub fn new(is_verbose: bool) -> Self {
+    pub fn new(cli_args: &CliArgs) -> Self {
         Self {
+            is_verbose: cli_args.verbose,
+            lookup_local_impls: cli_args.debug_local_impls,
+
             core_crate: OnceLock::new(),
             types: TypeContext::new(),
-            is_verbose,
             crates: Default::default(),
             common_types: OnceLock::new(),
 

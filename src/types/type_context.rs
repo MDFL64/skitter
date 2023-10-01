@@ -11,7 +11,7 @@ use crate::{
     items::{path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
     types::Sub,
-    vm::VM,
+    vm::VM, impls::find_inherent_impl_crate,
 };
 
 use colosseum::sync::Arena;
@@ -165,6 +165,32 @@ impl<'vm> TypeContext<'vm> {
         args: &[GenericArg<'tcx>],
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> ItemWithSubs<'vm> {
+        if ctx.vm.lookup_local_impls && did.krate == rustc_hir::def_id::LOCAL_CRATE {
+            if let Some(parent_impl) = ctx.tcx.impl_of_method(did) {
+                let subject = ctx.tcx.impl_subject(parent_impl).skip_binder();
+                if let ImplSubject::Inherent(ty) = subject {
+                    let ty = self.type_from_rustc(ty, ctx);
+                    let ident = ctx.tcx.item_name(did);
+
+                    let res = ctx
+                        .find_inherent_impl(ty, ident.as_str())
+                        .expect("failed to find local impl");
+
+                    if let AssocValue::Item(item_id) = res {
+                        let item = ctx.get_item(item_id).expect("failed to find item");
+                        let subs = self.subs_from_rustc(args, ctx);
+
+                        return ItemWithSubs{
+                            item,
+                            subs
+                        };
+                    } else {
+                        panic!("can't convert value to item, this is a bug");
+                    }
+                }
+            }
+        }
+
         let item = if let Some(item) = ctx.item_by_did(did) {
             item
         } else {
@@ -187,18 +213,29 @@ impl<'vm> TypeContext<'vm> {
                 let ident = ctx.tcx.item_name(did);
                 match subject {
                     ImplSubject::Inherent(ty) => {
-                        panic!("todo inherent impl lookup")
-                        /*let ty = self.type_from_rustc(ty, ctx);
-                        if let Some((crate_id, ir_source)) = ty.find_assoc_value(ident.as_str()) {
-                            let crate_items = ctx.vm.crate_provider(crate_id);
-                            if let AssocValue::Item(item_id) = ir_source {
-                                crate_items.item_by_id(item_id)
-                            } else {
-                                panic!("can't convert raw IR to item, this is a bug");
+                        let ty = self.type_from_rustc(ty, ctx);
+                        let ty_key = ty.impl_key().expect("inherent impls must have a valid impl key!");
+                        let full_key = format!("{}:{}",ty_key,ident.as_str());
+
+                        let candidate_crate_ids = find_inherent_impl_crate(ty);
+
+                        for crate_id in candidate_crate_ids {
+                            let crate_provider = ctx.vm.crate_provider(crate_id);
+
+                            let res = crate_provider.inherent_impl(&full_key, ty);
+                            
+                            if let Some(AssocValue::Item(item_id)) = res {
+                                let item = crate_provider.item_by_id(item_id);
+                                let subs = self.subs_from_rustc(args, ctx);
+        
+                                return ItemWithSubs{
+                                    item,
+                                    subs
+                                };
                             }
-                        } else {
-                            panic!("couldn't find inherent impl {}::{}", ty, ident);
-                        }*/
+                        }
+
+                        panic!("failed to find inherent impl");
                     }
                     ImplSubject::Trait(trait_ref) => {
                         panic!("todo trait ref");

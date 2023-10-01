@@ -10,11 +10,11 @@ use crate::{
     vm::VM,
 };
 
-/// Find candidate crates for a trait impl on this type.
-/// 
+/// Find candidate crates for a trait impl on a list of types.
+///
 /// TODO smallvec
 pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<CrateId> {
-    let mut res = vec!(trait_crate);
+    let mut res = vec![trait_crate];
 
     for sub in for_tys.list.iter() {
         match sub {
@@ -24,27 +24,31 @@ pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<Cra
                     res.push(cid);
                 }
             }
-            _ => ()
+            _ => (),
         }
     }
 
     res
 }
 
+/// Find candidate crates for an inherent impl on a type.
+///
+/// TODO smallvec
+pub fn find_inherent_impl_crate(ty: Type) -> Vec<CrateId> {
+    vec![find_source_crate(ty)]
+}
+
 fn find_source_crate(ty: Type) -> CrateId {
     match ty.kind() {
-        TypeKind::Adt(item) => {
-            item.item.crate_id
-        }
-        TypeKind::Ref(child,_) => {
-            find_source_crate(*child)
-        }
-        TypeKind::Bool |
-        TypeKind::Float(_) |
-        TypeKind::Int(..) => {
+        TypeKind::Adt(item) => item.item.crate_id,
+        TypeKind::FunctionDef(item) => item.item.crate_id,
+
+        TypeKind::Ref(child, _) => find_source_crate(*child),
+        
+        TypeKind::Bool | TypeKind::Float(_) | TypeKind::Int(..) | TypeKind::Tuple(_) => {
             *ty.vm().core_crate.get().unwrap()
         }
-        _ => panic!("source crate {}",ty)
+        _ => panic!("source crate {}", ty),
     }
 }
 
@@ -172,6 +176,18 @@ impl<'vm> Impls<'vm> {
         }
         None
     }
+
+    pub fn find_inherent(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
+        if let Some(list) = self.inherent_table.get(full_key) {
+            for value in list {
+                let bounds = &self.bounds_table[value.bounds_id as usize];
+                if bounds.check_inherent(ty) {
+                    return Some(value.value.clone());
+                }
+            }
+        }
+        None
+    }
 }
 
 impl<'vm> ImplBounds<'vm> {
@@ -213,6 +229,22 @@ impl<'vm> ImplBounds<'vm> {
         } else {
             None
         }
+    }
+
+    /// This relaxed check method tests against a single type,
+    /// and does not actually check the stored bounds.
+    pub fn check_inherent(&self, ty: Type<'vm>) -> bool {
+        let check_ty = self.for_tys.list[0].assert_ty();
+
+        if ty == check_ty {
+            return true;
+        }
+
+        if ty.is_concrete() && check_ty.is_concrete() {
+            return false;
+        }
+
+        panic!("check {} {}",check_ty,ty);
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {

@@ -218,11 +218,6 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         panic!("rustc worker should create all adt info eagerly");
     }
 
-    fn fill_inherent_impls(&self, _: Type<'vm>) {
-        // All we need to do is wait for initialization.
-        self.call(|_| {}).wait();
-    }
-
     fn trait_impl(
         &self,
         trait_item: &Item<'vm>,
@@ -231,6 +226,12 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         let items = self.items();
         let impls = items.impls.get().expect("no impls available");
         impls.find_trait(trait_item, for_tys)
+    }
+
+    fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
+        let items = self.items();
+        let impls = items.impls.get().expect("no impls available");
+        impls.find_inherent(full_key, ty)
     }
 }
 
@@ -812,6 +813,26 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 crate_name.as_str()
             );
         })
+    }
+
+    /// ONLY to be used for debugging local impls!
+    pub fn find_inherent_impl(&self, ty: Type<'vm>, member_key: &str) -> Option<AssocValue<'vm>> {
+        let ty_key = ty
+            .impl_key()
+            .expect("inherent impls must have a valid impl key!");
+        let full_key = format!("{}:{}", ty_key, member_key);
+
+        let impls = self.items.impls.get().expect("could not get impls");
+        impls.find_inherent(&full_key, ty)
+    }
+
+    /// ONLY to be used for debugging local impls!
+    pub fn get_item(&self, id: ItemId) -> Option<&'vm Item<'vm>> {
+        if let Some(item) = self.items.items.get(id.index()) {
+            Some(item.item)
+        } else {
+            None
+        }
     }
 }
 

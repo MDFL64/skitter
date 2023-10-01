@@ -21,10 +21,6 @@ pub struct CliArgs {
     #[clap(long, short)]
     pub verbose: bool,
 
-    /// Load core sources (SLOW, TEMPORARY FEATURE)
-    #[clap(long)]
-    pub core: bool,
-
     /// Save IR to a cache file
     #[clap(long)]
     pub save: bool,
@@ -33,7 +29,11 @@ pub struct CliArgs {
     #[clap(long)]
     pub debug_repeat: bool,
 
+    /// Lookup local inherent impls instead of using a fast path.
+    #[clap(long)]
+    pub debug_local_impls: bool,
+
     /// Compile dependencies instead of loading cached IR. SLOW.
     #[clap(long)]
-    pub no_load: bool,
+    pub debug_no_load: bool,
 }

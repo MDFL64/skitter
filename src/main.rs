@@ -88,13 +88,16 @@ fn run(args: &cli::CliArgs) {
     if args.test {
         let mut global_args = Vec::new();
 
-        if args.no_load {
-            global_args.push(OsString::from("--no-load"));
+        if args.debug_no_load {
+            global_args.push(OsString::from("--debug-no-load"));
+        }
+        if args.debug_local_impls {
+            global_args.push(OsString::from("--debug-local-impls"));
         }
         test::test(file_name, global_args);
     }
 
-    let vm: &VM = Box::leak(Box::new(VM::new(args.verbose)));
+    let vm: &VM = Box::leak(Box::new(VM::new(args)));
     // HACK: this must be initialized ASAP so common types have correct persist IDs
     vm.common_types();
 
@@ -129,7 +132,7 @@ fn run(args: &cli::CliArgs) {
     if !crate_path.is_core() {
         let core_path = CratePath::new(OsStr::new("@core"));
 
-        let core_id = if args.no_load {
+        let core_id = if args.debug_no_load {
             vm.add_rustc_provider(RustCWorkerConfig {
                 crate_path: core_path,
                 extern_crates: vec![],

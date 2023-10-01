@@ -5,7 +5,8 @@ use ahash::AHashMap;
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
-    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter}, vm::VM,
+    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter},
+    vm::VM,
 };
 
 use super::{

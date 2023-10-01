@@ -102,15 +102,15 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         }
     }
 
-    fn fill_inherent_impls(&self, ty: Type<'vm>) {
-        panic!("todo fill inherent");
-    }
-
     fn trait_impl(
         &self,
         trait_item: &Item,
         for_tys: &SubList<'vm>,
     ) -> Option<TraitImplResult<'vm>> {
         panic!("todo parse trait impl");
+    }
+
+    fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
+        panic!("todo parse inherent impl");
     }
 }

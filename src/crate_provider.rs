@@ -18,16 +18,13 @@ pub trait CrateProvider<'vm>: Send + Sync + 'vm {
 
     fn build_adt(&self, id: ItemId) -> AdtInfo<'vm>;
 
-    /// Populate inherent impls of a type.
-    /// The type must be declared in this crate, with the exception
-    /// of primitive types, which have impls in core.
-    fn fill_inherent_impls(&self, ty: Type<'vm>);
-
     fn trait_impl(
         &self,
         trait_item: &Item<'vm>,
         for_tys: &SubList<'vm>,
     ) -> Option<TraitImplResult<'vm>>;
+
+    fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>>;
 }
 
 pub struct TraitImplResult<'vm> {

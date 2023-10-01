@@ -9,12 +9,13 @@ use crate::{
     bytecode_compiler::BytecodeCompiler,
     closure::Closure,
     crate_provider::TraitImplResult,
+    impls::find_trait_impl_crate,
     ir::{glue_builder::glue_for_ctor, IRFunction},
     lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
-    vm::{Function, FunctionSource, VM}, impls::find_trait_impl_crate,
+    vm::{Function, FunctionSource, VM},
 };
 use ahash::AHashMap;
 
@@ -1096,8 +1097,8 @@ impl<'vm> Item<'vm> {
             }
         }
 
-        let candidate_crate_ids = find_trait_impl_crate(for_tys,self.crate_id);
-        
+        let candidate_crate_ids = find_trait_impl_crate(for_tys, self.crate_id);
+
         for crate_id in candidate_crate_ids {
             let crate_provider = self.vm.crate_provider(crate_id);
 
