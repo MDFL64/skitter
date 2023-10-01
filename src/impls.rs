@@ -44,7 +44,7 @@ fn find_source_crate(ty: Type) -> CrateId {
         TypeKind::FunctionDef(item) => item.item.crate_id,
 
         TypeKind::Ref(child, _) => find_source_crate(*child),
-        
+
         TypeKind::Bool | TypeKind::Float(_) | TypeKind::Int(..) | TypeKind::Tuple(_) => {
             *ty.vm().core_crate.get().unwrap()
         }
@@ -221,7 +221,20 @@ impl<'vm> ImplBounds<'vm> {
                             return None;
                         }
                     }
-                    _ => panic!("todo check bound {:?}", bound),
+                    BoundKind::Projection(assoc_ty, eq_ty) => {
+                        let types_to_check = assoc_ty.subs.sub(&result_subs);
+
+                        let resolved_assoc_ty =
+                            assoc_ty.item.resolve_associated_ty(&types_to_check);
+
+                        let mut proj_sub_map = Default::default();
+                        if !Self::match_types(resolved_assoc_ty, *eq_ty, &mut proj_sub_map) {
+                            panic!("unmatched {} = {}", resolved_assoc_ty, eq_ty);
+                        }
+
+                        proj_sub_map.assert_empty(SubSide::Lhs);
+                        proj_sub_map.apply_to(SubSide::Rhs, &mut result_subs);
+                    }
                 }
             }
 
@@ -244,7 +257,7 @@ impl<'vm> ImplBounds<'vm> {
             return false;
         }
 
-        panic!("check {} {}",check_ty,ty);
+        panic!("check {} {}", check_ty, ty);
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {

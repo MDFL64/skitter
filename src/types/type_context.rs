@@ -8,10 +8,11 @@ use rustc_middle::ty::{
 
 use crate::{
     closure::{Closure, ClosureSig},
+    impls::find_inherent_impl_crate,
     items::{path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
     types::Sub,
-    vm::VM, impls::find_inherent_impl_crate,
+    vm::VM,
 };
 
 use colosseum::sync::Arena;
@@ -180,10 +181,7 @@ impl<'vm> TypeContext<'vm> {
                         let item = ctx.get_item(item_id).expect("failed to find item");
                         let subs = self.subs_from_rustc(args, ctx);
 
-                        return ItemWithSubs{
-                            item,
-                            subs
-                        };
+                        return ItemWithSubs { item, subs };
                     } else {
                         panic!("can't convert value to item, this is a bug");
                     }
@@ -214,8 +212,10 @@ impl<'vm> TypeContext<'vm> {
                 match subject {
                     ImplSubject::Inherent(ty) => {
                         let ty = self.type_from_rustc(ty, ctx);
-                        let ty_key = ty.impl_key().expect("inherent impls must have a valid impl key!");
-                        let full_key = format!("{}:{}",ty_key,ident.as_str());
+                        let ty_key = ty
+                            .impl_key()
+                            .expect("inherent impls must have a valid impl key!");
+                        let full_key = format!("{}:{}", ty_key, ident.as_str());
 
                         let candidate_crate_ids = find_inherent_impl_crate(ty);
 
@@ -223,15 +223,12 @@ impl<'vm> TypeContext<'vm> {
                             let crate_provider = ctx.vm.crate_provider(crate_id);
 
                             let res = crate_provider.inherent_impl(&full_key, ty);
-                            
+
                             if let Some(AssocValue::Item(item_id)) = res {
                                 let item = crate_provider.item_by_id(item_id);
                                 let subs = self.subs_from_rustc(args, ctx);
-        
-                                return ItemWithSubs{
-                                    item,
-                                    subs
-                                };
+
+                                return ItemWithSubs { item, subs };
                             }
                         }
 
