@@ -273,10 +273,16 @@ pub enum PatternKind {
     /// Small literals: integer, float, char, or bool types (same as the ExprKind)
     LiteralValue(i128),
 
+    Range{
+        start: Option<ExprId>,
+        end: Option<ExprId>,
+        end_is_inclusive: bool
+    },
+
     Hole,
 
     /// Error, for unsupported patterns
-    Error,
+    Error(String),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -887,8 +893,9 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
             PatternKind::Hole => {
                 writer.write_byte(b'_');
             }
-            PatternKind::Error => {
+            PatternKind::Error(ref msg) => {
                 writer.write_byte(b'~');
+                msg.persist_write(writer);
             }
             _ => panic!("todo write pattern {:?}", self.kind),
         }

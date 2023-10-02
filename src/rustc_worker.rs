@@ -688,6 +688,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 let lang_trait = ctx.item_by_did(lang_trait).unwrap();
                 lang_trait.trait_set_builtin(BuiltinTrait::Fn);
             }
+            {
+                let lang_trait = lang_items.pointee_trait().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.trait_set_builtin(BuiltinTrait::Pointee);
+            }
         }
 
         if vm.is_verbose {

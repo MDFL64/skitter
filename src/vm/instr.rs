@@ -341,6 +341,12 @@ pub enum Instr<'vm> {
     I32_PopCount(Slot, Slot),
     I64_PopCount(Slot, Slot),
     I128_PopCount(Slot, Slot),
+
+    I8_TrailingZeros(Slot, Slot),
+    I16_TrailingZeros(Slot, Slot),
+    I32_TrailingZeros(Slot, Slot),
+    I64_TrailingZeros(Slot, Slot),
+    I128_TrailingZeros(Slot, Slot),
 }
 
 impl<'vm> Instr<'vm> {
@@ -615,6 +621,12 @@ impl<'vm> Instr<'vm> {
             | Instr::I32_PopCount(x, _)
             | Instr::I64_PopCount(x, _)
             | Instr::I128_PopCount(x, _) => Some(x),
+
+            Instr::I8_TrailingZeros(x, _)
+            | Instr::I16_TrailingZeros(x, _)
+            | Instr::I32_TrailingZeros(x, _)
+            | Instr::I64_TrailingZeros(x, _)
+            | Instr::I128_TrailingZeros(x, _) => Some(x),
 
             Instr::WriteBytes { .. } => None,
         }

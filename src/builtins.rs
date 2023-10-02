@@ -17,6 +17,7 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum BuiltinTrait {
     Sized,
     Tuple,
@@ -24,32 +25,17 @@ pub enum BuiltinTrait {
     FnOnce,
     FnMut,
     Fn,
+    Pointee
 }
 
 impl<'vm> Persist<'vm> for BuiltinTrait {
     fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
-        let b = match self {
-            Self::Sized => 0,
-            Self::Tuple => 1,
-            Self::DiscriminantKind => 2,
-            Self::FnOnce => 3,
-            Self::FnMut => 4,
-            Self::Fn => 5,
-        };
+        let b = *self as u8;
         writer.write_byte(b);
     }
 
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        match b {
-            0 => Self::Sized,
-            1 => Self::Tuple,
-            2 => Self::DiscriminantKind,
-            3 => Self::FnOnce,
-            4 => Self::FnMut,
-            5 => Self::Fn,
-            _ => panic!(),
-        }
+        panic!("fix read (just transmute it)");
     }
 }
 
@@ -122,6 +108,30 @@ impl BuiltinTrait {
                     }
                 }
                 None
+            }
+            BuiltinTrait::Pointee => {
+                assert!(for_tys.list.len() == 1);
+                let ty = for_tys.list[0].assert_ty();
+                let metadata_ty = match ty.kind() {
+                    TypeKind::Slice(_) | TypeKind::StringSlice => {
+                        vm.common_types().usize
+                    }
+                    TypeKind::Dynamic => {
+                        panic!("pointee dynamic");
+                    }
+                    _ => {
+                        panic!("pointee none");
+                    }
+                };
+
+                return Some(trait_impl(
+                    for_tys.clone(),
+                    trait_item,
+                    &[(
+                        ItemPath::for_type("Metadata"),
+                        AssocValue::Type(metadata_ty),
+                    )],
+                ));
             }
             BuiltinTrait::FnOnce | BuiltinTrait::FnMut | BuiltinTrait::Fn => {
                 let func_ty = for_tys.list[0].assert_ty();
@@ -600,7 +610,23 @@ pub fn compile_rust_intrinsic<'vm>(
                 _ => panic!("can't ctpop {}", arg_ty),
             }
         }
-        "assert_zero_valid" | "assert_inhabited" => {
+        "cttz_nonzero" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg_slot = arg_slots[0];
+
+            match arg_ty.layout().assert_size() {
+                1 => out_bc.push(Instr::I8_TrailingZeros(out_slot, arg_slot)),
+                2 => out_bc.push(Instr::I16_TrailingZeros(out_slot, arg_slot)),
+                4 => out_bc.push(Instr::I32_TrailingZeros(out_slot, arg_slot)),
+                8 => out_bc.push(Instr::I64_TrailingZeros(out_slot, arg_slot)),
+                16 => out_bc.push(Instr::I128_TrailingZeros(out_slot, arg_slot)),
+                _ => panic!("can't cttz {}", arg_ty),
+            }
+        }
+        "assume" | "assert_zero_valid" | "assert_inhabited"  => {
             // do nothing yeehaw
         }
         "unlikely" => {
@@ -650,6 +676,54 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "unchecked_sub" | "wrapping_sub" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "wrapping_mul" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "exact_div" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Div, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "unchecked_rem" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Rem, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "unchecked_shl" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::ShiftL, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "unchecked_shr" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let (ctor, _) = bytecode_select::binary(BinaryOp::ShiftR, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
         }
         _ => {

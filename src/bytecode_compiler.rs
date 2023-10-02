@@ -1389,8 +1389,65 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     .push(cmp_ctor(match_result_slot, val_slot, lit_slot));
                 true
             }
+            PatternKind::Range { start, end, end_is_inclusive } => {
+                // rufutable pattern, should have a result
+                let match_result_slot = match_result_slot.unwrap();
+
+                let val_slot = match source {
+                    Place::Local(slot) => slot,
+                    Place::Ptr(ref_slot, ref_offset) => {
+                        let ty = self.apply_subs(pat.ty);
+                        let slot = self.stack.alloc(ty);
+                        if let Some(instr) =
+                            bytecode_select::copy_from_ptr(slot, ref_slot, ty, ref_offset)
+                        {
+                            self.out_bc.push(instr);
+                        }
+                        slot
+                    }
+                };
+
+                if let Some(end) = end {
+                    let end_cmp_val = self.lower_expr(*end, None);
+
+                    let (end_cmp_ctor, _) = if *end_is_inclusive {
+                        bytecode_select::binary(BinaryOp::LtEq, pat.ty)
+                    } else {
+                        bytecode_select::binary(BinaryOp::Lt, pat.ty)
+                    };
+
+                    self.out_bc
+                        .push(end_cmp_ctor(match_result_slot, val_slot, end_cmp_val));
+
+                    if let Some(start) = start {
+                        // start AND end, we need to insert a jump
+                        let jump_index = self.skip_instr();
+
+                        let start_cmp_val = self.lower_expr(*start, None);
+
+                        let (start_cmp_ctor, _) = bytecode_select::binary(BinaryOp::LtEq, pat.ty);
+
+                        self.out_bc
+                            .push(start_cmp_ctor(match_result_slot, start_cmp_val, val_slot));
+
+                        let gap_offset = -self.get_jump_offset(jump_index);
+                        self.out_bc[jump_index] = Instr::JumpF(gap_offset, match_result_slot);
+                    }
+                } else if let Some(start) = start {
+                    let start_cmp_val = self.lower_expr(*start, None);
+
+                    let (start_cmp_ctor, _) = bytecode_select::binary(BinaryOp::LtEq, pat.ty);
+
+                    self.out_bc
+                        .push(start_cmp_ctor(match_result_slot, start_cmp_val, val_slot));
+                } else {
+                    panic!("bad range")
+                }
+
+                true
+            }
             PatternKind::Hole => false,
-            PatternKind::Error => todo!(),
+            PatternKind::Error(msg) => panic!("error pattern: {}",msg),
         }
     }
 

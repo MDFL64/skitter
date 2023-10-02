@@ -399,6 +399,9 @@ impl<'vm> Display for Type<'vm> {
                 }
                 write!(f, ")")
             }
+            TypeKind::Slice(child) => {
+                write!(f, "[{}]", child)
+            }
             TypeKind::Int(width, sign) => match (width, sign) {
                 (IntWidth::I8, IntSign::Signed) => write!(f, "i8"),
                 (IntWidth::I16, IntSign::Signed) => write!(f, "i16"),

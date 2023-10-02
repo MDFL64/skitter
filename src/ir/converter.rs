@@ -773,8 +773,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 match lit {
                     ExprKind::LiteralValue(val) => PatternKind::LiteralValue(val),
                     _ => {
-                        println!("pat lit {:?}", lit);
-                        PatternKind::Error
+                        PatternKind::Error(format!("pat lit {:?}", lit))
                     }
                 }
             }
@@ -912,8 +911,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         PatternKind::Hole
                     }
                 } else {
-                    println!("WARNING path pattern = {:?}", path);
-                    PatternKind::Error
+                    PatternKind::Error(format!("WARNING path pattern = {:?}", path))
                 }
             }
             hir::PatKind::Ref(sub_pattern, _) => {
@@ -925,9 +923,23 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 PatternKind::Or { options }
             }
             hir::PatKind::Wild => PatternKind::Hole,
-            hir::PatKind::Slice(..) | hir::PatKind::Range(..) => {
-                // TODO
-                PatternKind::Error
+            hir::PatKind::Slice(..) => {
+                PatternKind::Error("todo slice pattern".to_owned())
+            }
+            hir::PatKind::Range(start,end,end_kind) => {
+                let start = start.map(|start| {
+                    self.expr(start)
+                });
+                let end = end.map(|end| {
+                    self.expr(end)
+                });
+                let end_is_inclusive = end_kind == rustc_hir::RangeEnd::Included;
+
+                PatternKind::Range{
+                    start,
+                    end,
+                    end_is_inclusive
+                }
             }
             _ => panic!("pat {:?}", pat.kind),
         };
