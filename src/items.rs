@@ -502,6 +502,7 @@ impl<'vm> Persist<'vm> for FunctionSig<'vm> {
 
 pub enum AdtKind<'vm> {
     Struct,
+    Union,
     EnumWithDiscriminant(Type<'vm>),
     EnumNonZero,
 }
@@ -514,8 +515,15 @@ pub struct AdtInfo<'vm> {
 impl<'vm> AdtInfo<'vm> {
     pub fn is_enum(&self) -> bool {
         match self.kind {
-            AdtKind::Struct => false,
+            AdtKind::Struct | AdtKind::Union => false,
             AdtKind::EnumNonZero | AdtKind::EnumWithDiscriminant(_) => true,
+        }
+    }
+
+    pub fn is_union(&self) -> bool {
+        match self.kind {
+            AdtKind::Union => true,
+            _ => false,
         }
     }
 
@@ -542,6 +550,9 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
             AdtKind::EnumNonZero => {
                 writer.write_byte(2);
             }
+            AdtKind::Union => {
+                writer.write_byte(3);
+            }
         }
     }
 
@@ -555,6 +566,7 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
                 AdtKind::EnumWithDiscriminant(ty)
             }
             2 => AdtKind::EnumNonZero,
+            3 => AdtKind::Union,
             _ => panic!(),
         };
 

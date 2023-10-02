@@ -25,7 +25,7 @@ pub enum BuiltinTrait {
     FnOnce,
     FnMut,
     Fn,
-    Pointee
+    Pointee,
 }
 
 impl<'vm> Persist<'vm> for BuiltinTrait {
@@ -113,9 +113,7 @@ impl BuiltinTrait {
                 assert!(for_tys.list.len() == 1);
                 let ty = for_tys.list[0].assert_ty();
                 let metadata_ty = match ty.kind() {
-                    TypeKind::Slice(_) | TypeKind::StringSlice => {
-                        vm.common_types().usize
-                    }
+                    TypeKind::Slice(_) | TypeKind::StringSlice => vm.common_types().usize,
                     TypeKind::Dynamic => {
                         panic!("pointee dynamic");
                     }
@@ -626,7 +624,7 @@ pub fn compile_rust_intrinsic<'vm>(
                 _ => panic!("can't cttz {}", arg_ty),
             }
         }
-        "assume" | "assert_zero_valid" | "assert_inhabited"  => {
+        "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
         }
         "unlikely" => {

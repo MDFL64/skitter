@@ -516,6 +516,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let kind = if adt_def.is_enum() {
                 let kind = TypeKind::Int(IntWidth::I32, IntSign::Unsigned);
                 AdtKind::EnumWithDiscriminant(vm.types.intern(kind, vm))
+            } else if adt_def.is_union() {
+                AdtKind::Union
             } else {
                 AdtKind::Struct
             };

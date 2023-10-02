@@ -1,4 +1,4 @@
-use core::fmt::Write;
+use std::fmt::Write;
 
 mod _builtin;
 

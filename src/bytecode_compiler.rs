@@ -1389,7 +1389,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     .push(cmp_ctor(match_result_slot, val_slot, lit_slot));
                 true
             }
-            PatternKind::Range { start, end, end_is_inclusive } => {
+            PatternKind::Range {
+                start,
+                end,
+                end_is_inclusive,
+            } => {
                 // rufutable pattern, should have a result
                 let match_result_slot = match_result_slot.unwrap();
 
@@ -1427,8 +1431,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         let (start_cmp_ctor, _) = bytecode_select::binary(BinaryOp::LtEq, pat.ty);
 
-                        self.out_bc
-                            .push(start_cmp_ctor(match_result_slot, start_cmp_val, val_slot));
+                        self.out_bc.push(start_cmp_ctor(
+                            match_result_slot,
+                            start_cmp_val,
+                            val_slot,
+                        ));
 
                         let gap_offset = -self.get_jump_offset(jump_index);
                         self.out_bc[jump_index] = Instr::JumpF(gap_offset, match_result_slot);
@@ -1447,7 +1454,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 true
             }
             PatternKind::Hole => false,
-            PatternKind::Error(msg) => panic!("error pattern: {}",msg),
+            PatternKind::Error(msg) => panic!("error pattern: {}", msg),
         }
     }
 

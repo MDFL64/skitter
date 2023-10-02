@@ -92,12 +92,36 @@ impl Layout {
             TypeKind::Adt(ItemWithSubs { item, subs }) => {
                 let info = item.adt_info();
 
-                let fixed_fields = info
-                    .variant_fields
-                    .iter()
-                    .map(|fields| fields.iter().map(|field| field.sub(subs)));
+                if info.is_union() {
+                    assert!(info.variant_fields.len() == 1);
 
-                Layout::compound(fixed_fields, info.discriminant_ty())
+                    let mut align = 1;
+                    let mut size = 0;
+
+                    for ty in info.variant_fields[0].iter() {
+                        let layout = ty.sub(subs).layout();
+
+                        align = align.max(layout.align);
+                        size = size.max(layout.assert_size());
+                    }
+
+                    size = crate::abi::align(size, align);
+
+                    let field_count = info.variant_fields[0].len();
+
+                    Layout {
+                        maybe_size: Some(size),
+                        align,
+                        field_offsets: vec![vec![0; field_count]],
+                    }
+                } else {
+                    let fixed_fields = info
+                        .variant_fields
+                        .iter()
+                        .map(|fields| fields.iter().map(|field| field.sub(subs)));
+
+                    Layout::compound(fixed_fields, info.discriminant_ty())
+                }
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
@@ -129,7 +153,7 @@ impl Layout {
                 let mut size = base_size;
                 let res = fields
                     .map(|ty| {
-                        let layout = Layout::from(ty);
+                        let layout = ty.layout();
 
                         size = crate::abi::align(size, layout.align);
 

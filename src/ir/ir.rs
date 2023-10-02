@@ -273,10 +273,10 @@ pub enum PatternKind {
     /// Small literals: integer, float, char, or bool types (same as the ExprKind)
     LiteralValue(i128),
 
-    Range{
+    Range {
         start: Option<ExprId>,
         end: Option<ExprId>,
-        end_is_inclusive: bool
+        end_is_inclusive: bool,
     },
 
     Hole,
