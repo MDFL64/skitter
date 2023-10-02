@@ -35,8 +35,10 @@ pub enum TypeKind<'vm> {
     Adt(ItemWithSubs<'vm>),
     AssociatedType(ItemWithSubs<'vm>),
 
+    // stores it's own def path
+    Foreign(CrateId, &'vm str),
+
     // not properly implemented yet
-    Foreign,
     Opaque,
     Dynamic,
     FunctionPointer(FunctionSig<'vm>),
@@ -241,6 +243,7 @@ impl<'vm> Type<'vm> {
             | TypeKind::Float(_)
             | TypeKind::Bool
             | TypeKind::StringSlice
+            | TypeKind::Foreign(..)
             | TypeKind::Char => *self,
             _ => panic!("todo sub {:?} with {:?}", self, subs),
         }

@@ -120,7 +120,13 @@ impl<'vm> TypeContext<'vm> {
                 AliasKind::Opaque => TypeKind::Opaque,
                 AliasKind::Inherent => panic!("inherent alias?"),
             },
-            TyKind::Foreign(_) => TypeKind::Foreign,
+            TyKind::Foreign(did) => {
+                let def_path = ctx.tcx.def_path(*did);
+                let foreign_path = path_from_rustc(&def_path, ctx.vm);
+
+                let crate_id = ctx.find_crate_id(did.krate);
+                TypeKind::Foreign(crate_id, foreign_path.as_string())
+            }
             TyKind::Dynamic(..) => TypeKind::Dynamic,
             TyKind::FnPtr(rs_sig) => {
                 let sig = FunctionSig::from_rustc(&rs_sig.skip_binder(), ctx);

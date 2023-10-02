@@ -198,6 +198,7 @@ impl<'vm> VM<'vm> {
                     "::_builtin::print_float" => func.set_native(builtin_print_float),
                     "::_builtin::print_bool" => func.set_native(builtin_print_bool),
                     "::_builtin::print_char" => func.set_native(builtin_print_char),
+                    "::_builtin::print_raw" => func.set_native(builtin_print_raw),
                     _ => panic!("unknown builtin {}", path),
                 }
             }
@@ -373,4 +374,9 @@ unsafe fn builtin_print_bool(stack: *mut u8) {
 unsafe fn builtin_print_char(stack: *mut u8) {
     let x: char = read_stack(stack, Slot::new(0));
     println!("{}", x);
+}
+
+unsafe fn builtin_print_raw(stack: *mut u8) {
+    let x: &str = read_stack(stack, Slot::new(0));
+    print!("{}", x);
 }

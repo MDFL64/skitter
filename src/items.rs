@@ -46,7 +46,7 @@ impl<'vm> ItemPath<'vm> {
     pub fn for_value(name: &'vm str) -> Self {
         Self(NameSpace::Value, name)
     }
-    pub fn as_string(&self) -> &str {
+    pub fn as_string(&self) -> &'vm str {
         &self.1
     }
 }
@@ -86,7 +86,7 @@ enum NameSpace {
     DebugOnly,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub struct CrateId(u32);
 
 impl CrateId {
@@ -994,16 +994,19 @@ impl<'vm> Item<'vm> {
         let crate_items = self.vm.crate_provider(self.crate_id);
         let trait_item = crate_items.item_by_id(virtual_info.trait_id);
 
-        let trait_impl = trait_item
-            .find_trait_impl(subs)
-            .expect("failed to resolve impl for associated type");
+        if let Some(trait_impl) = trait_item.find_trait_impl(subs) {
+            let res_val = &trait_impl.assoc_values[virtual_info.member_index as usize];
 
-        let res_val = &trait_impl.assoc_values[virtual_info.member_index as usize];
-
-        if let Some(AssocValue::Type(ty)) = res_val {
-            ty.sub(&trait_impl.impl_subs)
+            if let Some(AssocValue::Type(ty)) = res_val {
+                ty.sub(&trait_impl.impl_subs)
+            } else {
+                panic!("failed to find associated type")
+            }
         } else {
-            panic!("failed to find associated type")
+            panic!(
+                "failed to resolve impl for associated type: {:?}{}",
+                self, subs
+            );
         }
     }
 

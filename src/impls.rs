@@ -45,9 +45,11 @@ fn find_source_crate(ty: Type) -> CrateId {
 
         TypeKind::Ref(child, _) => find_source_crate(*child),
 
-        TypeKind::Bool | TypeKind::Float(_) | TypeKind::Int(..) | TypeKind::Tuple(_) => {
-            *ty.vm().core_crate.get().unwrap()
-        }
+        TypeKind::Bool
+        | TypeKind::Float(_)
+        | TypeKind::Int(..)
+        | TypeKind::Tuple(_)
+        | TypeKind::Slice(_) => *ty.vm().core_crate.get().unwrap(),
         _ => panic!("source crate {}", ty),
     }
 }

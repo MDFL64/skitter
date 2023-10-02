@@ -17,3 +17,7 @@ pub fn print_char(x: char) {
 pub fn print_bool(x: bool) {
     println!("{}", x);
 }
+
+pub fn print_raw(x: &str) {
+    print!("{}", x);
+}

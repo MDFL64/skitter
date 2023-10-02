@@ -1083,6 +1083,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             | ExprKind::Array(_)
             | ExprKind::Cast(_)
             | ExprKind::Adt { .. }
+            | ExprKind::Call { .. }
             | ExprKind::LiteralValue { .. } => {
                 // WARNING: be wary of expressions that could alias locals!
                 let res = self.lower_expr(id, None);

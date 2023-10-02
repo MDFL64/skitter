@@ -145,16 +145,15 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(33);
                 sig.persist_write(writer);
             }
-            TypeKind::Foreign => {
+            /*TypeKind::Foreign => {
                 writer.write_byte(34);
-            }
-
+            }*/
             TypeKind::Param(n) => {
                 writer.write_byte(40);
                 n.persist_write(writer);
             }
 
-            TypeKind::Closure(..) => writer.write_byte(252),
+            //TypeKind::Closure(..) => writer.write_byte(252),
             TypeKind::Dynamic => writer.write_byte(254),
             TypeKind::Opaque => writer.write_byte(255),
 
@@ -233,7 +232,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let sig = Persist::persist_read(reader);
                 TypeKind::FunctionPointer(sig)
             }
-            34 => TypeKind::Foreign,
+            //34 => TypeKind::Foreign,
             40 => {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)

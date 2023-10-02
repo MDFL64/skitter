@@ -798,21 +798,25 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
     }
 
     pub fn find_crate_id(&self, crate_num: rustc_span::def_id::CrateNum) -> CrateId {
-        let mut cache = self.extern_crate_id_cache.lock().unwrap();
+        if crate_num == rustc_hir::def_id::LOCAL_CRATE {
+            self.items.crate_id
+        } else {
+            let mut cache = self.extern_crate_id_cache.lock().unwrap();
 
-        *cache.entry(crate_num).or_insert_with(|| {
-            let crate_name = self.tcx.crate_name(crate_num);
-            for entry in &self.extern_crates {
-                if entry.name == crate_name.as_str() {
-                    return entry.id;
+            *cache.entry(crate_num).or_insert_with(|| {
+                let crate_name = self.tcx.crate_name(crate_num);
+                for entry in &self.extern_crates {
+                    if entry.name == crate_name.as_str() {
+                        return entry.id;
+                    }
                 }
-            }
-            panic!(
-                "lookup for crate failed: {} {}",
-                crate_num,
-                crate_name.as_str()
-            );
-        })
+                panic!(
+                    "lookup for crate failed: {} {}",
+                    crate_num,
+                    crate_name.as_str()
+                );
+            })
+        }
     }
 
     /// ONLY to be used for debugging local impls!
