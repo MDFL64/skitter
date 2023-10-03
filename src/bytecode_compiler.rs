@@ -407,33 +407,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         dst_slot
                     } else {
+                        
+                        let ret_slot = self.build_call(expr_ty, args);
+
                         let func = func_ref.item.func_mono(&func_ref.subs);
-                        let call_start_instr = self.out_bc.len();
-
-                        // evaluate arguments and write them to a virtual call frame
-                        let mut call_frame = CallFrame::default();
-                        call_frame.alloc(expr_ty);
-                        for arg in args.iter() {
-                            let arg_ty = self.expr_ty(*arg);
-                            let arg_slot = call_frame.alloc(arg_ty);
-                            self.lower_expr(*arg, Some(arg_slot));
-                        }
-
-                        // set up real call frame
-                        let base_slot = self.stack.align_for_call();
-                        let ret_slot = self.stack.alloc(expr_ty);
-                        assert_eq!(ret_slot, base_slot);
-
-                        for arg in args.iter() {
-                            let arg_ty = self.expr_ty(*arg);
-                            self.stack.alloc(arg_ty);
-                        }
-
-                        // amend the previous code to write args into the correct slots
-                        for index in call_start_instr..self.out_bc.len() {
-                            self.out_bc[index].replace_arg_sub(base_slot);
-                        }
-
                         self.out_bc.push(Instr::Call(ret_slot, func));
                         if let Some(dst_slot) = dst_slot {
                             if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty)
@@ -446,32 +423,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
                 } else if let TypeKind::FunctionPointer(_) = ty.kind() {
+
+                    let ret_slot = self.build_call(expr_ty, args);
+
                     let func_slot = self.lower_expr(*func, None);
-                    let call_start_instr = self.out_bc.len();
-
-                    // evaluate arguments and write them to a virtual call frame
-                    let mut call_frame = CallFrame::default();
-                    call_frame.alloc(expr_ty);
-                    for arg in args.iter() {
-                        let arg_ty = self.expr_ty(*arg);
-                        let arg_slot = call_frame.alloc(arg_ty);
-                        self.lower_expr(*arg, Some(arg_slot));
-                    }
-
-                    // set up real call frame
-                    let base_slot = self.stack.align_for_call();
-                    let ret_slot = self.stack.alloc(expr_ty);
-                    assert_eq!(ret_slot, base_slot);
-
-                    for arg in args.iter() {
-                        let arg_ty = self.expr_ty(*arg);
-                        self.stack.alloc(arg_ty);
-                    }
-
-                    // amend the previous code to write args into the correct slots
-                    for index in call_start_instr..self.out_bc.len() {
-                        self.out_bc[index].replace_arg_sub(base_slot);
-                    }
 
                     self.out_bc.push(Instr::CallPtr {
                         frame: ret_slot,
@@ -1091,6 +1046,36 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             }
             _ => panic!("expr_to_place {:?}", expr.kind),
         }
+    }
+
+    fn build_call(&mut self, res_ty: Type, args: &[ExprId]) -> Slot {
+        // this is annoying and not very performant, but it's the least buggy way to build call frames I've found
+
+        // start by evaluating the args
+        let args_src: Vec<_> = args.iter().map(|arg| self.lower_expr(*arg, None)).collect();
+
+        // allocate return slot
+        let base_slot = self.stack.align_for_call();
+        let ret_slot = self.stack.alloc(res_ty);
+        assert_eq!(ret_slot, base_slot);
+
+        // allocate arg slots
+        let args_dst: Vec<_> = args
+            .iter()
+            .map(|arg| {
+                let arg_ty = self.expr_ty(*arg);
+                (self.stack.alloc(arg_ty),arg_ty)
+            })
+            .collect();
+
+        // copy args to their final slots
+        for (src,(dst,ty)) in args_src.into_iter().zip(args_dst) {
+            if let Some(copy) = bytecode_select::copy(dst, src, ty) {
+                self.out_bc.push(copy);
+            }
+        }
+
+        ret_slot
     }
 
     fn apply_subs(&self, ty: Type<'vm>) -> Type<'vm> {

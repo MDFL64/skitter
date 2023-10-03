@@ -14,13 +14,10 @@ pub fn main() {
 
     let source = text.as_bytes();
 
-    let mut i=0;
-    loop {
-        if i >= source.len() || i>=data.len() {
-            break;
-        }
+    let len = source.len().min(data.len());
+
+    for i in 0..len {
         data[i] = source[i];
-        i+=1;
     }
 
     print_string(core::str::from_utf8(&data).unwrap_or("error"));

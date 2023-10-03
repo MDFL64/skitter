@@ -252,7 +252,11 @@ impl<'vm> Type<'vm> {
     pub fn is_concrete(&self) -> bool {
         match self.kind() {
             // primitive types
-            TypeKind::Int(..) | TypeKind::Float(..) | TypeKind::Bool | TypeKind::Char | TypeKind::StringSlice => true,
+            TypeKind::Int(..)
+            | TypeKind::Float(..)
+            | TypeKind::Bool
+            | TypeKind::Char
+            | TypeKind::StringSlice => true,
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
@@ -260,15 +264,15 @@ impl<'vm> Type<'vm> {
                 sig.fn_ptr_ty.is_concrete() && sig.env_ty.is_concrete() && subs.is_concrete()
             }
 
-            TypeKind::Ref(child, _) |
-            TypeKind::Ptr(child, _) |
-            TypeKind::Slice(child) => child.is_concrete(),
+            TypeKind::Ref(child, _) | TypeKind::Ptr(child, _) | TypeKind::Slice(child) => {
+                child.is_concrete()
+            }
 
             TypeKind::FunctionPointer(sig) => {
                 let args_concrete = sig.inputs.iter().all(|arg| arg.is_concrete());
                 args_concrete && sig.output.is_concrete()
             }
-            TypeKind::Array(child,size) => {
+            TypeKind::Array(child, size) => {
                 if let ArraySize::ConstParam(_) = size {
                     return false;
                 }

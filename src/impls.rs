@@ -255,7 +255,7 @@ impl<'vm> ImplBounds<'vm> {
 
         let check_ty = self.for_tys.list[0].assert_ty();
 
-        Self::match_types(ty,check_ty,&mut map)
+        Self::match_types(ty, check_ty, &mut map)
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
@@ -309,7 +309,7 @@ impl<'vm> ImplBounds<'vm> {
             }
 
             (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
-                if res_map.allow_bidirectional {                    
+                if res_map.allow_bidirectional {
                     res_map.set(SubSide::Rhs, *rhs_param, lhs);
                     res_map.set(SubSide::Lhs, *lhs_param, rhs);
                     true
@@ -355,7 +355,7 @@ enum SubSide {
 #[derive(Default, Debug)]
 struct SubMap<'vm> {
     map: Vec<((SubSide, u32), Type<'vm>)>,
-    pub allow_bidirectional: bool
+    pub allow_bidirectional: bool,
 }
 
 impl<'vm> SubMap<'vm> {
