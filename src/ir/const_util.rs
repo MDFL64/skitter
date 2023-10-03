@@ -31,7 +31,9 @@ impl<'vm> IRFunction<'vm> {
 
             ExprKind::VarRef(..) | ExprKind::UpVar(_) => false,
 
-            _ => panic!("is_const_alloc {:?}", expr.kind),
+            ExprKind::Call { .. } => false,
+
+            _ => panic!("is_const_alloc {:?} / {}", expr.kind, expr.ty),
         }
     }
 

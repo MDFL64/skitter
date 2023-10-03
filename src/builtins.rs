@@ -409,6 +409,22 @@ pub fn compile_rust_intrinsic<'vm>(
                 ));
             }
         }
+        "offset" => {
+            assert!(subs.list.len() == 2);
+            assert!(arg_slots.len() == 2);
+
+            let ptr_ty = subs.list[0].assert_ty();
+            let offset_ty = subs.list[1].assert_ty();
+            assert!(ptr_ty.layout().assert_size() == POINTER_SIZE.bytes());
+
+            let (offset_ctor,_) = bytecode_select::binary(BinaryOp::Add, offset_ty);
+
+            out_bc.push(offset_ctor(out_slot,arg_slots[0],arg_slots[1]));
+
+            //panic!("offset {:?} {:?} {:?}",out_slot,arg_slots[0],arg_slots[1]);
+
+            // TODO wide pointers?
+        }
         "min_align_of" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 0);

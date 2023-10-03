@@ -14,20 +14,22 @@ pub fn main() {
 
     let source = text.as_bytes();
 
-    for i in 0..data.len() {
-        if i >= source.len() {
+    let mut i=0;
+    loop {
+        if i >= source.len() || i>=data.len() {
             break;
         }
         data[i] = source[i];
+        i+=1;
     }
 
     print_string(core::str::from_utf8(&data).unwrap_or("error"));
 
-    /*data.make_ascii_uppercase();
+    data.make_ascii_uppercase();
 
     print_string(core::str::from_utf8(&data).unwrap_or("error"));
 
     data.make_ascii_lowercase();
 
-    print_string(core::str::from_utf8(&data).unwrap_or("error"));*/
+    print_string(core::str::from_utf8(&data).unwrap_or("error"));
 }

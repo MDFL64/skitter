@@ -250,17 +250,12 @@ impl<'vm> ImplBounds<'vm> {
     /// This relaxed check method tests against a single type,
     /// and does not actually check the stored bounds.
     pub fn check_inherent(&self, ty: Type<'vm>) -> bool {
+        let mut map = SubMap::default();
+        map.allow_bidirectional = true;
+
         let check_ty = self.for_tys.list[0].assert_ty();
 
-        if ty == check_ty {
-            return true;
-        }
-
-        if ty.is_concrete() && check_ty.is_concrete() {
-            return false;
-        }
-
-        panic!("check {} {}", check_ty, ty);
+        Self::match_types(ty,check_ty,&mut map)
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
@@ -314,7 +309,13 @@ impl<'vm> ImplBounds<'vm> {
             }
 
             (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
-                panic!("fixme? this looks annoying");
+                if res_map.allow_bidirectional {                    
+                    res_map.set(SubSide::Rhs, *rhs_param, lhs);
+                    res_map.set(SubSide::Lhs, *lhs_param, rhs);
+                    true
+                } else {
+                    panic!("bidirectional bound not permitted");
+                }
             }
 
             (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs),
@@ -326,6 +327,8 @@ impl<'vm> ImplBounds<'vm> {
             | (_, TypeKind::Ptr(..))
             | (TypeKind::Ref(..), _)
             | (_, TypeKind::Ref(..))
+            | (TypeKind::Slice(..), _)
+            | (_, TypeKind::Slice(..))
             | (TypeKind::Bool, _)
             | (_, TypeKind::Bool)
             | (TypeKind::Char, _)
@@ -352,6 +355,7 @@ enum SubSide {
 #[derive(Default, Debug)]
 struct SubMap<'vm> {
     map: Vec<((SubSide, u32), Type<'vm>)>,
+    pub allow_bidirectional: bool
 }
 
 impl<'vm> SubMap<'vm> {
