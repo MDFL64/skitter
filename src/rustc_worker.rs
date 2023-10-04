@@ -747,7 +747,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                 writer.flip()
             };*/
-            panic!("todo impls");
+            //panic!("todo impls");
+            println!("todo impls");
 
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);

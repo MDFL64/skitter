@@ -407,7 +407,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         dst_slot
                     } else {
-                        
                         let ret_slot = self.build_call(expr_ty, args);
 
                         let func = func_ref.item.func_mono(&func_ref.subs);
@@ -423,7 +422,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
                 } else if let TypeKind::FunctionPointer(_) = ty.kind() {
-
                     let ret_slot = self.build_call(expr_ty, args);
 
                     let func_slot = self.lower_expr(*func, None);
@@ -1064,12 +1062,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             .iter()
             .map(|arg| {
                 let arg_ty = self.expr_ty(*arg);
-                (self.stack.alloc(arg_ty),arg_ty)
+                (self.stack.alloc(arg_ty), arg_ty)
             })
             .collect();
 
         // copy args to their final slots
-        for (src,(dst,ty)) in args_src.into_iter().zip(args_dst) {
+        for (src, (dst, ty)) in args_src.into_iter().zip(args_dst) {
             if let Some(copy) = bytecode_select::copy(dst, src, ty) {
                 self.out_bc.push(copy);
             }

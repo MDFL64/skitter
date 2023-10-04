@@ -893,6 +893,16 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
             PatternKind::Hole => {
                 writer.write_byte(b'_');
             }
+            PatternKind::Range {
+                start,
+                end,
+                end_is_inclusive,
+            } => {
+                writer.write_byte(b'.');
+                start.persist_write(writer);
+                end.persist_write(writer);
+                end_is_inclusive.persist_write(writer);
+            }
             PatternKind::Error(ref msg) => {
                 writer.write_byte(b'~');
                 msg.persist_write(writer);

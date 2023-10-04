@@ -4,7 +4,7 @@ use ahash::AHashMap;
 
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
-    items::FunctionSig,
+    items::{CrateId, FunctionSig, ItemId},
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
@@ -73,6 +73,13 @@ pub struct Closure<'vm> {
     pub vm: &'vm VM<'vm>,
     unique_id: u32,
 
+    // the following fields are used to locate closures in foreign crates
+    // they should NOT be used when interning closures, since multiple closures
+    // may exist for the same (crate,item,indices) key
+    def_crate: CrateId,
+    def_item: ItemId,
+    def_path_indices: Vec<u32>,
+
     abstract_sig: OnceLock<ClosureSig<'vm>>,
 
     ir_base: OnceLock<Arc<IRFunction<'vm>>>,
@@ -84,10 +91,20 @@ pub struct Closure<'vm> {
 }
 
 impl<'vm> Closure<'vm> {
-    pub fn new(unique_id: u32, vm: &'vm VM<'vm>) -> Self {
+    pub fn new(
+        unique_id: u32,
+        def_crate: CrateId,
+        def_item: ItemId,
+        def_path_indices: Vec<u32>,
+        vm: &'vm VM<'vm>,
+    ) -> Self {
         Self {
             vm,
             unique_id,
+
+            def_crate,
+            def_item,
+            def_path_indices,
 
             abstract_sig: Default::default(),
 

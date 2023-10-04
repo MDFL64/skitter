@@ -922,13 +922,14 @@ impl<'vm> Item<'vm> {
             ItemKind::Function { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
 
-                closures
-                    .entry(path_indices)
-                    .or_insert_with(|| self.vm.alloc_closure())
+                closures.entry(path_indices.clone()).or_insert_with(|| {
+                    self.vm
+                        .alloc_closure(self.crate_id, self.item_id, path_indices)
+                })
             }
             ItemKind::Constant { .. } => {
                 println!("TODO CLOSURE IN CONSTANT!");
-                self.vm.alloc_closure()
+                self.vm.alloc_closure(self.crate_id, self.item_id, path_indices)
             }
             _ => {
                 panic!("attempt to get child closure on {:?}", self)

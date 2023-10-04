@@ -10,6 +10,7 @@ use crate::crate_provider::CrateProvider;
 use crate::ir::IRFunction;
 use crate::items::CrateId;
 use crate::items::Item;
+use crate::items::ItemId;
 use crate::persist::PersistReadContext;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
@@ -219,10 +220,16 @@ impl<'vm> VM<'vm> {
         self.arena_constants.alloc(str)
     }
 
-    pub fn alloc_closure(&'vm self) -> &'vm Closure<'vm> {
+    pub fn alloc_closure(
+        &'vm self,
+        def_crate: CrateId,
+        def_item: ItemId,
+        def_path_indices: Vec<u32>,
+    ) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
 
-        self.arena_closures.alloc(Closure::new(n, self))
+        self.arena_closures
+            .alloc(Closure::new(n, def_crate, def_item, def_path_indices, self))
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {
