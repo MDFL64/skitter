@@ -6,14 +6,25 @@ use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::{CrateId, FunctionSig, ItemId},
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
-    vm::{Function, FunctionSource, VM},
+    vm::{Function, FunctionSource, VM}, persist::Persist,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(u8)]
 pub enum FnTrait {
     Fn,
     FnMut,
     FnOnce,
+}
+
+impl<'vm> Persist<'vm> for FnTrait {
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        panic!("read fn trait");
+    }
+
+    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
+        writer.write_byte(*self as u8);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -76,9 +87,9 @@ pub struct Closure<'vm> {
     // the following fields are used to locate closures in foreign crates
     // they should NOT be used when interning closures, since multiple closures
     // may exist for the same (crate,item,indices) key
-    def_crate: CrateId,
-    def_item: ItemId,
-    def_path_indices: Vec<u32>,
+    pub def_crate: CrateId,
+    pub def_item: ItemId,
+    pub def_path_indices: Vec<u32>,
 
     abstract_sig: OnceLock<ClosureSig<'vm>>,
 

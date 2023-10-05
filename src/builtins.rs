@@ -35,7 +35,8 @@ impl<'vm> Persist<'vm> for BuiltinTrait {
     }
 
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        panic!("fix read (just transmute it)");
+        let n = reader.read_byte();
+        unsafe { std::mem::transmute(n) }
     }
 }
 

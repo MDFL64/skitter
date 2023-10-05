@@ -101,6 +101,7 @@ impl CrateId {
 
 impl<'vm> Persist<'vm> for CrateId {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        // TODO remap crate id!
         Self::new(Persist::persist_read(reader))
     }
 
@@ -119,6 +120,16 @@ impl ItemId {
 
     pub fn index(&self) -> usize {
         self.0 as usize
+    }
+}
+
+impl<'vm> Persist<'vm> for ItemId {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        Self::new(Persist::persist_read(reader))
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer);
     }
 }
 

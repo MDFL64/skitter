@@ -145,9 +145,31 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(33);
                 sig.persist_write(writer);
             }
-            /*TypeKind::Foreign => {
+            TypeKind::Closure(closure,sig,subs) => {
                 writer.write_byte(34);
-            }*/
+
+                // TODO: a lot of this is likely redundant, and could be pulled from the closure def and subs
+                // for now we just write everything
+
+                // write closure ref
+                closure.def_crate.persist_write(writer);
+                closure.def_item.persist_write(writer);
+                closure.def_path_indices.persist_write(writer);
+
+                // write sig
+                sig.kind.persist_write(writer);
+                sig.fn_ptr_ty.persist_write(writer);
+                sig.env_ty.persist_write(writer);
+
+                // write subs
+                subs.persist_write(writer);
+            }
+            TypeKind::Foreign(crate_id,path) => {
+                writer.write_byte(35);
+                crate_id.persist_write(writer);
+                writer.write_str(path);
+            }
+
             TypeKind::Param(n) => {
                 writer.write_byte(40);
                 n.persist_write(writer);
@@ -232,7 +254,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let sig = Persist::persist_read(reader);
                 TypeKind::FunctionPointer(sig)
             }
-            //34 => TypeKind::Foreign,
+
             40 => {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)

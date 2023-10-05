@@ -753,9 +753,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);
 
-            // write trait impls
-            //writer.write_bytes(&trait_impl_bytes);
-
             let cache_path = worker_config.crate_path.cache_path();
             std::fs::write(cache_path, writer.flip()).expect("save failed");
         }
