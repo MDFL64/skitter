@@ -55,28 +55,83 @@ fn find_source_crate(ty: Type) -> CrateId {
     }
 }
 
+pub trait ImplTable<'vm> {
+    fn get_crate_id(&self) -> CrateId;
+
+    fn get_bounds(&self, i: u32) -> &ImplBounds<'vm>;
+
+    fn get_inherent_table(&self, full_key: &str) -> Option<&[InherentMember<'vm>]>;
+
+    fn get_trait_table(&self, trait_key: &TraitKey, type_key: Option<&'vm str>) -> Option<&[TraitValue<'vm>]>;
+
+    fn find_inherent(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
+        if let Some(list) = self.get_inherent_table(full_key) {
+            for value in list {
+                let bounds = self.get_bounds(value.bounds_id);
+                if bounds.check_inherent(ty) {
+                    return Some(value.value.clone());
+                }
+            }
+        }
+        None
+    }
+
+    fn find_trait(
+        &self,
+        trait_item: &Item<'vm>,
+        for_tys: &SubList<'vm>,
+    ) -> Option<TraitImplResult<'vm>> {
+        let trait_key = TraitKey {
+            crate_id: trait_item.crate_id,
+            item_id: trait_item.item_id,
+        };
+
+        let type_key = for_tys.list[0].assert_ty().impl_key();
+
+        if let Some(list) = self.get_trait_table(&trait_key,type_key) {
+            for value in list {
+                let bounds = self.get_bounds(value.bounds_id);
+                if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
+                    return Some(TraitImplResult {
+                        crate_id: self.get_crate_id(),
+                        assoc_values: value.values.clone(),
+                        impl_subs,
+                    });
+                }
+            }
+        }
+        
+        // retry with a 'None' key
+        if type_key != None {
+            if let Some(list) = self.get_trait_table(&trait_key,None) {
+                for value in list {
+                    let bounds = self.get_bounds(value.bounds_id);
+                    if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
+                        return Some(TraitImplResult {
+                            crate_id: self.get_crate_id(),
+                            assoc_values: value.values.clone(),
+                            impl_subs,
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
     pub bounds: Vec<BoundKind<'vm>>,
     pub generic_counts: GenericCounts,
 }
 
-pub struct Impls<'vm> {
+pub struct ImplTableSimple<'vm> {
     crate_id: CrateId,
     inherent_table: AHashMap<String, Vec<InherentMember<'vm>>>,
     trait_table: AHashMap<TraitKey, AHashMap<Option<&'vm str>, Vec<TraitValue<'vm>>>>,
     bounds_table: Vec<ImplBounds<'vm>>,
-}
-
-impl<'vm> Impls<'vm> {
-    pub fn new(crate_id: CrateId) -> Self {
-        Self {
-            crate_id,
-            inherent_table: Default::default(),
-            trait_table: Default::default(),
-            bounds_table: Default::default(),
-        }
-    }
 }
 
 struct InherentMember<'vm> {
@@ -102,7 +157,16 @@ struct TraitValue<'vm> {
     values: Arc<[Option<AssocValue<'vm>>]>,
 }
 
-impl<'vm> Impls<'vm> {
+impl<'vm> ImplTableSimple<'vm> {
+    pub fn new(crate_id: CrateId) -> Self {
+        Self {
+            crate_id,
+            inherent_table: Default::default(),
+            trait_table: Default::default(),
+            bounds_table: Default::default(),
+        }
+    }
+
     pub fn add_bounds(&mut self, bounds: ImplBounds<'vm>) -> u32 {
         let index = self.bounds_table.len() as u32;
         self.bounds_table.push(bounds);
@@ -134,59 +198,29 @@ impl<'vm> Impls<'vm> {
             values: assoc_values.into(),
         });
     }
+}
 
-    pub fn find_trait(
-        &self,
-        trait_item: &Item<'vm>,
-        for_tys: &SubList<'vm>,
-    ) -> Option<TraitImplResult<'vm>> {
-        let key_trait = TraitKey {
-            crate_id: trait_item.crate_id,
-            item_id: trait_item.item_id,
-        };
-
-        if let Some(sub_table) = self.trait_table.get(&key_trait) {
-            let key_ty = for_tys.list[0].assert_ty().impl_key();
-
-            if let Some(list) = sub_table.get(&key_ty) {
-                for value in list {
-                    let bounds = &self.bounds_table[value.bounds_id as usize];
-                    if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
-                        return Some(TraitImplResult {
-                            crate_id: self.crate_id,
-                            assoc_values: value.values.clone(),
-                            impl_subs,
-                        });
-                    }
-                }
-            }
-
-            // retry with a 'None' key
-            if key_ty != None {
-                if let Some(list) = sub_table.get(&None) {
-                    for value in list {
-                        let bounds = &self.bounds_table[value.bounds_id as usize];
-                        if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
-                            return Some(TraitImplResult {
-                                crate_id: self.crate_id,
-                                assoc_values: value.values.clone(),
-                                impl_subs,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        None
+impl<'vm> ImplTable<'vm> for ImplTableSimple<'vm> {
+    fn get_crate_id(&self) -> CrateId {
+        self.crate_id
     }
 
-    pub fn find_inherent(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
-        if let Some(list) = self.inherent_table.get(full_key) {
-            for value in list {
-                let bounds = &self.bounds_table[value.bounds_id as usize];
-                if bounds.check_inherent(ty) {
-                    return Some(value.value.clone());
-                }
+    fn get_bounds(&self, i: u32) -> &ImplBounds<'vm> {
+        &self.bounds_table[i as usize]
+    }
+
+    fn get_inherent_table(&self, full_key: &str) -> Option<&[InherentMember<'vm>]> {
+        if let Some(val) = self.inherent_table.get(full_key) {
+            Some(val)
+        } else {
+            None
+        }
+    }
+
+    fn get_trait_table(&self, trait_key: &TraitKey, type_key: Option<&'vm str>) -> Option<&[TraitValue<'vm>]> {
+        if let Some(sub_table) = self.trait_table.get(trait_key) {
+            if let Some(list) = sub_table.get(&type_key) {
+                return Some(list);
             }
         }
         None

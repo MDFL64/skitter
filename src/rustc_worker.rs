@@ -18,7 +18,7 @@ use rustc_session::config;
 use crate::{
     builtins::BuiltinTrait,
     crate_provider::{CrateProvider, TraitImplResult},
-    impls::{ImplBounds, Impls},
+    impls::{ImplBounds, ImplTableSimple, ImplTable},
     ir::{converter::IRFunctionConverter, IRFunction},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
@@ -528,7 +528,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             });
         }
 
-        let mut impls = Impls::new(this_crate);
+        let mut impls = ImplTableSimple::new(this_crate);
 
         // fill impls
         for impl_item in impl_items {
@@ -850,7 +850,7 @@ struct RustCItems<'vm> {
     items: Vec<RustCItem<'vm>>,
     map_paths: AHashMap<ItemPath<'vm>, ItemId>,
     map_defs: AHashMap<LocalDefId, ItemId>,
-    impls: OnceLock<Impls<'vm>>,
+    impls: OnceLock<ImplTableSimple<'vm>>,
 }
 
 struct RustCItem<'vm> {
