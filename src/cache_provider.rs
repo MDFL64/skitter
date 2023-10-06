@@ -15,11 +15,12 @@ use crate::{
     profiler::profile,
     types::{SubList, Type},
     vm::VM,
-    CratePath,
+    CratePath, impls::{ImplTableLazy, ImplTable},
 };
 
 pub struct CacheProvider<'vm> {
     read_context: Arc<PersistReadContext<'vm>>,
+    impls: ImplTableLazy<'vm>
 }
 
 impl<'vm> CacheProvider<'vm> {
@@ -56,13 +57,18 @@ impl<'vm> CacheProvider<'vm> {
             .set(items)
             .map_err(|_| "double-assign to items")?;
 
+        let impls = ImplTableLazy::new(&mut reader);
+
         let types = LazyArray::read(&mut reader);
         read_context
             .types
             .set(types)
             .map_err(|_| "double-assign to types")?;
 
-        Ok(Self { read_context })
+        Ok(Self {
+            read_context,
+            impls
+        })
     }
 }
 
@@ -74,7 +80,7 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
 
     fn item_by_path(&self, path: &ItemPath<'vm>) -> Option<&'vm Item<'vm>> {
         let items = self.read_context.items.get().unwrap();
-        Some(items.get(path))
+        items.get(path).copied()
     }
 
     fn build_ir(&self, id: ItemId) -> Arc<IRFunction<'vm>> {
@@ -104,10 +110,10 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
 
     fn trait_impl(
         &self,
-        trait_item: &Item,
+        trait_item: &Item<'vm>,
         for_tys: &SubList<'vm>,
     ) -> Option<TraitImplResult<'vm>> {
-        panic!("todo parse trait impl");
+        self.impls.find_trait(trait_item, for_tys)
     }
 
     fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {

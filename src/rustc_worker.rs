@@ -742,24 +742,21 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);
 
-            /*let trait_impl_bytes = {
-                let mut writer = writer.new_child_writer();
-
-                impl_ids.len().persist_write(&mut writer);
-                for (trait_item, index) in impl_ids {
-                    trait_item.write_trait_impl(index, &mut writer);
-                }
-
-                writer.flip()
-            };*/
-            //panic!("todo impls");
-            println!("todo impls");
+            // impls
+            {
+                let impls = ctx.items.impls.get().expect("no impls");
+                impls.write(&mut writer);
+            }
 
             let types = writer.iter_types();
             LazyArray::<Type>::write(&mut writer, types);
 
             let cache_path = worker_config.crate_path.cache_path();
             std::fs::write(cache_path, writer.flip()).expect("save failed");
+
+            println!("ir saved");
+
+            std::process::exit(0);
         }
 
         ctx

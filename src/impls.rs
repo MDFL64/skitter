@@ -5,7 +5,8 @@ use ahash::AHashMap;
 use crate::{
     crate_provider::TraitImplResult,
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
-    lazy_collections::LazyKey,
+    lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
+    persist::{Persist, PersistWriter, PersistReader},
     types::{Sub, SubList, Type, TypeKind},
     vm::VM,
 };
@@ -125,10 +126,50 @@ pub trait ImplTable<'vm> {
     }
 }
 
+#[derive(Debug)]
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
     pub bounds: Vec<BoundKind<'vm>>,
     pub generic_counts: GenericCounts,
+}
+
+impl<'vm> LazyItem<'vm> for ImplBounds<'vm> {
+    type Input = Self;
+
+    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+        input
+    }
+}
+
+impl<'vm> Persist<'vm> for ImplBounds<'vm> {
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        
+        let for_tys = Persist::persist_read(reader);
+        let bounds = Persist::persist_read(reader);
+
+        let lifetimes = Persist::persist_read(reader);
+        let types = Persist::persist_read(reader);
+        let consts = Persist::persist_read(reader);
+
+        Self {
+            for_tys,
+            bounds,
+            generic_counts: GenericCounts {
+                lifetimes,
+                types,
+                consts
+            }
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.for_tys.persist_write(writer);
+        self.bounds.persist_write(writer);
+
+        self.generic_counts.lifetimes.persist_write(writer);
+        self.generic_counts.types.persist_write(writer);
+        self.generic_counts.consts.persist_write(writer);
+    }
 }
 
 pub struct ImplTableSimple<'vm> {
@@ -143,7 +184,7 @@ struct InherentMember<'vm> {
     value: AssocValue<'vm>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 struct TraitKey {
     crate_id: CrateId,
     item_id: ItemId,
@@ -156,10 +197,92 @@ impl Hash for TraitKey {
     }
 }
 
+#[derive(Clone, Debug)]
 struct TraitValue<'vm> {
     bounds_id: u32,
     values: Arc<[Option<AssocValue<'vm>>]>,
 }
+
+impl<'vm> Persist<'vm> for TraitValue<'vm> {
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let bounds_id = u32::persist_read(reader);
+
+        let values: Vec<Option<AssocValue<'vm>>> = Persist::persist_read(reader);
+
+        TraitValue{
+            bounds_id,
+            values: values.into()
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.bounds_id.persist_write(writer);
+        self.values.len().persist_write(writer);
+        for val in self.values.iter() {
+            val.persist_write(writer);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TraitKeyValue<'vm> {
+    key: (TraitKey, Option<&'vm str>),
+    value: Vec<TraitValue<'vm>>,
+}
+
+impl<'vm> LazyItem<'vm> for TraitKeyValue<'vm> {
+    type Input = Self;
+
+    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+        input
+    }
+}
+
+impl<'vm> LazyKey<'vm> for TraitKeyValue<'vm> {
+    type Key = (TraitKey, Option<&'vm str>);
+
+    fn key(&self) -> Option<&Self::Key> {
+        Some(&self.key)
+    }
+
+    fn key_for_input(input: &Self::Input) -> Option<&Self::Key> {
+        Some(&input.key)
+    }
+}
+
+impl<'vm> Persist<'vm> for TraitKeyValue<'vm> {
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let crate_id = CrateId::persist_read(reader);
+        let item_id = ItemId::persist_read(reader);
+
+        let b = reader.read_byte();
+        let ty_key = if b == 1 {
+            Some(reader.read_str())
+        } else {
+            None
+        };
+
+        Self {
+            key: (TraitKey{crate_id, item_id}, ty_key),
+            value: Persist::persist_read(reader)
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.key.0.crate_id.persist_write(writer);
+        self.key.0.item_id.persist_write(writer);
+        if let Some(ty_key) = self.key.1 {
+            writer.write_byte(1);
+            writer.write_str(ty_key);
+        } else {
+            writer.write_byte(0);
+        }
+
+        self.value.persist_write(writer);
+    }
+}
+
+
 
 impl<'vm> ImplTableSimple<'vm> {
     pub fn new(crate_id: CrateId) -> Self {
@@ -202,6 +325,20 @@ impl<'vm> ImplTableSimple<'vm> {
             values: assoc_values.into(),
         });
     }
+
+    pub fn write(&self, writer: &mut PersistWriter<'vm>) {
+        LazyArray::<ImplBounds<'vm>>::write(writer, self.bounds_table.iter());
+
+        // what a disaster
+        let trait_pairs: Vec<_> = self.trait_table.iter().flat_map(|(key_1, sub_table)| {
+            sub_table.iter().map(|(key_2, val)| TraitKeyValue {
+                key: (key_1.clone(), *key_2),
+                value: val.clone(),
+            })
+        }).collect();
+
+        LazyTable::<TraitKeyValue>::write(writer, trait_pairs.iter());
+    }
 }
 
 impl<'vm> ImplTable<'vm> for ImplTableSimple<'vm> {
@@ -232,6 +369,53 @@ impl<'vm> ImplTable<'vm> for ImplTableSimple<'vm> {
             }
         }
         None
+    }
+}
+
+pub struct ImplTableLazy<'vm> {
+    crate_id: CrateId,
+    bounds_table: LazyArray<'vm,ImplBounds<'vm>>,
+    trait_table: LazyTable<'vm,TraitKeyValue<'vm>>,
+}
+
+impl<'vm> ImplTableLazy<'vm> {
+    pub fn new(reader: &mut PersistReader<'vm>) -> Self {
+        let bounds_table = LazyArray::read(reader);
+        let trait_table = LazyTable::read(reader);
+
+        Self {
+            crate_id: reader.context.this_crate,
+            bounds_table,
+            trait_table
+        }
+    }
+}
+
+impl<'vm> ImplTable<'vm> for ImplTableLazy<'vm> {
+    fn get_bounds(&self, i: u32) -> &ImplBounds<'vm> {
+        self.bounds_table.get(i as usize)
+    }
+
+    fn get_crate_id(&self) -> CrateId {
+        self.crate_id
+    }
+
+    fn get_trait_table(
+            &self,
+            trait_key: &TraitKey,
+            type_key: Option<&'vm str>,
+        ) -> Option<&[TraitValue<'vm>]> {
+        
+        let key = (trait_key.clone(),type_key);
+
+        // todo this probably NEEDS to be optional
+        self.trait_table.get(&key).map(|kv| {
+            kv.value.as_slice()
+        })
+    }
+
+    fn get_inherent_table(&self, full_key: &str) -> Option<&[InherentMember<'vm>]> {
+        panic!("I");
     }
 }
 

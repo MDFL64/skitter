@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::{
     closure::FnTrait,
     items::FunctionSig,
@@ -68,6 +70,12 @@ pub struct IRFunction<'vm> {
     pub params: Vec<PatternId>,
     exprs: Vec<Expr<'vm>>,
     patterns: Vec<Pattern<'vm>>,
+}
+
+impl<'vm> Debug for IRFunction<'vm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("IRFunction")
+    }
 }
 
 impl<'vm> IRFunction<'vm> {

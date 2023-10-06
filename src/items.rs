@@ -625,7 +625,7 @@ pub struct TraitImpl<'vm> {
     pub generics: GenericCounts,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AssocValue<'vm> {
     /// An item. Can be either a function or a constant.
     Item(ItemId),
@@ -636,7 +636,7 @@ pub enum AssocValue<'vm> {
 }
 
 /// This is a hack to get correct subs in closures.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum IRFlag {
     None,
     UseClosureSubs,

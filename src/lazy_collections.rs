@@ -180,7 +180,7 @@ where
             if bucket_keys.len() == 1 {
                 let item_index = bucket_keys[0].1;
                 table_1[bucket_i] = item_index as i32;
-                println!("> {:?} t1[{}]={}", bucket_keys[0].0, bucket_i, item_index);
+                //println!("> {:?} t1[{}]={}", bucket_keys[0].0, bucket_i, item_index);
             } else if bucket_keys.len() > 1 {
                 let mut seed = -1;
                 loop {
@@ -202,10 +202,10 @@ where
                     if new_indices.len() == bucket_keys.len() {
                         for (hash_index, item_index, key) in new_indices {
                             table_2[hash_index] = *item_index as i32;
-                            println!(
+                            /*println!(
                                 "> {:?} t1[{}]={} t2[{}]={}",
                                 key, bucket_i, seed, hash_index, item_index
-                            );
+                            );*/
                         }
                         table_1[bucket_i] = seed;
                         break;
@@ -242,7 +242,7 @@ where
         }
     }
 
-    pub fn get(&self, key: &T::Key) -> &T {
+    pub fn get(&self, key: &T::Key) -> Option<&T> {
         let t1_index = {
             let mut hasher = get_hasher(0);
             key.hash(&mut hasher);
@@ -252,6 +252,9 @@ where
 
         let final_index = if t1_index >= 0 {
             // fast path
+            if t1_index == TABLE_SLOT_INVALID {
+                return None;
+            }
             t1_index as usize
         } else {
             // slow path, seed a secondary hasher
@@ -267,9 +270,11 @@ where
         let item = self.array.get(final_index);
 
         let item_key = <T as LazyKey>::key(item);
-        assert!(item_key == Some(key));
+        if item_key != Some(key) {
+            return None;
+        }
 
-        item
+        Some(item)
     }
 }
 
