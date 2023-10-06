@@ -514,8 +514,12 @@ impl<'vm> Persist<'vm> for FunctionSig<'vm> {
 pub enum AdtKind<'vm> {
     Struct,
     Union,
-    EnumWithDiscriminant(Type<'vm>),
-    EnumNonZero,
+    Enum(EnumInfo<'vm>),
+}
+
+pub struct EnumInfo<'vm> {
+    pub discriminant_external: Type<'vm>,
+    pub discriminant_internal: Type<'vm>,
 }
 
 pub struct AdtInfo<'vm> {
@@ -526,8 +530,8 @@ pub struct AdtInfo<'vm> {
 impl<'vm> AdtInfo<'vm> {
     pub fn is_enum(&self) -> bool {
         match self.kind {
-            AdtKind::Struct | AdtKind::Union => false,
-            AdtKind::EnumNonZero | AdtKind::EnumWithDiscriminant(_) => true,
+            AdtKind::Enum(_) => true,
+            _ => false,
         }
     }
 
@@ -538,9 +542,9 @@ impl<'vm> AdtInfo<'vm> {
         }
     }
 
-    pub fn discriminant_ty(&self) -> Option<Type<'vm>> {
-        match self.kind {
-            AdtKind::EnumWithDiscriminant(ty) => Some(ty),
+    pub fn enum_info(&self) -> Option<&EnumInfo<'vm>> {
+        match &self.kind {
+            AdtKind::Enum(info) => Some(info),
             _ => None,
         }
     }
@@ -554,15 +558,13 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
             AdtKind::Struct => {
                 writer.write_byte(0);
             }
-            AdtKind::EnumWithDiscriminant(ty) => {
+            AdtKind::Enum(ref info) => {
                 writer.write_byte(1);
-                ty.persist_write(writer);
-            }
-            AdtKind::EnumNonZero => {
-                writer.write_byte(2);
+                info.discriminant_internal.persist_write(writer);
+                info.discriminant_external.persist_write(writer);
             }
             AdtKind::Union => {
-                writer.write_byte(3);
+                writer.write_byte(2);
             }
         }
     }
@@ -573,11 +575,14 @@ impl<'vm> Persist<'vm> for AdtInfo<'vm> {
         let kind = match reader.read_byte() {
             0 => AdtKind::Struct,
             1 => {
-                let ty = Persist::persist_read(reader);
-                AdtKind::EnumWithDiscriminant(ty)
+                let discriminant_internal = Persist::persist_read(reader);
+                let discriminant_external = Persist::persist_read(reader);
+                AdtKind::Enum(EnumInfo {
+                    discriminant_internal,
+                    discriminant_external,
+                })
             }
-            2 => AdtKind::EnumNonZero,
-            3 => AdtKind::Union,
+            2 => AdtKind::Union,
             _ => panic!(),
         };
 
@@ -905,7 +910,8 @@ impl<'vm> Item<'vm> {
         let result_val = mono_values.entry(subs.clone()).or_insert_with(|| {
             let (ir, new_subs) = self.ir(subs);
 
-            let bc = BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string());
+            let bc =
+                BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
             let const_thread = self.vm.make_thread();
             const_thread.run_bytecode(&bc, 0);
@@ -940,7 +946,8 @@ impl<'vm> Item<'vm> {
             }
             ItemKind::Constant { .. } => {
                 println!("TODO CLOSURE IN CONSTANT!");
-                self.vm.alloc_closure(self.crate_id, self.item_id, path_indices)
+                self.vm
+                    .alloc_closure(self.crate_id, self.item_id, path_indices)
             }
             _ => {
                 panic!("attempt to get child closure on {:?}", self)

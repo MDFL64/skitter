@@ -5,8 +5,9 @@ use ahash::AHashMap;
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::{CrateId, FunctionSig, ItemId},
+    persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
-    vm::{Function, FunctionSource, VM}, persist::Persist,
+    vm::{Function, FunctionSource, VM},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

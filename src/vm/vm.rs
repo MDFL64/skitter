@@ -66,6 +66,10 @@ pub struct VMThread<'vm> {
 
 impl<'vm> VMThread<'vm> {
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
+        /*{
+            let bytes: [u8;16] = unsafe { read_stack(self.stack.as_ptr() as *mut u8, Slot::new(stack_offset)) };
+            println!("enter {}{}: {:?}",func.source.debug_name(),func.subs,bytes);
+        }*/
         let native = func.get_native();
         if let Some(native) = native {
             unsafe {
@@ -78,6 +82,10 @@ impl<'vm> VMThread<'vm> {
         // fetch bytecode
         let bc = func.bytecode();
         self.run_bytecode(bc, stack_offset);
+        /*{
+            let bytes: [u8;16] = unsafe { read_stack(self.stack.as_ptr() as *mut u8, Slot::new(stack_offset)) };
+            println!("exit {}{}: {:?}",func.source.debug_name(),func.subs,bytes);
+        }*/
     }
 
     pub fn run_bytecode(&self, bc: &[Instr<'vm>], stack_offset: u32) {
@@ -344,7 +352,7 @@ impl<'vm> Function<'vm> {
             let (ir, new_subs) = self.source.ir(&self.subs);
             let path = self.source.debug_name();
 
-            let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path);
+            let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
             let bc_ref = vm.alloc_bytecode(bc);
 
             self.set_bytecode(bc_ref);

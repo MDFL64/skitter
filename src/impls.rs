@@ -62,7 +62,11 @@ pub trait ImplTable<'vm> {
 
     fn get_inherent_table(&self, full_key: &str) -> Option<&[InherentMember<'vm>]>;
 
-    fn get_trait_table(&self, trait_key: &TraitKey, type_key: Option<&'vm str>) -> Option<&[TraitValue<'vm>]>;
+    fn get_trait_table(
+        &self,
+        trait_key: &TraitKey,
+        type_key: Option<&'vm str>,
+    ) -> Option<&[TraitValue<'vm>]>;
 
     fn find_inherent(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
         if let Some(list) = self.get_inherent_table(full_key) {
@@ -88,7 +92,7 @@ pub trait ImplTable<'vm> {
 
         let type_key = for_tys.list[0].assert_ty().impl_key();
 
-        if let Some(list) = self.get_trait_table(&trait_key,type_key) {
+        if let Some(list) = self.get_trait_table(&trait_key, type_key) {
             for value in list {
                 let bounds = self.get_bounds(value.bounds_id);
                 if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
@@ -100,10 +104,10 @@ pub trait ImplTable<'vm> {
                 }
             }
         }
-        
+
         // retry with a 'None' key
         if type_key != None {
-            if let Some(list) = self.get_trait_table(&trait_key,None) {
+            if let Some(list) = self.get_trait_table(&trait_key, None) {
                 for value in list {
                     let bounds = self.get_bounds(value.bounds_id);
                     if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
@@ -217,7 +221,11 @@ impl<'vm> ImplTable<'vm> for ImplTableSimple<'vm> {
         }
     }
 
-    fn get_trait_table(&self, trait_key: &TraitKey, type_key: Option<&'vm str>) -> Option<&[TraitValue<'vm>]> {
+    fn get_trait_table(
+        &self,
+        trait_key: &TraitKey,
+        type_key: Option<&'vm str>,
+    ) -> Option<&[TraitValue<'vm>]> {
         if let Some(sub_table) = self.trait_table.get(trait_key) {
             if let Some(list) = sub_table.get(&type_key) {
                 return Some(list);

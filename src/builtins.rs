@@ -97,13 +97,13 @@ impl BuiltinTrait {
                 assert!(for_tys.list.len() == 1);
                 let ty = for_tys.list[0].assert_ty();
                 if ty.is_concrete() {
-                    if let Some(discrim_ty) = ty.adt_info().discriminant_ty() {
+                    if let Some(enum_info) = ty.adt_info().enum_info() {
                         return Some(trait_impl(
                             for_tys.clone(),
                             trait_item,
                             &[(
                                 ItemPath::for_type("Discriminant"),
-                                AssocValue::Type(discrim_ty),
+                                AssocValue::Type(enum_info.discriminant_external),
                             )],
                         ));
                     }
@@ -542,14 +542,34 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
-            let discriminant_ty = arg_ty
+            let enum_info = arg_ty
                 .adt_info()
-                .discriminant_ty()
-                .expect("missing discriminator type");
+                .enum_info()
+                .expect("attempt to get discriminant of non-enum");
+
+            let layout_external = enum_info.discriminant_external.layout();
+            let layout_internal = enum_info.discriminant_internal.layout();
+
+            if layout_internal.assert_size() > layout_external.assert_size() {
+                panic!("internal layout may not be larger than external");
+            }
 
             out_bc.push(
-                bytecode_select::copy_from_ptr(out_slot, arg_slots[0], discriminant_ty, 0).unwrap(),
+                bytecode_select::copy_from_ptr(
+                    out_slot,
+                    arg_slots[0],
+                    enum_info.discriminant_internal,
+                    0,
+                )
+                .unwrap(),
             );
+
+            if enum_info.discriminant_external != enum_info.discriminant_internal {
+                out_bc.push(bytecode_select::cast(
+                    enum_info.discriminant_internal,
+                    enum_info.discriminant_external,
+                )(out_slot, out_slot));
+            }
         }
         //""
         "const_eval_select" => {

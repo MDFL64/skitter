@@ -145,7 +145,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(33);
                 sig.persist_write(writer);
             }
-            TypeKind::Closure(closure,sig,subs) => {
+            TypeKind::Closure(closure, sig, subs) => {
                 writer.write_byte(34);
 
                 // TODO: a lot of this is likely redundant, and could be pulled from the closure def and subs
@@ -164,7 +164,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 // write subs
                 subs.persist_write(writer);
             }
-            TypeKind::Foreign(crate_id,path) => {
+            TypeKind::Foreign(crate_id, path) => {
                 writer.write_byte(35);
                 crate_id.persist_write(writer);
                 writer.write_str(path);

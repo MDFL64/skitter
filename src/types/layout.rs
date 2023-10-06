@@ -120,7 +120,9 @@ impl Layout {
                         .iter()
                         .map(|fields| fields.iter().map(|field| field.sub(subs)));
 
-                    Layout::compound(fixed_fields, info.discriminant_ty())
+                    let discriminant_ty = info.enum_info().map(|e| e.discriminant_internal);
+
+                    Layout::compound(fixed_fields, discriminant_ty)
                 }
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
@@ -135,13 +137,13 @@ impl Layout {
 
     fn compound<'vm>(
         variants: impl Iterator<Item = impl Iterator<Item = Type<'vm>>>,
-        discriminator_ty: Option<Type<'vm>>,
+        discriminant_ty: Option<Type<'vm>>,
     ) -> Self {
         let mut full_size = 0;
         let mut align = 1;
 
-        let base_size = if let Some(discriminator_ty) = discriminator_ty {
-            let dl = discriminator_ty.layout();
+        let base_size = if let Some(discriminant_ty) = discriminant_ty {
+            let dl = discriminant_ty.layout();
             align = dl.align;
             dl.assert_size()
         } else {

@@ -18,11 +18,12 @@ use rustc_session::config;
 use crate::{
     builtins::BuiltinTrait,
     crate_provider::{CrateProvider, TraitImplResult},
-    impls::{ImplBounds, ImplTableSimple, ImplTable},
+    impls::{ImplBounds, ImplTable, ImplTableSimple},
     ir::{converter::IRFunctionConverter, IRFunction},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
-        ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, TraitImpl,
+        EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath,
+        TraitImpl,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -514,8 +515,12 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 .collect();
 
             let kind = if adt_def.is_enum() {
-                let kind = TypeKind::Int(IntWidth::I32, IntSign::Unsigned);
-                AdtKind::EnumWithDiscriminant(vm.types.intern(kind, vm))
+                // unless specified, the external discriminant MUST be an isize,
+                // rustc makes some annoying assumptions when generating derive code
+                AdtKind::Enum(EnumInfo {
+                    discriminant_internal: vm.common_types().u32,
+                    discriminant_external: vm.common_types().isize,
+                })
             } else if adt_def.is_union() {
                 AdtKind::Union
             } else {

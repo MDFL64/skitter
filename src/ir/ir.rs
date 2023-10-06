@@ -98,12 +98,6 @@ impl<'vm> IRFunction<'vm> {
         PatternId(index as u32)
     }
 
-    pub fn print(&self) {
-        for (i, expr) in self.exprs.iter().enumerate() {
-            println!("{} {:?}", i, expr);
-        }
-    }
-
     pub fn iter_expr_ids(&self) -> impl Iterator<Item = ExprId> {
         (0..self.exprs.len()).map(|index| ExprId(index as u32))
     }

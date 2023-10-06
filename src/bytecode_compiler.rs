@@ -47,9 +47,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         ir: &'f IRFunction<'vm>,
         subs: &'f SubList<'vm>,
         path: &str,
+        original_subs: &'f SubList<'vm>,
     ) -> Vec<Instr<'vm>> {
         if vm.is_verbose {
-            println!("compiling {:?} for {}", path, subs);
+            println!("compiling {}{}", path, original_subs);
+            //ir.print();
         }
 
         let mut compiler = BytecodeCompiler {
@@ -819,8 +821,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Adt { variant, fields } => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                if let Some(discriminator_ty) = expr_ty.adt_info().discriminant_ty() {
-                    let dl = discriminator_ty.layout();
+                if let Some(enum_info) = expr_ty.adt_info().enum_info() {
+                    let dl = enum_info.discriminant_internal.layout();
                     self.out_bc.push(bytecode_select::literal(
                         *variant as i128,
                         dl.assert_size(),
@@ -1226,8 +1228,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let discriminant_ty = pat
                         .ty
                         .adt_info()
-                        .discriminant_ty()
-                        .expect("no discriminator type");
+                        .enum_info()
+                        .expect("not an enum?")
+                        .discriminant_internal;
+
                     let fake_pattern = Pattern {
                         kind: PatternKind::LiteralValue(*variant_index as i128),
                         ty: discriminant_ty,
