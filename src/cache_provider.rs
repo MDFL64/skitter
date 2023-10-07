@@ -117,6 +117,6 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
     }
 
     fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>> {
-        panic!("todo parse inherent impl");
+        self.impls.find_inherent(full_key, ty)
     }
 }

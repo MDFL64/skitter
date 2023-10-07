@@ -550,6 +550,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let loop_id = LoopId(Persist::persist_read(reader));
                 ExprKind::Loop(block, loop_id)
             }
+            'N' => {
+                let arg = Persist::persist_read(reader);
+                let size = Persist::persist_read(reader);
+                ExprKind::ArrayRepeat(arg, size)
+            }
             'R' => {
                 let e = Persist::persist_read(reader);
                 ExprKind::Return(e)
@@ -623,6 +628,14 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             '{' => {
                 let block = Persist::persist_read(reader);
                 ExprKind::Block(block)
+            }
+            '[' => {
+                let lhs = Persist::persist_read(reader);
+                let index = Persist::persist_read(reader);
+                ExprKind::Index{
+                    lhs,
+                    index
+                }
             }
             '(' => {
                 let args = Persist::persist_read(reader);
@@ -845,6 +858,21 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
             'R' => {
                 let sub_pattern = Persist::persist_read(reader);
                 PatternKind::DeRef { sub_pattern }
+            }
+            '|' => {
+                let options = Persist::persist_read(reader);
+                PatternKind::Or { options }
+            }
+            '.' => {
+                let start = Persist::persist_read(reader);
+                let end = Persist::persist_read(reader);
+                let end_is_inclusive = Persist::persist_read(reader);
+
+                PatternKind::Range {
+                    start,
+                    end,
+                    end_is_inclusive
+                }
             }
             '_' => PatternKind::Hole,
             _ => panic!("todo read pattern '{}'", c),

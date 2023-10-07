@@ -144,8 +144,8 @@ impl<'vm> VM<'vm> {
     pub fn make_thread(&'vm self) -> VMThread<'vm> {
         VMThread {
             vm: self,
-            // 64k stack
-            stack: vec![0; 4096],
+            // 1M stack
+            stack: vec![0; 65536],
         }
     }
 

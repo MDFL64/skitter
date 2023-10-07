@@ -242,7 +242,7 @@ where
         }
     }
 
-    pub fn get(&self, key: &T::Key) -> Option<&T> {
+    pub fn get<Q>(&self, key: &Q) -> Option<&T> where T::Key: Borrow<Q>, Q: Hash + Eq + ?Sized {
         let t1_index = {
             let mut hasher = get_hasher(0);
             key.hash(&mut hasher);
@@ -269,7 +269,7 @@ where
 
         let item = self.array.get(final_index);
 
-        let item_key = <T as LazyKey>::key(item);
+        let item_key = <T as LazyKey>::key(item).map(|key| key.borrow());
         if item_key != Some(key) {
             return None;
         }

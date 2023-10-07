@@ -179,9 +179,26 @@ pub struct ImplTableSimple<'vm> {
     bounds_table: Vec<ImplBounds<'vm>>,
 }
 
+#[derive(Debug,Clone)]
 struct InherentMember<'vm> {
     bounds_id: u32,
     value: AssocValue<'vm>,
+}
+
+impl<'vm> Persist<'vm> for InherentMember<'vm> {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let bounds_id = Persist::persist_read(reader);
+        let value = Persist::persist_read(reader);
+        Self {
+            bounds_id,
+            value
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.bounds_id.persist_write(writer);
+        self.value.persist_write(writer);
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -282,7 +299,47 @@ impl<'vm> Persist<'vm> for TraitKeyValue<'vm> {
     }
 }
 
+#[derive(Debug)]
+struct InherentKeyValue<'vm> {
+    key: String,
+    list: Vec<InherentMember<'vm>>
+}
 
+impl<'vm> LazyItem<'vm> for InherentKeyValue<'vm> {
+    type Input = Self;
+
+    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+        input
+    }
+}
+
+impl<'vm> LazyKey<'vm> for InherentKeyValue<'vm> {
+    type Key = String;
+
+    fn key(&self) -> Option<&Self::Key> {
+        Some(&self.key)
+    }
+
+    fn key_for_input(input: &Self::Input) -> Option<&Self::Key> {
+        Some(&input.key)
+    }
+}
+
+impl<'vm> Persist<'vm> for InherentKeyValue<'vm> {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let key = Persist::persist_read(reader);
+        let list = Persist::persist_read(reader);
+        InherentKeyValue{
+            key,
+            list
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.key.persist_write(writer);
+        self.list.persist_write(writer);
+    }
+}
 
 impl<'vm> ImplTableSimple<'vm> {
     pub fn new(crate_id: CrateId) -> Self {
@@ -338,6 +395,15 @@ impl<'vm> ImplTableSimple<'vm> {
         }).collect();
 
         LazyTable::<TraitKeyValue>::write(writer, trait_pairs.iter());
+
+        let inherent_pairs: Vec<_> = self.inherent_table.iter().map(|(k,v)| {
+            InherentKeyValue{
+                key: k.clone(),
+                list: v.clone()
+            }
+        }).collect();
+
+        LazyTable::<InherentKeyValue>::write(writer,inherent_pairs.iter());
     }
 }
 
@@ -376,17 +442,20 @@ pub struct ImplTableLazy<'vm> {
     crate_id: CrateId,
     bounds_table: LazyArray<'vm,ImplBounds<'vm>>,
     trait_table: LazyTable<'vm,TraitKeyValue<'vm>>,
+    inherent_table: LazyTable<'vm,InherentKeyValue<'vm>>
 }
 
 impl<'vm> ImplTableLazy<'vm> {
     pub fn new(reader: &mut PersistReader<'vm>) -> Self {
         let bounds_table = LazyArray::read(reader);
         let trait_table = LazyTable::read(reader);
+        let inherent_table = LazyTable::read(reader);
 
         Self {
             crate_id: reader.context.this_crate,
             bounds_table,
-            trait_table
+            trait_table,
+            inherent_table
         }
     }
 }
@@ -408,14 +477,15 @@ impl<'vm> ImplTable<'vm> for ImplTableLazy<'vm> {
         
         let key = (trait_key.clone(),type_key);
 
-        // todo this probably NEEDS to be optional
         self.trait_table.get(&key).map(|kv| {
             kv.value.as_slice()
         })
     }
 
     fn get_inherent_table(&self, full_key: &str) -> Option<&[InherentMember<'vm>]> {
-        panic!("I");
+        self.inherent_table.get(full_key).map(|kv| {
+            kv.list.as_slice()
+        })
     }
 }
 
