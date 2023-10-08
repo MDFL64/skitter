@@ -169,6 +169,11 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 crate_id.persist_write(writer);
                 writer.write_str(path);
             }
+            TypeKind::Opaque(item_with_subs,sub_id) => {
+                writer.write_byte(36);
+                item_with_subs.persist_write(writer);
+                sub_id.persist_write(writer);
+            }
 
             TypeKind::Param(n) => {
                 writer.write_byte(40);
@@ -177,7 +182,6 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
 
             //TypeKind::Closure(..) => writer.write_byte(252),
             TypeKind::Dynamic => writer.write_byte(254),
-            TypeKind::Opaque => writer.write_byte(255),
 
             _ => panic!("write type {:?}", self),
         }
@@ -254,6 +258,15 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let sig = Persist::persist_read(reader);
                 TypeKind::FunctionPointer(sig)
             }
+            34 => {
+                panic!("read closure");
+            }
+            35 => {
+                let crate_id = Persist::persist_read(reader);
+                let path = reader.read_str();
+                TypeKind::Foreign(crate_id, path)
+            }
+
 
             40 => {
                 let n = Persist::persist_read(reader);

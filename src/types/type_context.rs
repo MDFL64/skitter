@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use ahash::AHashMap;
 use rustc_hir::def_id::DefId;
+use rustc_hir::definitions::DefPathData;
 use rustc_middle::ty::{
     AliasKind, FloatTy, GenericArg, GenericArgKind, ImplSubject, IntTy, Ty, TyKind, UintTy,
 };
@@ -117,7 +118,11 @@ impl<'vm> TypeContext<'vm> {
                     let item_with_subs = self.def_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
                     TypeKind::AssociatedType(item_with_subs)
                 }
-                AliasKind::Opaque => TypeKind::Opaque,
+                AliasKind::Opaque => {
+                    let (parent_item,sub_id) = self.opaque_type_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
+
+                    TypeKind::Opaque(parent_item,sub_id)
+                }
                 AliasKind::Inherent => panic!("inherent alias?"),
             },
             TyKind::Foreign(did) => {
@@ -264,8 +269,6 @@ impl<'vm> TypeContext<'vm> {
         let mut def_path = ctx.tcx.def_path(did);
 
         loop {
-            use rustc_hir::definitions::DefPathData;
-
             let last = def_path.data.last().expect("closure missing parent");
 
             match last.data {
@@ -279,7 +282,7 @@ impl<'vm> TypeContext<'vm> {
             }
         }
 
-        // DEBUG
+        // sanity check
         {
             let check_path = ctx.tcx.def_path(did);
             assert!(def_path.data == check_path.data);
@@ -288,6 +291,38 @@ impl<'vm> TypeContext<'vm> {
         let parent_item = self.def_from_rustc(did, &[], ctx);
 
         parent_item.item.child_closure(path_indices)
+    }
+
+    /// This is similar to closure_from_rustc. Sadly we still need multiple path indices, since
+    /// impl types can be nested: impl T<S = impl U>
+    pub fn opaque_type_from_rustc<'tcx>(&'vm self,mut did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm, 'tcx>) -> (ItemWithSubs<'vm>,Vec<u32>) {
+        let mut path_indices = Vec::new();
+
+        let mut def_path = ctx.tcx.def_path(did);
+
+        loop {
+            let last = def_path.data.last().expect("closure missing parent");
+
+            match last.data {
+                DefPathData::ImplTrait => {
+                    path_indices.push(last.disambiguator);
+                    def_path.data.pop();
+                    did = ctx.tcx.parent(did);
+                }
+                DefPathData::ValueNs(_) => break,
+                d => panic!("closure resolve {:?}", d),
+            }
+        }
+
+        // sanity check
+        {
+            let check_path = ctx.tcx.def_path(did);
+            assert!(def_path.data == check_path.data);
+        }
+
+        let parent_item = self.def_from_rustc(did, args, ctx);
+
+        (parent_item,path_indices)
     }
 
     pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {

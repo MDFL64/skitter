@@ -39,6 +39,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
         root_expr: ExprId,
         is_constant: bool,
         params: Vec<PatternId>,
+        opaque_types: Vec<OpaqueTypeMapping<'vm>>,
     ) -> IRFunction<'vm> {
         let output = self.exprs[root_expr.0 as usize].ty;
         let inputs = params
@@ -56,6 +57,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
             root_expr,
             exprs: self.exprs,
             patterns: self.patterns,
+            opaque_types
         }
     }
 }
@@ -68,6 +70,7 @@ pub struct IRFunction<'vm> {
     pub closure_kind: Option<FnTrait>,
     pub root_expr: ExprId,
     pub params: Vec<PatternId>,
+    pub opaque_types: Vec<OpaqueTypeMapping<'vm>>,
     exprs: Vec<Expr<'vm>>,
     patterns: Vec<Pattern<'vm>>,
 }
@@ -97,6 +100,7 @@ impl<'vm> IRFunction<'vm> {
             params: self.params.clone(),
             exprs: self.exprs.clone(),
             patterns: self.patterns.clone(),
+            opaque_types: self.opaque_types.clone()
         }
     }
 
@@ -376,6 +380,8 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
             params,
             exprs,
             patterns,
+
+            opaque_types: vec!()
         }
     }
 
@@ -392,6 +398,8 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
 
         self.exprs.persist_write(writer);
         self.patterns.persist_write(writer);
+
+        assert!(self.opaque_types.len() == 0);
     }
 }
 
@@ -1056,4 +1064,11 @@ impl<'vm> Persist<'vm> for PointerCast {
         };
         writer.write_byte(b);
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct OpaqueTypeMapping<'vm> {
+    pub source_item: ItemWithSubs<'vm>,
+    pub source_path_indices: Vec<u32>,
+    pub destination_ty: Type<'vm>
 }

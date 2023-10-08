@@ -1119,6 +1119,7 @@ pub fn path_from_rustc<'vm>(
     vm: &'vm VM<'vm>,
 ) -> ItemPath<'vm> {
     use rustc_hir::definitions::DefPathData;
+    use std::fmt::Write;
 
     let mut result = String::new();
 

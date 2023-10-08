@@ -36,13 +36,16 @@ pub enum TypeKind<'vm> {
     AssociatedType(ItemWithSubs<'vm>),
 
     // stores it's own def path
+    // these are implemented as items in rustc
+    // we currently skip them, but it might be nicer just to have consistency with most other types
     Foreign(CrateId, &'vm str),
 
-    // not properly implemented yet
-    Opaque,
-    Dynamic,
+    Opaque(ItemWithSubs<'vm>,Vec<u32>),
     FunctionPointer(FunctionSig<'vm>),
     Closure(&'vm Closure<'vm>, ClosureSig<'vm>, SubList<'vm>),
+
+    // not properly implemented yet
+    Dynamic,
 
     Param(u32),
     Unknown, //Error
@@ -237,6 +240,34 @@ impl<'vm> Type<'vm> {
 
                 vm.types.intern(TypeKind::FunctionPointer(new_sig), vm)
             }
+
+            TypeKind::Opaque(item_with_subs,path_indices) => {
+
+                let new_subs = item_with_subs.subs.sub(subs);
+
+                //println!("new subs {}",new_subs);
+
+                let (ir,ir_subs) = item_with_subs.item.ir(&new_subs);
+
+                for candidate in ir.opaque_types.iter() {
+                    // TODO is this always true?
+                    assert!(candidate.source_item.item == item_with_subs.item);
+                    
+                    if candidate.source_path_indices == *path_indices {
+                        let final_subs = candidate.source_item.subs.sub(&ir_subs);
+
+                        // TODO just use new_subs if this assumption is correct
+                        assert_eq!(final_subs,new_subs);
+
+                        let res = candidate.destination_ty.sub(&final_subs);
+                        //println!("res = {}",res);
+                        return res;
+                    }
+                }
+
+                panic!("failed to lookup opaque type");
+            }
+
             // These types never accept subs.
             TypeKind::Never
             | TypeKind::Int(..)
@@ -431,6 +462,10 @@ impl<'vm> Display for Type<'vm> {
                 (IntWidth::I128, IntSign::Unsigned) => write!(f, "u128"),
                 (IntWidth::ISize, IntSign::Unsigned) => write!(f, "usize"),
             },
+            TypeKind::Float(width) => match width {
+                FloatWidth::F32 => write!(f, "f32"),
+                FloatWidth::F64 => write!(f, "f64")
+            }
             TypeKind::StringSlice => {
                 write!(f, "str")
             }
