@@ -242,7 +242,11 @@ where
         }
     }
 
-    pub fn get<Q>(&self, key: &Q) -> Option<&T> where T::Key: Borrow<Q>, Q: Hash + Eq + ?Sized {
+    pub fn get<Q>(&self, key: &Q) -> Option<&T>
+    where
+        T::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let t1_index = {
             let mut hasher = get_hasher(0);
             key.hash(&mut hasher);

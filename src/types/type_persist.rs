@@ -169,7 +169,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 crate_id.persist_write(writer);
                 writer.write_str(path);
             }
-            TypeKind::Opaque(item_with_subs,sub_id) => {
+            TypeKind::Opaque(item_with_subs, sub_id) => {
                 writer.write_byte(36);
                 item_with_subs.persist_write(writer);
                 sub_id.persist_write(writer);
@@ -266,7 +266,6 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let path = reader.read_str();
                 TypeKind::Foreign(crate_id, path)
             }
-
 
             40 => {
                 let n = Persist::persist_read(reader);

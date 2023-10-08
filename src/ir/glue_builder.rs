@@ -86,7 +86,7 @@ pub fn glue_for_fn_trait<'vm>(
         ty: res_ty,
     });
 
-    builder.finish(root_expr, false, params, vec!())
+    builder.finish(root_expr, false, params, vec![])
 }
 
 pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) -> IRFunction<'vm> {
@@ -132,5 +132,5 @@ pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) ->
         ty: adt_ty,
     });
 
-    builder.finish(struct_expr, is_constant, params, vec!())
+    builder.finish(struct_expr, is_constant, params, vec![])
 }

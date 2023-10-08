@@ -6,8 +6,9 @@ use std::str::FromStr;
 
 use crate::{
     closure::ClosureSig,
+    ir::OpaqueTypeMapping,
     rustc_worker::RustCContext,
-    types::{FloatWidth, Mutability, Sub, Type, TypeKind}, ir::OpaqueTypeMapping,
+    types::{FloatWidth, Mutability, Sub, Type, TypeKind},
 };
 
 use super::{
@@ -38,17 +39,24 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         //println!("func = {:?}",func_id);
         assert!(body.generator_kind.is_none());
 
-        let opaque_types = types.concrete_opaque_types.iter().map(|(key,val)| {
-            let (item,path_indices) = ctx.vm.types.opaque_type_from_rustc(key.def_id.into(), key.substs, ctx);
-            
-            let destination_ty = ctx.type_from_rustc(val.ty);
+        let opaque_types = types
+            .concrete_opaque_types
+            .iter()
+            .map(|(key, val)| {
+                let (item, path_indices) =
+                    ctx.vm
+                        .types
+                        .opaque_type_from_rustc(key.def_id.into(), key.substs, ctx);
 
-            OpaqueTypeMapping{
-                source_item: item,
-                source_path_indices: path_indices,
-                destination_ty
-            }
-        }).collect();
+                let destination_ty = ctx.type_from_rustc(val.ty);
+
+                OpaqueTypeMapping {
+                    source_item: item,
+                    source_path_indices: path_indices,
+                    destination_ty,
+                }
+            })
+            .collect();
 
         let mut converter = Self {
             ctx,
@@ -66,7 +74,9 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
         let root_expr = converter.expr(body.value);
 
-        converter.builder.finish(root_expr, is_constant, params, opaque_types)
+        converter
+            .builder
+            .finish(root_expr, is_constant, params, opaque_types)
     }
 
     /// Convert binary op from rust IR. Does not handle logical ops.

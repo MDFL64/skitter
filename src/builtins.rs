@@ -811,6 +811,23 @@ pub fn compile_rust_intrinsic<'vm>(
             let (ctor, _) = bytecode_select::binary(BinaryOp::ShiftR, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
         }
+        // icky float intrinsics which aren't generic
+        "minnumf32" => {
+            assert!(arg_slots.len() == 2);
+            out_bc.push(Instr::F32_Min(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "maxnumf32" => {
+            assert!(arg_slots.len() == 2);
+            out_bc.push(Instr::F32_Max(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "minnumf64" => {
+            assert!(arg_slots.len() == 2);
+            out_bc.push(Instr::F64_Min(out_slot, arg_slots[0], arg_slots[1]));
+        }
+        "maxnumf64" => {
+            assert!(arg_slots.len() == 2);
+            out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
+        }
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);
         }

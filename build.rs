@@ -257,6 +257,9 @@ fn write_float_ops(ty: &str, source: &mut String) {
     write_binary(&format!("{}_LtEq", big), ty, "a <= b", source);
     write_binary(&format!("{}_Gt", big), ty, "a > b", source);
     write_binary(&format!("{}_GtEq", big), ty, "a >= b", source);
+
+    write_binary(&format!("{}_Min", big), ty, "a.min(b)", source);
+    write_binary(&format!("{}_Max", big), ty, "a.max(b)", source);
 }
 
 fn write_exec_match() {

@@ -119,9 +119,10 @@ impl<'vm> TypeContext<'vm> {
                     TypeKind::AssociatedType(item_with_subs)
                 }
                 AliasKind::Opaque => {
-                    let (parent_item,sub_id) = self.opaque_type_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
+                    let (parent_item, sub_id) =
+                        self.opaque_type_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
 
-                    TypeKind::Opaque(parent_item,sub_id)
+                    TypeKind::Opaque(parent_item, sub_id)
                 }
                 AliasKind::Inherent => panic!("inherent alias?"),
             },
@@ -295,7 +296,12 @@ impl<'vm> TypeContext<'vm> {
 
     /// This is similar to closure_from_rustc. Sadly we still need multiple path indices, since
     /// impl types can be nested: impl T<S = impl U>
-    pub fn opaque_type_from_rustc<'tcx>(&'vm self,mut did: DefId, args: &[GenericArg<'tcx>], ctx: &RustCContext<'vm, 'tcx>) -> (ItemWithSubs<'vm>,Vec<u32>) {
+    pub fn opaque_type_from_rustc<'tcx>(
+        &'vm self,
+        mut did: DefId,
+        args: &[GenericArg<'tcx>],
+        ctx: &RustCContext<'vm, 'tcx>,
+    ) -> (ItemWithSubs<'vm>, Vec<u32>) {
         let mut path_indices = Vec::new();
 
         let mut def_path = ctx.tcx.def_path(did);
@@ -322,7 +328,7 @@ impl<'vm> TypeContext<'vm> {
 
         let parent_item = self.def_from_rustc(did, args, ctx);
 
-        (parent_item,path_indices)
+        (parent_item, path_indices)
     }
 
     pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {

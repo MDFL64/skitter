@@ -365,6 +365,12 @@ pub enum Instr<'vm> {
     I32_RotateRight(Slot, Slot, Slot),
     I64_RotateRight(Slot, Slot, Slot),
     I128_RotateRight(Slot, Slot, Slot),
+
+    F32_Min(Slot, Slot, Slot),
+    F64_Min(Slot, Slot, Slot),
+
+    F32_Max(Slot, Slot, Slot),
+    F64_Max(Slot, Slot, Slot),
 }
 
 /* This used to be used to setup call frames, but it was buggy. Probably best to stop using it.

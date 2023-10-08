@@ -57,7 +57,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
             root_expr,
             exprs: self.exprs,
             patterns: self.patterns,
-            opaque_types
+            opaque_types,
         }
     }
 }
@@ -100,7 +100,7 @@ impl<'vm> IRFunction<'vm> {
             params: self.params.clone(),
             exprs: self.exprs.clone(),
             patterns: self.patterns.clone(),
-            opaque_types: self.opaque_types.clone()
+            opaque_types: self.opaque_types.clone(),
         }
     }
 
@@ -383,7 +383,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
             exprs,
             patterns,
 
-            opaque_types
+            opaque_types,
         }
     }
 
@@ -642,10 +642,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             '[' => {
                 let lhs = Persist::persist_read(reader);
                 let index = Persist::persist_read(reader);
-                ExprKind::Index{
-                    lhs,
-                    index
-                }
+                ExprKind::Index { lhs, index }
             }
             '(' => {
                 let args = Persist::persist_read(reader);
@@ -881,7 +878,7 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 PatternKind::Range {
                     start,
                     end,
-                    end_is_inclusive
+                    end_is_inclusive,
                 }
             }
             '_' => PatternKind::Hole,
@@ -1072,7 +1069,7 @@ impl<'vm> Persist<'vm> for PointerCast {
 pub struct OpaqueTypeMapping<'vm> {
     pub source_item: ItemWithSubs<'vm>,
     pub source_path_indices: Vec<u32>,
-    pub destination_ty: Type<'vm>
+    pub destination_ty: Type<'vm>,
 }
 
 impl<'vm> Persist<'vm> for OpaqueTypeMapping<'vm> {

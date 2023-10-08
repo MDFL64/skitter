@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     crate_provider::{CrateProvider, TraitImplResult},
+    impls::{ImplTable, ImplTableLazy},
     ir::IRFunction,
     items::{AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
     lazy_collections::{LazyArray, LazyTable},
@@ -15,12 +16,12 @@ use crate::{
     profiler::profile,
     types::{SubList, Type},
     vm::VM,
-    CratePath, impls::{ImplTableLazy, ImplTable},
+    CratePath,
 };
 
 pub struct CacheProvider<'vm> {
     read_context: Arc<PersistReadContext<'vm>>,
-    impls: ImplTableLazy<'vm>
+    impls: ImplTableLazy<'vm>,
 }
 
 impl<'vm> CacheProvider<'vm> {
@@ -67,7 +68,7 @@ impl<'vm> CacheProvider<'vm> {
 
         Ok(Self {
             read_context,
-            impls
+            impls,
         })
     }
 }
