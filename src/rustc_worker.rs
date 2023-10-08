@@ -617,7 +617,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                             .impl_key()
                             .expect("inherent impls should always have a valid key")
                             .to_owned();
-                        full_key.push_str(":");
+                        full_key.push_str("::");
                         full_key.push_str(&member_key);
 
                         impls.add_inherent(full_key, bounds_id, val);
@@ -831,7 +831,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         let ty_key = ty
             .impl_key()
             .expect("inherent impls must have a valid impl key!");
-        let full_key = format!("{}:{}", ty_key, member_key);
+        let full_key = format!("{}::{}", ty_key, member_key);
 
         let impls = self.items.impls.get().expect("could not get impls");
         impls.find_inherent(&full_key, ty)

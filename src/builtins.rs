@@ -661,6 +661,56 @@ pub fn compile_rust_intrinsic<'vm>(
                 _ => panic!("can't cttz {}", arg_ty),
             }
         }
+        "bitreverse" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg_slot = arg_slots[0];
+
+            match arg_ty.layout().assert_size() {
+                1 => out_bc.push(Instr::I8_ReverseBits(out_slot, arg_slot)),
+                2 => out_bc.push(Instr::I16_ReverseBits(out_slot, arg_slot)),
+                4 => out_bc.push(Instr::I32_ReverseBits(out_slot, arg_slot)),
+                8 => out_bc.push(Instr::I64_ReverseBits(out_slot, arg_slot)),
+                16 => out_bc.push(Instr::I128_ReverseBits(out_slot, arg_slot)),
+                _ => panic!("can't ctpop {}", arg_ty),
+            }
+        }
+        "rotate_left" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg1 = arg_slots[0];
+            let arg2 = arg_slots[1];
+
+            match arg_ty.layout().assert_size() {
+                1 => out_bc.push(Instr::I8_RotateLeft(out_slot, arg1, arg2)),
+                2 => out_bc.push(Instr::I16_RotateLeft(out_slot, arg1, arg2)),
+                4 => out_bc.push(Instr::I32_RotateLeft(out_slot, arg1, arg2)),
+                8 => out_bc.push(Instr::I64_RotateLeft(out_slot, arg1, arg2)),
+                16 => out_bc.push(Instr::I128_RotateLeft(out_slot, arg1, arg2)),
+                _ => panic!("can't ctpop {}", arg_ty),
+            }
+        }
+        "rotate_right" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg1 = arg_slots[0];
+            let arg2 = arg_slots[1];
+
+            match arg_ty.layout().assert_size() {
+                1 => out_bc.push(Instr::I8_RotateRight(out_slot, arg1, arg2)),
+                2 => out_bc.push(Instr::I16_RotateRight(out_slot, arg1, arg2)),
+                4 => out_bc.push(Instr::I32_RotateRight(out_slot, arg1, arg2)),
+                8 => out_bc.push(Instr::I64_RotateRight(out_slot, arg1, arg2)),
+                16 => out_bc.push(Instr::I128_RotateRight(out_slot, arg1, arg2)),
+                _ => panic!("can't ctpop {}", arg_ty),
+            }
+        }
         "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
         }

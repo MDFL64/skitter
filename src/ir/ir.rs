@@ -368,6 +368,8 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         let exprs = Persist::persist_read(reader);
         let patterns = Persist::persist_read(reader);
 
+        let opaque_types = Persist::persist_read(reader);
+
         IRFunction {
             sig: FunctionSig {
                 inputs: sig_inputs,
@@ -381,7 +383,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
             exprs,
             patterns,
 
-            opaque_types: vec!()
+            opaque_types
         }
     }
 
@@ -399,7 +401,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         self.exprs.persist_write(writer);
         self.patterns.persist_write(writer);
 
-        assert!(self.opaque_types.len() == 0);
+        self.opaque_types.persist_write(writer);
     }
 }
 
@@ -1071,4 +1073,16 @@ pub struct OpaqueTypeMapping<'vm> {
     pub source_item: ItemWithSubs<'vm>,
     pub source_path_indices: Vec<u32>,
     pub destination_ty: Type<'vm>
+}
+
+impl<'vm> Persist<'vm> for OpaqueTypeMapping<'vm> {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        panic!("read opaque type mapping");
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.source_item.persist_write(writer);
+        self.source_path_indices.persist_write(writer);
+        self.destination_ty.persist_write(writer);
+    }
 }

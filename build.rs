@@ -220,6 +220,25 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "x.count_ones()",
         source,
     );
+    write_unary(
+        &format!("{}_ReverseBits", big),
+        unsigned,
+        "x.reverse_bits()",
+        source,
+    );
+
+    write_binary(
+        &format!("{}_RotateLeft", big),
+        unsigned,
+        "a.rotate_left(b as u32)",
+        source,
+    );
+    write_binary(
+        &format!("{}_RotateRight", big),
+        unsigned,
+        "a.rotate_right(b as u32)",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {

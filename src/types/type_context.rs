@@ -226,7 +226,7 @@ impl<'vm> TypeContext<'vm> {
                         let ty_key = ty
                             .impl_key()
                             .expect("inherent impls must have a valid impl key!");
-                        let full_key = format!("{}:{}", ty_key, ident.as_str());
+                        let full_key = format!("{}::{}", ty_key, ident.as_str());
 
                         let candidate_crate_ids = find_inherent_impl_crate(ty);
 

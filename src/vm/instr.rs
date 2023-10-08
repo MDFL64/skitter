@@ -347,7 +347,27 @@ pub enum Instr<'vm> {
     I32_TrailingZeros(Slot, Slot),
     I64_TrailingZeros(Slot, Slot),
     I128_TrailingZeros(Slot, Slot),
+
+    I8_ReverseBits(Slot, Slot),
+    I16_ReverseBits(Slot, Slot),
+    I32_ReverseBits(Slot, Slot),
+    I64_ReverseBits(Slot, Slot),
+    I128_ReverseBits(Slot, Slot),
+
+    I8_RotateLeft(Slot, Slot, Slot),
+    I16_RotateLeft(Slot, Slot, Slot),
+    I32_RotateLeft(Slot, Slot, Slot),
+    I64_RotateLeft(Slot, Slot, Slot),
+    I128_RotateLeft(Slot, Slot, Slot),
+
+    I8_RotateRight(Slot, Slot, Slot),
+    I16_RotateRight(Slot, Slot, Slot),
+    I32_RotateRight(Slot, Slot, Slot),
+    I64_RotateRight(Slot, Slot, Slot),
+    I128_RotateRight(Slot, Slot, Slot),
 }
+
+/* This used to be used to setup call frames, but it was buggy. Probably best to stop using it.
 
 impl<'vm> Instr<'vm> {
     pub fn replace_arg_sub(&mut self, call_slot: Slot) {
@@ -632,3 +652,4 @@ impl<'vm> Instr<'vm> {
         }
     }
 }
+*/

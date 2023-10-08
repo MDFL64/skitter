@@ -13,6 +13,11 @@ pub fn main() {
     let c = (7i32).pow(10);
     _builtin::print_int(c as _);
 
+    _builtin::print_int((a).div_euclid(5) as _);
+    _builtin::print_int((a).div_euclid(-5) as _);
+    _builtin::print_int((-a).div_euclid(5) as _);
+    _builtin::print_int((-a).div_euclid(-5) as _);
+
     _builtin::print_int(a.swap_bytes() as _);
 
     let bytes = c.to_le_bytes();
@@ -39,10 +44,14 @@ pub fn main() {
 
     _builtin::print_int((123i32).ilog10() as _);
     _builtin::print_int((456789i32).ilog10() as _);
-    //let min = a.min(b);
+    
+    _builtin::print_int(a.min(b) as _);
+    _builtin::print_int(a.max(b) as _);
 
-    //let c = a.count_zeros();
+    _builtin::print_int(a.count_zeros() as _);
+    _builtin::print_int(a.count_ones() as _);
 
-    //let e = (5i32).reverse_bits();
-    //let f = (2i32).rotate_left(5);
+    _builtin::print_int(a.reverse_bits() as _);
+    _builtin::print_int(a.rotate_left(5) as _);
+    _builtin::print_int(a.rotate_right(5) as _);
 }
