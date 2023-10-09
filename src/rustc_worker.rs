@@ -606,10 +606,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             match impl_item.subject {
                 ImplSubject::Inherent(_) => {
-                    if key_ty.kind().is_dummy() {
-                        continue;
-                    }
-
                     assert!(impl_item.assoc_tys.len() == 0);
 
                     for (member_key, val) in impl_item.assoc_values {

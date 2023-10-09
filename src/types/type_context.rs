@@ -12,7 +12,7 @@ use crate::{
     impls::find_inherent_impl_crate,
     items::{path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
-    types::Sub,
+    types::{AutoTraitSet, Sub},
     vm::VM,
 };
 
@@ -133,7 +133,45 @@ impl<'vm> TypeContext<'vm> {
                 let crate_id = ctx.find_crate_id(did.krate);
                 TypeKind::Foreign(crate_id, foreign_path.as_string())
             }
-            TyKind::Dynamic(..) => TypeKind::Dynamic,
+            TyKind::Dynamic(list, _, kind) => {
+                use rustc_middle::ty::{DynKind, ExistentialPredicate};
+
+                let is_dyn_star = match kind {
+                    DynKind::Dyn => false,
+                    DynKind::DynStar => true,
+                };
+
+                let mut primary_trait = None;
+                let auto_traits = AutoTraitSet::EMPTY;
+
+                for item in list.iter() {
+                    match item.skip_binder() {
+                        ExistentialPredicate::Trait(trait_ref) => {
+                            if primary_trait.is_some() {
+                                panic!("multiple primary traits on dyn");
+                            }
+
+                            let item = self.def_from_rustc(trait_ref.def_id, trait_ref.substs, ctx);
+
+                            primary_trait = Some(item);
+                        }
+                        ExistentialPredicate::Projection(x) => {
+                            panic!("Projection on dyn?");
+                        }
+                        ExistentialPredicate::AutoTrait(did) => {
+                            panic!("auto trait");
+                        }
+                    }
+                }
+
+                let primary_trait = primary_trait.expect("no primary trait on dyn");
+
+                TypeKind::Dynamic {
+                    primary_trait,
+                    auto_traits,
+                    is_dyn_star,
+                }
+            }
             TyKind::FnPtr(rs_sig) => {
                 let sig = FunctionSig::from_rustc(&rs_sig.skip_binder(), ctx);
                 TypeKind::FunctionPointer(sig)

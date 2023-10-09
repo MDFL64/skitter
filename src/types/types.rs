@@ -4,7 +4,7 @@ use ahash::AHashMap;
 
 use crate::{
     closure::{Closure, ClosureSig},
-    items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item},
+    items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item, ItemId},
     persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter},
     vm::VM,
 };
@@ -45,19 +45,14 @@ pub enum TypeKind<'vm> {
     Closure(&'vm Closure<'vm>, ClosureSig<'vm>, SubList<'vm>),
 
     // not properly implemented yet
-    Dynamic,
+    Dynamic {
+        primary_trait: ItemWithSubs<'vm>,
+        auto_traits: AutoTraitSet,
+        is_dyn_star: bool,
+    },
 
     Param(u32),
     Unknown, //Error
-}
-
-impl<'vm> TypeKind<'vm> {
-    pub fn is_dummy(&self) -> bool {
-        match self {
-            TypeKind::Dynamic => true,
-            _ => false,
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -149,8 +144,39 @@ impl<'vm> Type<'vm> {
     pub fn is_sized(&self) -> bool {
         match self.kind() {
             TypeKind::Slice(_) | TypeKind::StringSlice => false,
+            TypeKind::Dynamic { is_dyn_star, .. } => {
+                assert!(!is_dyn_star);
+                false
+            }
             _ => true,
         }
+    }
+
+    pub fn is_dyn_receiver(&self, trait_crate: CrateId, trait_id: ItemId) -> bool {
+        if let TypeKind::Dynamic {
+            primary_trait,
+            is_dyn_star,
+            ..
+        } = self.kind()
+        {
+            assert!(!is_dyn_star);
+            if primary_trait.item.crate_id == trait_crate && primary_trait.item.item_id == trait_id
+            {
+                return true;
+            }
+        }
+        /*match self.kind() {
+            TypeKind::Ref(child,_) => {
+                if let TypeKind::Dynamic { primary_trait, is_dyn_star, .. } = child.kind() {
+                    assert!(!is_dyn_star);
+                    if primary_trait.item == for_trait {
+                        return true;
+                    }
+                }
+            }
+            _ => ()
+        }*/
+        false
     }
 
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
@@ -239,6 +265,17 @@ impl<'vm> Type<'vm> {
                 let new_sig = sig.sub(subs);
 
                 vm.types.intern(TypeKind::FunctionPointer(new_sig), vm)
+            }
+
+            TypeKind::Dynamic {
+                primary_trait,
+                auto_traits,
+                is_dyn_star,
+            } => {
+                assert!(!is_dyn_star);
+                assert!(primary_trait.subs.list.len() == 0);
+
+                *self
             }
 
             TypeKind::Opaque(item_with_subs, path_indices) => {
@@ -343,6 +380,8 @@ impl<'vm> Type<'vm> {
             TypeKind::Ptr(..) => false,
             // how would we even handle this? assume not
             TypeKind::Slice(..) => false,
+            // TODO? assume true?
+            TypeKind::Dynamic { .. } => true,
             _ => panic!("is_interior_mut? {}", self),
         }
     }
@@ -374,7 +413,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Ptr(..) => Some("@ptr"),
             // TODO impls on refs may be common enough to special-case
             TypeKind::Ref(..) => Some("@ref"),
-            TypeKind::Dynamic => Some("@dyn"),
+            TypeKind::Dynamic { .. } => Some("@dyn"),
 
             TypeKind::Adt(item) => Some(item.item.path.as_string()),
 
@@ -480,5 +519,22 @@ impl<'vm> Display for Type<'vm> {
                 write!(f, "{:?}", self)
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AutoTraitSet(u16);
+
+impl AutoTraitSet {
+    pub const EMPTY: AutoTraitSet = AutoTraitSet(0);
+}
+
+impl<'vm> Persist<'vm> for AutoTraitSet {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        Self(Persist::persist_read(reader))
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.0.persist_write(writer);
     }
 }

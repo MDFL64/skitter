@@ -324,6 +324,8 @@ pub enum Instr<'vm> {
         func_ptr: Slot,
     },
 
+    VTableFunc(Slot, Slot, u32),
+
     Return,
     Bad,
     Debug(Box<String>),

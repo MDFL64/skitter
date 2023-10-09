@@ -115,7 +115,8 @@ impl BuiltinTrait {
                 let ty = for_tys.list[0].assert_ty();
                 let metadata_ty = match ty.kind() {
                     TypeKind::Slice(_) | TypeKind::StringSlice => vm.common_types().usize,
-                    TypeKind::Dynamic => {
+                    TypeKind::Dynamic { is_dyn_star, .. } => {
+                        assert!(!is_dyn_star);
                         panic!("pointee dynamic");
                     }
                     _ => {
@@ -460,7 +461,7 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let arg_ty = subs.list[0].assert_ty();
 
-            if let TypeKind::Dynamic = arg_ty.kind() {
+            if let TypeKind::Dynamic { .. } = arg_ty.kind() {
                 // it may be best to just force alignment to the max for these cases and use that compile-time value
                 panic!("todo, trait objects may have alignment only decidable at run-time");
             } else {

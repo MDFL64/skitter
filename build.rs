@@ -414,6 +414,11 @@ fn write_exec_match() {
         let func: &Function = read_stack(stack, *func_ptr);
         self.call(func,stack_offset + frame.index() as u32);
     }
+    Instr::VTableFunc(out,arg,index) => {
+        let vtable: &VTable = read_stack(stack, *arg);
+        let func = vtable.methods[*index as usize].expect("no method in vtable");
+        write_stack(stack, *out, func);
+    }
     Instr::SlotAddr(out,arg) => {
         let res = stack.add(arg.index()) as usize;
         write_stack(stack, *out, res);

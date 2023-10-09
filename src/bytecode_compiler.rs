@@ -392,6 +392,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     if let Some((FunctionAbi::RustIntrinsic, extern_name)) =
                         func_ref.item.func_extern()
                     {
+                        // inline rust intrinsics
                         let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                         let arg_slots =
@@ -409,10 +410,41 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         dst_slot
                     } else {
-                        let ret_slot = self.build_call(expr_ty, args);
+                        let ret_slot = if let Some(vtable_index) =
+                            func_ref.item.is_function_dyn(&func_ref.subs)
+                        {
+                            // special case for virtual functions
 
-                        let func = func_ref.item.func_mono(&func_ref.subs);
-                        self.out_bc.push(Instr::Call(ret_slot, func));
+                            let (receiver_ptr, vtable_ptr) = {
+                                let arg_ty = self.expr_ty(args[0]);
+                                assert!(arg_ty.layout().assert_size() == POINTER_SIZE.bytes() * 2);
+                                let receiver = self.lower_expr(args[0], None);
+                                (receiver, receiver.offset_by(POINTER_SIZE.bytes()))
+                            };
+
+                            let func_ptr = self.stack.alloc(self.vm.common_types().usize);
+
+                            self.out_bc
+                                .push(Instr::VTableFunc(func_ptr, vtable_ptr, vtable_index));
+
+                            let ret_slot = self.build_call(expr_ty, args, Some(receiver_ptr));
+
+                            self.out_bc.push(Instr::CallPtr {
+                                frame: ret_slot,
+                                func_ptr,
+                            });
+
+                            ret_slot
+                        } else {
+                            // normal function calls
+                            let ret_slot = self.build_call(expr_ty, args, None);
+
+                            let func = func_ref.item.func_mono(&func_ref.subs);
+                            self.out_bc.push(Instr::Call(ret_slot, func));
+
+                            ret_slot
+                        };
+
                         if let Some(dst_slot) = dst_slot {
                             if let Some(instr) = bytecode_select::copy(dst_slot, ret_slot, expr_ty)
                             {
@@ -424,7 +456,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
                 } else if let TypeKind::FunctionPointer(_) = ty.kind() {
-                    let ret_slot = self.build_call(expr_ty, args);
+                    let ret_slot = self.build_call(expr_ty, args, None);
 
                     let func_slot = self.lower_expr(*func, None);
 
@@ -688,17 +720,46 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     PointerCast::UnSize => {
                         assert_eq!(expr_ty.layout().assert_size(), POINTER_SIZE.bytes() * 2);
 
-                        let src_ty = self.expr_ty(*source);
+                        //let src_ty = self.expr_ty(*source);
 
-                        let src_kind = match src_ty.kind() {
-                            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => ref_ty.kind(),
+                        let src_ty = match self.expr_ty(*source).kind() {
+                            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
                             _ => panic!(),
                         };
 
-                        let meta = match src_kind {
+                        let dst_ty = match expr_ty.kind() {
+                            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
+                            _ => panic!(),
+                        };
+
+                        let meta = match (src_ty.kind(), dst_ty.kind()) {
+                            (TypeKind::Array(_, elem_count), TypeKind::Slice(_)) => {
+                                elem_count.assert_static() as usize
+                            }
+                            (
+                                _,
+                                TypeKind::Dynamic {
+                                    primary_trait,
+                                    is_dyn_star,
+                                    ..
+                                },
+                            ) => {
+                                assert!(!is_dyn_star);
+                                assert!(primary_trait.subs.list.len() == 0);
+
+                                let vtable = self.vm.find_vtable(primary_trait.item, src_ty);
+
+                                vtable as *const _ as usize
+                            }
+                            (_, _) => {
+                                panic!("unsized cast from {} to {}", src_ty, dst_ty);
+                            }
+                        };
+
+                        /*let meta = match src_kind {
                             TypeKind::Array(_, elem_count) => elem_count.assert_static() as usize,
                             _ => panic!("unsized cast ptr to {:?}", src_kind),
-                        };
+                        };*/
 
                         let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
@@ -1048,11 +1109,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn build_call(&mut self, res_ty: Type, args: &[ExprId]) -> Slot {
+    /// `override_arg_0` MUST be a thin pointer if present.
+    fn build_call(&mut self, res_ty: Type, args: &[ExprId], override_arg_0: Option<Slot>) -> Slot {
         // this is annoying and not very performant, but it's the least buggy way to build call frames I've found
 
         // start by evaluating the args
-        let args_src: Vec<_> = args.iter().map(|arg| self.lower_expr(*arg, None)).collect();
+        let args_src: Vec<_> = args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                if i == 0 {
+                    if let Some(override_arg_0) = override_arg_0 {
+                        return override_arg_0;
+                    }
+                }
+                self.lower_expr(*arg, None)
+            })
+            .collect();
 
         // allocate return slot
         let base_slot = self.stack.align_for_call();
@@ -1062,8 +1135,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         // allocate arg slots
         let args_dst: Vec<_> = args
             .iter()
-            .map(|arg| {
-                let arg_ty = self.expr_ty(*arg);
+            .enumerate()
+            .map(|(i, arg)| {
+                let arg_ty = if i == 0 && override_arg_0.is_some() {
+                    self.vm.common_types().usize
+                } else {
+                    self.expr_ty(*arg)
+                };
+
                 (self.stack.alloc(arg_ty), arg_ty)
             })
             .collect();

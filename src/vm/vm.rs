@@ -1,3 +1,4 @@
+use ahash::AHashMap;
 use ahash::AHashSet;
 use colosseum::sync::Arena;
 
@@ -8,6 +9,7 @@ use crate::closure::Closure;
 use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
 use crate::ir::IRFunction;
+use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::items::ItemId;
@@ -17,6 +19,7 @@ use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
 use crate::types::ItemWithSubs;
 use crate::types::Mutability;
+use crate::types::Sub;
 use crate::types::SubList;
 use crate::types::Type;
 use crate::types::TypeContext;
@@ -53,8 +56,10 @@ pub struct VM<'vm> {
     arena_bytecode: Arena<Vec<Instr<'vm>>>,
     arena_constants: Arena<Vec<u8>>,
     arena_paths: Arena<String>,
+    arena_vtables: Arena<VTable<'vm>>,
 
     map_paths: Mutex<AHashSet<&'vm str>>,
+    map_vtables: Mutex<AHashMap<(&'vm Item<'vm>, SubList<'vm>), &'vm VTable<'vm>>>,
 
     next_closure_id: AtomicU32,
 }
@@ -130,8 +135,10 @@ impl<'vm> VM<'vm> {
             arena_constants: Arena::new(),
             arena_paths: Arena::new(),
             arena_closures: Arena::new(),
+            arena_vtables: Arena::new(),
 
             map_paths: Default::default(),
+            map_vtables: Default::default(),
 
             next_closure_id: AtomicU32::new(0),
         }
@@ -251,6 +258,59 @@ impl<'vm> VM<'vm> {
         }
     }
 
+    pub fn find_vtable(
+        &'vm self,
+        trait_item: &'vm Item<'vm>,
+        primary_ty: Type<'vm>,
+    ) -> &'vm VTable<'vm> {
+        let for_tys = SubList {
+            list: vec![Sub::Type(primary_ty)],
+        };
+
+        assert!(for_tys.is_concrete());
+
+        let mut map_vtables = self.map_vtables.lock().unwrap();
+
+        map_vtables
+            .entry((trait_item, for_tys.clone()))
+            .or_insert_with(|| {
+                let impl_result = trait_item
+                    .find_trait_impl(&for_tys)
+                    .expect("no trait impl to build vtable from");
+
+                let impl_crate = self.crate_provider(impl_result.crate_id);
+
+                // TODO include methods in the base trait def?
+                // can specialization cause issues?
+                let methods: Vec<_> = impl_result
+                    .assoc_values
+                    .iter()
+                    .map(|val| match val {
+                        Some(AssocValue::Item(item_id)) => {
+                            let item = impl_crate.item_by_id(*item_id);
+                            if item.is_function() {
+                                Some(item.func_mono(&impl_result.impl_subs))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => {
+                            println!("{:?}", val);
+                            panic!();
+                        }
+                    })
+                    .collect();
+
+                let layout = primary_ty.layout();
+
+                self.arena_vtables.alloc(VTable {
+                    size: layout.assert_size(),
+                    align: layout.align,
+                    methods,
+                })
+            })
+    }
+
     pub fn common_types(&'vm self) -> &CommonTypes<'vm> {
         self.common_types.get_or_init(|| CommonTypes::new(self))
     }
@@ -358,6 +418,14 @@ impl<'vm> Function<'vm> {
             self.set_bytecode(bc_ref);
         }
     }
+}
+
+pub struct VTable<'vm> {
+    size: u32,
+    align: u32,
+    // TODO drop???
+    // currently only stores methods of the primary trait -- no super traits
+    methods: Vec<Option<&'vm Function<'vm>>>,
 }
 
 impl<'vm> std::fmt::Debug for Function<'vm> {

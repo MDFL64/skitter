@@ -804,6 +804,24 @@ impl<'vm> Item<'vm> {
         }
     }
 
+    // returns a vtable index if the item and subs pair should produce a virtual call
+    pub fn is_function_dyn(&self, subs: &SubList<'vm>) -> Option<u32> {
+        let ItemKind::Function{virtual_info,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        // TODO! TODO! TODO! check if the function is actually a method (with a receiver), and
+        // not a function that takes a dyn as its 1st argument
+
+        if let Some(virtual_info) = virtual_info {
+            let primary_ty = subs.list[0].assert_ty();
+            if primary_ty.is_dyn_receiver(self.crate_id, virtual_info.trait_id) {
+                return Some(virtual_info.member_index);
+            }
+        }
+        None
+    }
+
     pub fn func_extern(&self) -> &Option<(FunctionAbi, String)> {
         let ItemKind::Function{extern_name,..} = &self.kind else {
             panic!("item kind mismatch");
@@ -1095,6 +1113,20 @@ impl<'vm> Item<'vm> {
             let builtin_res = builtin.find_impl(for_tys, self.vm, self);
             if builtin_res.is_some() {
                 return builtin_res;
+            }
+        }
+
+        {
+            // TODO we probably want to return something here, but what?
+            // building a concrete impl result seems like a dumb idea
+            let self_ty = for_tys.list[0].assert_ty();
+            if let TypeKind::Dynamic {
+                primary_trait,
+                auto_traits,
+                is_dyn_star,
+            } = self_ty.kind()
+            {
+                panic!("DYN!");
             }
         }
 

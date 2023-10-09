@@ -174,14 +174,21 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 item_with_subs.persist_write(writer);
                 sub_id.persist_write(writer);
             }
+            TypeKind::Dynamic {
+                primary_trait,
+                auto_traits,
+                is_dyn_star,
+            } => {
+                writer.write_byte(37);
+                primary_trait.persist_write(writer);
+                auto_traits.persist_write(writer);
+                is_dyn_star.persist_write(writer);
+            }
 
             TypeKind::Param(n) => {
                 writer.write_byte(40);
                 n.persist_write(writer);
             }
-
-            //TypeKind::Closure(..) => writer.write_byte(252),
-            TypeKind::Dynamic => writer.write_byte(254),
 
             _ => panic!("write type {:?}", self),
         }
@@ -271,7 +278,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let n = Persist::persist_read(reader);
                 TypeKind::Param(n)
             }
-            254 => TypeKind::Dynamic,
+
             _ => panic!("read type {:?}", n),
         }
     }
