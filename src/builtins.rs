@@ -5,9 +5,9 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     closure::FnTrait,
-    crate_provider::TraitImplResult,
+    crate_provider::{TraitImpl, TraitImplResult},
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
-    items::{AssocValue, CrateId, GenericCounts, IRFlag, Item, ItemPath, TraitImpl},
+    items::{AssocValue, CrateId, GenericCounts, IRFlag, Item, ItemPath},
     persist::Persist,
     types::{Mutability, Sub, SubList, Type, TypeKind},
     vm::{
@@ -41,8 +41,8 @@ impl<'vm> Persist<'vm> for BuiltinTrait {
 }
 
 /// Used for marker trait impls.
-fn trait_impl_empty<'vm>() -> TraitImplResult<'vm> {
-    TraitImplResult {
+fn trait_impl_empty<'vm>() -> TraitImpl<'vm> {
+    TraitImpl {
         crate_id: CrateId::new(0),
         impl_subs: SubList { list: vec![] },
         assoc_values: Arc::new([]),
@@ -53,10 +53,10 @@ fn trait_impl<'vm>(
     impl_subs: SubList<'vm>,
     trait_item: &Item<'vm>,
     pairs: &[(ItemPath, AssocValue<'vm>)],
-) -> TraitImplResult<'vm> {
+) -> TraitImpl<'vm> {
     let assoc_values = trait_item.trait_build_assoc_values_for_impl(pairs);
 
-    TraitImplResult {
+    TraitImpl {
         crate_id: CrateId::new(0),
         impl_subs,
         assoc_values: assoc_values.into(),
@@ -72,7 +72,7 @@ impl BuiltinTrait {
         for_tys: &SubList<'vm>,
         vm: &'vm VM<'vm>,
         trait_item: &Item<'vm>,
-    ) -> Option<TraitImplResult<'vm>> {
+    ) -> Option<TraitImpl<'vm>> {
         match self {
             BuiltinTrait::Sized => {
                 assert!(for_tys.list.len() == 1);

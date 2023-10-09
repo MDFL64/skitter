@@ -17,13 +17,12 @@ use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    crate_provider::{CrateProvider, TraitImplResult},
+    crate_provider::{CrateProvider, TraitImpl, TraitImplResult},
     impls::{ImplBounds, ImplTable, ImplTableSimple},
     ir::{converter::IRFunctionConverter, IRFunction},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
         EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath,
-        TraitImpl,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -210,8 +209,14 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         let did = item_info.did;
         let is_constant = !item_info.item.is_function();
 
-        let res = self
-            .call(move |ctx| build_ir(ctx, did, is_constant).expect("build_ir: no ir available"));
+        let res = self.call(move |ctx| {
+            let res = build_ir(ctx, did, is_constant);
+            if let Some(res) = res {
+                res
+            } else {
+                panic!("cannot get ir for: {:?}", did)
+            }
+        });
         res.wait()
     }
 
@@ -219,11 +224,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         panic!("rustc worker should create all adt info eagerly");
     }
 
-    fn trait_impl(
-        &self,
-        trait_item: &Item<'vm>,
-        for_tys: &SubList<'vm>,
-    ) -> Option<TraitImplResult<'vm>> {
+    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<TraitImpl<'vm>> {
         let items = self.items();
         let impls = items.impls.get().expect("no impls available");
         impls.find_trait(trait_item, for_tys)

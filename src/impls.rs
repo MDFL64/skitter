@@ -3,7 +3,7 @@ use std::{hash::Hash, sync::Arc};
 use ahash::AHashMap;
 
 use crate::{
-    crate_provider::TraitImplResult,
+    crate_provider::{TraitImpl, TraitImplResult},
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
     lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
     persist::{Persist, PersistReader, PersistWriter},
@@ -81,11 +81,7 @@ pub trait ImplTable<'vm> {
         None
     }
 
-    fn find_trait(
-        &self,
-        trait_item: &Item<'vm>,
-        for_tys: &SubList<'vm>,
-    ) -> Option<TraitImplResult<'vm>> {
+    fn find_trait(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<TraitImpl<'vm>> {
         let trait_key = TraitKey {
             crate_id: trait_item.crate_id,
             item_id: trait_item.item_id,
@@ -97,7 +93,7 @@ pub trait ImplTable<'vm> {
             for value in list {
                 let bounds = self.get_bounds(value.bounds_id);
                 if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
-                    return Some(TraitImplResult {
+                    return Some(TraitImpl {
                         crate_id: self.get_crate_id(),
                         assoc_values: value.values.clone(),
                         impl_subs,
@@ -112,7 +108,7 @@ pub trait ImplTable<'vm> {
                 for value in list {
                     let bounds = self.get_bounds(value.bounds_id);
                     if let Some(impl_subs) = bounds.check(for_tys, trait_item.vm) {
-                        return Some(TraitImplResult {
+                        return Some(TraitImpl {
                             crate_id: self.get_crate_id(),
                             assoc_values: value.values.clone(),
                             impl_subs,

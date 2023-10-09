@@ -8,6 +8,8 @@ use crate::cli::CliArgs;
 use crate::closure::Closure;
 use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
+use crate::crate_provider::TraitImpl;
+use crate::crate_provider::TraitImplResult;
 use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
@@ -274,9 +276,10 @@ impl<'vm> VM<'vm> {
         map_vtables
             .entry((trait_item, for_tys.clone()))
             .or_insert_with(|| {
-                let impl_result = trait_item
-                    .find_trait_impl(&for_tys)
-                    .expect("no trait impl to build vtable from");
+                let TraitImplResult::Static(impl_result) = trait_item
+                    .find_trait_impl(&for_tys) else {
+                        panic!("cannot build vtable from trait {} for {}",trait_item.path.as_string(),primary_ty);
+                    };
 
                 let impl_crate = self.crate_provider(impl_result.crate_id);
 

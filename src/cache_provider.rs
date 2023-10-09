@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    crate_provider::{CrateProvider, TraitImplResult},
+    crate_provider::{CrateProvider, TraitImpl, TraitImplResult},
     impls::{ImplTable, ImplTableLazy},
     ir::IRFunction,
     items::{AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
@@ -109,11 +109,7 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         }
     }
 
-    fn trait_impl(
-        &self,
-        trait_item: &Item<'vm>,
-        for_tys: &SubList<'vm>,
-    ) -> Option<TraitImplResult<'vm>> {
+    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<TraitImpl<'vm>> {
         self.impls.find_trait(trait_item, for_tys)
     }
 

@@ -142,7 +142,7 @@ impl<'vm> TypeContext<'vm> {
                 };
 
                 let mut primary_trait = None;
-                let auto_traits = AutoTraitSet::EMPTY;
+                let mut auto_traits = AutoTraitSet::EMPTY;
 
                 for item in list.iter() {
                     match item.skip_binder() {
@@ -156,15 +156,20 @@ impl<'vm> TypeContext<'vm> {
                             primary_trait = Some(item);
                         }
                         ExistentialPredicate::Projection(x) => {
-                            panic!("Projection on dyn?");
+                            println!("todo projection on dyn???");
                         }
                         ExistentialPredicate::AutoTrait(did) => {
-                            panic!("auto trait");
+                            let def_path = ctx.tcx.def_path(did);
+                            let path = path_from_rustc(&def_path, ctx.vm);
+                            let add_trait = match path.as_string() {
+                                "::marker::Send" => AutoTraitSet::SEND,
+                                "::marker::Sync" => AutoTraitSet::SYNC,
+                                _ => panic!("auto trait {}", path.as_string()),
+                            };
+                            auto_traits.add(add_trait);
                         }
                     }
                 }
-
-                let primary_trait = primary_trait.expect("no primary trait on dyn");
 
                 TypeKind::Dynamic {
                     primary_trait,

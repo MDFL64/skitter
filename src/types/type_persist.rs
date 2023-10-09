@@ -273,6 +273,17 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 let path = reader.read_str();
                 TypeKind::Foreign(crate_id, path)
             }
+            37 => {
+                let primary_trait = Persist::persist_read(reader);
+                let auto_traits = Persist::persist_read(reader);
+                let is_dyn_star = Persist::persist_read(reader);
+
+                TypeKind::Dynamic {
+                    primary_trait,
+                    auto_traits,
+                    is_dyn_star,
+                }
+            }
 
             40 => {
                 let n = Persist::persist_read(reader);

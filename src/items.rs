@@ -615,16 +615,6 @@ impl<'vm> Persist<'vm> for VirtualInfo {
     }
 }
 
-pub struct TraitImpl<'vm> {
-    pub for_types: SubList<'vm>,
-    //impl_params: Vec<Sub<'vm>>,
-    pub crate_id: CrateId,
-    /// A vector of associated values. The trait item contains an index of identifiers to indices.
-    pub assoc_values: Vec<Option<AssocValue<'vm>>>,
-    pub bounds: Vec<BoundKind<'vm>>,
-    pub generics: GenericCounts,
-}
-
 #[derive(Clone, Debug)]
 pub enum AssocValue<'vm> {
     /// An item. Can be either a function or a constant.
@@ -1043,7 +1033,7 @@ impl<'vm> Item<'vm> {
         let crate_items = self.vm.crate_provider(self.crate_id);
         let trait_item = crate_items.item_by_id(virtual_info.trait_id);
 
-        if let Some(trait_impl) = trait_item.find_trait_impl(subs) {
+        if let TraitImplResult::Static(trait_impl) = trait_item.find_trait_impl(subs) {
             let res_val = &trait_impl.assoc_values[virtual_info.member_index as usize];
 
             if let Some(AssocValue::Type(ty)) = res_val {
@@ -1064,7 +1054,7 @@ impl<'vm> Item<'vm> {
         for_tys: &SubList<'vm>,
         member_index: u32,
     ) -> Option<(Arc<IRFunction<'vm>>, SubList<'vm>)> {
-        if let Some(result) = self.find_trait_impl(for_tys) {
+        if let TraitImplResult::Static(result) = self.find_trait_impl(for_tys) {
             let crate_items = self.vm.crate_provider(result.crate_id);
             let ir_source = &result.assoc_values[member_index as usize];
 
@@ -1100,25 +1090,29 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn trait_has_impl(&self, for_tys: &SubList<'vm>) -> bool {
-        self.find_trait_impl(for_tys).is_some()
+        let res = self.find_trait_impl(for_tys);
+        match res {
+            TraitImplResult::Static(_) | TraitImplResult::Dynamic => true,
+            TraitImplResult::None => false,
+        }
     }
 
     /// Find a trait implementation for a given list of types.
-    pub fn find_trait_impl(&self, for_tys: &SubList<'vm>) -> Option<TraitImplResult<'vm>> {
+    pub fn find_trait_impl(&self, for_tys: &SubList<'vm>) -> TraitImplResult<'vm> {
         let ItemKind::Trait{builtin,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
+        // builtins
         if let Some(builtin) = builtin.get() {
             let builtin_res = builtin.find_impl(for_tys, self.vm, self);
-            if builtin_res.is_some() {
-                return builtin_res;
+            if let Some(builtin_res) = builtin_res {
+                return TraitImplResult::Static(builtin_res);
             }
         }
 
         {
-            // TODO we probably want to return something here, but what?
-            // building a concrete impl result seems like a dumb idea
+            // dynamic (trait objects)
             let self_ty = for_tys.list[0].assert_ty();
             if let TypeKind::Dynamic {
                 primary_trait,
@@ -1126,7 +1120,11 @@ impl<'vm> Item<'vm> {
                 is_dyn_star,
             } = self_ty.kind()
             {
-                panic!("DYN!");
+                if let Some(primary_trait) = primary_trait {
+                    if primary_trait.item == self {
+                        return TraitImplResult::Dynamic;
+                    }
+                }
             }
         }
 
@@ -1136,12 +1134,12 @@ impl<'vm> Item<'vm> {
             let crate_provider = self.vm.crate_provider(crate_id);
 
             let res = crate_provider.trait_impl(self, for_tys);
-            if res.is_some() {
-                return res;
+            if let Some(res) = res {
+                return TraitImplResult::Static(res);
             }
         }
 
-        None
+        TraitImplResult::None
     }
 }
 

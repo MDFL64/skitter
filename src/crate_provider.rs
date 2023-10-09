@@ -18,17 +18,19 @@ pub trait CrateProvider<'vm>: Send + Sync + 'vm {
 
     fn build_adt(&self, id: ItemId) -> AdtInfo<'vm>;
 
-    fn trait_impl(
-        &self,
-        trait_item: &Item<'vm>,
-        for_tys: &SubList<'vm>,
-    ) -> Option<TraitImplResult<'vm>>;
+    fn trait_impl(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<TraitImpl<'vm>>;
 
     fn inherent_impl(&self, full_key: &str, ty: Type<'vm>) -> Option<AssocValue<'vm>>;
 }
 
-pub struct TraitImplResult<'vm> {
+pub struct TraitImpl<'vm> {
     pub crate_id: CrateId,
     pub assoc_values: Arc<[Option<AssocValue<'vm>>]>,
     pub impl_subs: SubList<'vm>,
+}
+
+pub enum TraitImplResult<'vm> {
+    Static(TraitImpl<'vm>),
+    Dynamic,
+    None,
 }

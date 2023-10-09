@@ -46,7 +46,7 @@ pub enum TypeKind<'vm> {
 
     // not properly implemented yet
     Dynamic {
-        primary_trait: ItemWithSubs<'vm>,
+        primary_trait: Option<ItemWithSubs<'vm>>,
         auto_traits: AutoTraitSet,
         is_dyn_star: bool,
     },
@@ -159,6 +159,7 @@ impl<'vm> Type<'vm> {
             ..
         } = self.kind()
         {
+            let primary_trait = primary_trait.as_ref().expect("no primary trait");
             assert!(!is_dyn_star);
             if primary_trait.item.crate_id == trait_crate && primary_trait.item.item_id == trait_id
             {
@@ -272,6 +273,7 @@ impl<'vm> Type<'vm> {
                 auto_traits,
                 is_dyn_star,
             } => {
+                let primary_trait = primary_trait.as_ref().expect("no primary trait");
                 assert!(!is_dyn_star);
                 assert!(primary_trait.subs.list.len() == 0);
 
@@ -330,6 +332,13 @@ impl<'vm> Type<'vm> {
             TypeKind::Closure(_, sig, subs) => {
                 sig.fn_ptr_ty.is_concrete() && sig.env_ty.is_concrete() && subs.is_concrete()
             }
+            TypeKind::Dynamic { primary_trait, .. } => {
+                if let Some(primary_trait) = primary_trait {
+                    primary_trait.subs.is_concrete()
+                } else {
+                    true
+                }
+            }
 
             TypeKind::Ref(child, _) | TypeKind::Ptr(child, _) | TypeKind::Slice(child) => {
                 child.is_concrete()
@@ -346,6 +355,7 @@ impl<'vm> Type<'vm> {
                 child.is_concrete()
             }
             TypeKind::Param(_) | TypeKind::Unknown => false,
+            TypeKind::AssociatedType(_) => false,
             _ => panic!("is concrete? {}", self),
         }
     }
@@ -357,7 +367,8 @@ impl<'vm> Type<'vm> {
             | TypeKind::Bool
             | TypeKind::Char
             | TypeKind::StringSlice
-            | TypeKind::FunctionDef(_) => false,
+            | TypeKind::FunctionDef(_)
+            | TypeKind::FunctionPointer(_) => false,
             TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut()),
             TypeKind::Array(child, _) => child.is_interior_mut(),
             TypeKind::Adt(adt) => {
@@ -527,6 +538,12 @@ pub struct AutoTraitSet(u16);
 
 impl AutoTraitSet {
     pub const EMPTY: AutoTraitSet = AutoTraitSet(0);
+    pub const SEND: AutoTraitSet = AutoTraitSet(1);
+    pub const SYNC: AutoTraitSet = AutoTraitSet(2);
+
+    pub fn add(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
 }
 
 impl<'vm> Persist<'vm> for AutoTraitSet {

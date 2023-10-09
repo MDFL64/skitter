@@ -720,8 +720,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     PointerCast::UnSize => {
                         assert_eq!(expr_ty.layout().assert_size(), POINTER_SIZE.bytes() * 2);
 
-                        //let src_ty = self.expr_ty(*source);
-
                         let src_ty = match self.expr_ty(*source).kind() {
                             TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
                             _ => panic!(),
@@ -744,12 +742,36 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                     ..
                                 },
                             ) => {
+                                let primary_trait =
+                                    primary_trait.as_ref().expect("no primary trait");
                                 assert!(!is_dyn_star);
                                 assert!(primary_trait.subs.list.len() == 0);
 
-                                let vtable = self.vm.find_vtable(primary_trait.item, src_ty);
+                                if let TypeKind::Dynamic {
+                                    primary_trait: src_primary_trait,
+                                    is_dyn_star: src_is_dyn_star,
+                                    ..
+                                } = src_ty.kind()
+                                {
+                                    // cast dyn to dyn -- currently we only handle the trivial case
+                                    assert_eq!(src_is_dyn_star, is_dyn_star);
+                                    assert_eq!(src_primary_trait.as_ref(), Some(primary_trait));
 
-                                vtable as *const _ as usize
+                                    let dst_slot =
+                                        dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                                    let src_slot = self.lower_expr(*source, None);
+
+                                    self.out_bc.push(
+                                        bytecode_select::copy(dst_slot, src_slot, expr_ty).unwrap(),
+                                    );
+
+                                    return dst_slot;
+                                } else {
+                                    let vtable = self.vm.find_vtable(primary_trait.item, src_ty);
+
+                                    vtable as *const _ as usize
+                                }
                             }
                             (_, _) => {
                                 panic!("unsized cast from {} to {}", src_ty, dst_ty);
