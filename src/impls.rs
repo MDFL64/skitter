@@ -73,7 +73,7 @@ pub trait ImplTable<'vm> {
         if let Some(list) = self.get_inherent_table(full_key) {
             for value in list {
                 let bounds = self.get_bounds(value.bounds_id);
-                if bounds.check_inherent(ty) {
+                if bounds.check_inherent(ty,ty.vm()) {
                     return Some(value.value.clone());
                 }
             }
@@ -483,16 +483,14 @@ impl<'vm> ImplTable<'vm> for ImplTableLazy<'vm> {
 
 impl<'vm> ImplBounds<'vm> {
     pub fn check(&self, for_tys: &SubList<'vm>, vm: &'vm VM<'vm>) -> Option<SubList<'vm>> {
-        let mut sub_map = SubMap::default();
-
+        
+        let mut sub_map = SubMap::new(self.generic_counts.clone(), vm);
         if Self::match_subs(&self.for_tys, for_tys, &mut sub_map) {
-            let mut result_subs = SubList::from_summary(&self.generic_counts, vm);
-
-            sub_map.apply_to(SubSide::Lhs, &mut result_subs);
-            sub_map.assert_empty(SubSide::Rhs);
 
             // this is an ATTEMPT to deal with GATs -- it may not be entirely correct
             if for_tys.list.len() > self.for_tys.list.len() {
+                let result_subs = sub_map.get_result();
+
                 let start = self.for_tys.list.len();
                 let end = for_tys.list.len();
                 for i in (start..end) {
@@ -504,7 +502,7 @@ impl<'vm> ImplBounds<'vm> {
             for bound in self.bounds.iter() {
                 match bound {
                     BoundKind::Trait(trait_bound) => {
-                        let types_to_check = trait_bound.subs.sub(&result_subs);
+                        let types_to_check = trait_bound.subs.sub(sub_map.get_result());
 
                         let has_impl = trait_bound.item.trait_has_impl(&types_to_check); // &mut Some(&mut result_subs));
 
@@ -513,23 +511,19 @@ impl<'vm> ImplBounds<'vm> {
                         }
                     }
                     BoundKind::Projection(assoc_ty, eq_ty) => {
-                        let types_to_check = assoc_ty.subs.sub(&result_subs);
+                        let types_to_check = assoc_ty.subs.sub(sub_map.get_result());
 
                         let resolved_assoc_ty =
                             assoc_ty.item.resolve_associated_ty(&types_to_check);
 
-                        let mut proj_sub_map = Default::default();
-                        if !Self::match_types(resolved_assoc_ty, *eq_ty, &mut proj_sub_map) {
+                        if !Self::match_types(*eq_ty, resolved_assoc_ty, &mut sub_map) {
                             panic!("unmatched {} = {}", resolved_assoc_ty, eq_ty);
                         }
-
-                        proj_sub_map.assert_empty(SubSide::Lhs);
-                        proj_sub_map.apply_to(SubSide::Rhs, &mut result_subs);
                     }
                 }
             }
 
-            Some(result_subs)
+            Some(sub_map.result_subs)
         } else {
             None
         }
@@ -537,13 +531,13 @@ impl<'vm> ImplBounds<'vm> {
 
     /// This relaxed check method tests against a single type,
     /// and does not actually check the stored bounds.
-    pub fn check_inherent(&self, ty: Type<'vm>) -> bool {
-        let mut map = SubMap::default();
-        map.allow_bidirectional = true;
+    /// TODO: It may be necessary to check the bounds???
+    pub fn check_inherent(&self, ty: Type<'vm>, vm: &'vm VM<'vm>) -> bool {
+        let mut sub_map = SubMap::new(self.generic_counts.clone(), vm);
 
         let check_ty = self.for_tys.list[0].assert_ty();
 
-        Self::match_types(ty, check_ty, &mut map)
+        Self::match_types(ty, check_ty, &mut sub_map)
     }
 
     fn match_subs(lhs: &SubList<'vm>, rhs: &SubList<'vm>, res_map: &mut SubMap<'vm>) -> bool {
@@ -596,18 +590,29 @@ impl<'vm> ImplBounds<'vm> {
                 }
             }
 
-            (TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
-                if res_map.allow_bidirectional {
+            /*(TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
+                panic!("bidirectional bound not permitted");
+                /*if res_map.allow_bidirectional {
                     res_map.set(SubSide::Rhs, *rhs_param, lhs);
                     res_map.set(SubSide::Lhs, *lhs_param, rhs);
                     true
                 } else {
                     panic!("bidirectional bound not permitted");
-                }
-            }
+                }*/
+            }*/
 
-            (_, TypeKind::Param(param_num)) => res_map.set(SubSide::Rhs, *param_num, lhs),
-            (TypeKind::Param(param_num), _) => res_map.set(SubSide::Lhs, *param_num, rhs),
+            (TypeKind::Param(param_num), _) => res_map.set_param(*param_num, rhs),
+            (_, TypeKind::Param(param_num)) => panic!("param rhs"),
+
+            // NOTE: whether this is resolvable is probably dependant on eval order
+            (TypeKind::AssociatedType(item), _) => {
+                let for_tys = item.subs.sub(&res_map.result_subs);
+                println!("<<< {}",for_tys);
+                let at = item.item.resolve_associated_ty(&for_tys);
+                println!(">>> {}",at);
+                Self::match_types(at,rhs,res_map)
+            }
+            (_, TypeKind::AssociatedType(item)) => panic!("assoc ty rhs"),
 
             (TypeKind::Adt(_), _)
             | (_, TypeKind::Adt(_))
@@ -640,41 +645,44 @@ enum SubSide {
     Rhs,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct SubMap<'vm> {
-    map: Vec<((SubSide, u32), Type<'vm>)>,
-    pub allow_bidirectional: bool,
+    result_subs: SubList<'vm>,
+    generic_counts: GenericCounts
 }
 
 impl<'vm> SubMap<'vm> {
-    fn set(&mut self, side: SubSide, n: u32, val: Type<'vm>) -> bool {
-        let key = (side, n);
-        for (ek, ev) in &self.map {
-            if *ek == key {
-                assert!(*ev == val);
-                return true;
-            }
-        }
-        self.map.push((key, val));
-        true
-    }
-
-    fn apply_to(&self, target_side: SubSide, target_subs: &mut SubList<'vm>) {
-        for ((side, n), val) in &self.map {
-            if *side == target_side {
-                target_subs.list[*n as usize] = Sub::Type(*val);
-            }
+    fn new(generic_counts: GenericCounts, vm: &'vm VM<'vm>) -> Self {
+        Self {
+            result_subs: SubList::from_summary(&generic_counts, vm),
+            generic_counts,
         }
     }
 
-    fn assert_empty(&self, target_side: SubSide) {
-        for ((side, _), _) in &self.map {
-            if *side == target_side {
-                for entry in &self.map {
-                    println!(" - {:?}", entry);
+    fn get_result(&mut self) -> &mut SubList<'vm> {
+        &mut self.result_subs
+    }
+}
+
+impl<'vm> SubMap<'vm> {
+    fn set_param(&mut self, n: u32, val: Type<'vm>) -> bool {
+        let result_subs = self.get_result();
+        
+        let entry = &mut result_subs.list[n as usize];
+
+        if let Sub::Type(current_val) = entry {
+            if current_val != &val {
+                if current_val.kind() == &TypeKind::Unknown {
+                    *current_val = val;
+                } else {
+                    println!("{} {}",current_val,val);
+                    panic!("yeet");
                 }
-                panic!("SubMap::assert_empty failed");
             }
+        } else {
+            panic!("attempt to fill non-type sub");
         }
+
+        true
     }
 }

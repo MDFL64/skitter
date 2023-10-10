@@ -172,9 +172,6 @@ pub enum ExprKind<'vm> {
     /// Used to replace some intermediate nodes which aren't super useful to us.
     Dummy(ExprId),
 
-    /// Used for unsupported expressions, allowing us to serialize all IR
-    Error,
-
     /// Primitive casts
     Cast(ExprId),
 
@@ -254,6 +251,9 @@ pub enum ExprKind<'vm> {
         arg: ExprId,
         arms: Vec<MatchArm>,
     },
+
+    /// Error, for unsupported exprs
+    Error(String)
 }
 
 #[derive(Debug, Clone)]
@@ -648,6 +648,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let args = Persist::persist_read(reader);
                 ExprKind::Tuple(args)
             }
+            '~' => {
+                let error_msg = String::persist_read(reader);
+                println!("error expr = {}",error_msg);
+                panic!();
+            }
             _ => panic!("todo read expr '{}'", c),
         };
         Expr { kind, ty }
@@ -817,8 +822,9 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 lhs.persist_write(writer);
                 index.persist_write(writer);
             }
-            ExprKind::Error => {
+            ExprKind::Error(ref msg) => {
                 writer.write_byte(b'~');
+                msg.persist_write(writer);
             }
             _ => panic!("todo write expr {:?}", self.kind),
         }

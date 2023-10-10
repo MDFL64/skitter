@@ -323,7 +323,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     ExprKind::Break { loop_id, value }
                 } else {
                     // TODO -- most likely caused by breaks bound to blocks instead of loops
-                    ExprKind::Error
+                    ExprKind::Error("bad break".to_owned())
                 }
             }
             hir::ExprKind::Continue(dest) => {
@@ -348,7 +348,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             }
             hir::ExprKind::Struct(path, fields, rest) => {
                 if rest.is_some() {
-                    ExprKind::Error
+                    ExprKind::Error("adt with rest".to_owned())
                 } else {
                     let res = self.types.qpath_res(&path, expr.hir_id);
                     let variant = Self::def_variant(&res, rs_ty);
@@ -411,8 +411,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                 ExprKind::NamedConst(const_item)
                             }
                             _ => {
-                                println!("TODO def = {:?}", def_kind);
-                                ExprKind::Error
+                                ExprKind::Error(format!("def = {:?}", def_kind))
                             }
                         }
                     }
@@ -490,9 +489,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 ExprKind::Tuple(capture_exprs)
             }
-            hir::ExprKind::ConstBlock(..) | hir::ExprKind::InlineAsm(..) => {
-                // TODO
-                ExprKind::Error
+            hir::ExprKind::ConstBlock(..) => {
+                ExprKind::Error("const block".to_owned())
+            }
+            hir::ExprKind::InlineAsm(..) => {
+                ExprKind::Error("inline asm".to_owned())
             }
             _ => panic!("todo expr kind {:?}", expr.kind),
         };

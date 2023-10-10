@@ -391,6 +391,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Ptr(..) => false,
             // how would we even handle this? assume not
             TypeKind::Slice(..) => false,
+            TypeKind::Foreign(..) => false,
             // TODO? assume true?
             TypeKind::Dynamic { .. } => true,
             _ => panic!("is_interior_mut? {}", self),

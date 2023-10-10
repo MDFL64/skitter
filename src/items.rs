@@ -640,7 +640,7 @@ pub enum BoundKind<'vm> {
     Projection(ItemWithSubs<'vm>, Type<'vm>),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct GenericCounts {
     pub lifetimes: u32,
     pub types: u32,

@@ -16,5 +16,7 @@ pub fn main() {
     let mut w = SimpleWriter;
 
     write!(&mut w,"test\n");
-    //write!(&mut w,"alpha {}\n","beta");
+    write!(&mut w,"alpha {}\n","beta");
+    let x: i32 = 100;
+    write!(&mut w,"int {}\n",x);
 }
