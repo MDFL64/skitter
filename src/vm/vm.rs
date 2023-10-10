@@ -233,8 +233,14 @@ impl<'vm> VM<'vm> {
         self.arena_bytecode.alloc(bc)
     }
 
+    /// TODO use read-only allocations, at least as a debug option
     pub fn alloc_constant(&'vm self, str: Vec<u8>) -> &'vm [u8] {
         self.arena_constants.alloc(str)
+    }
+
+    /// FIXME this is UNSOUND if the static is mutated!
+    pub fn alloc_static(&'vm self, str: Vec<u8>) -> *mut u8 {
+        self.arena_constants.alloc(str).as_mut_ptr()
     }
 
     pub fn alloc_closure(

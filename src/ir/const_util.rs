@@ -57,6 +57,7 @@ impl<'vm> IRFunction<'vm> {
             }
 
             ExprKind::NamedConst(_) => ConstStatus::Explicit,
+            ExprKind::Static(_) => ConstStatus::Not,
 
             ExprKind::Adt { ref fields, .. } => {
                 let all_const = fields

@@ -19,7 +19,7 @@ use crate::{
     builtins::BuiltinTrait,
     crate_provider::{CrateProvider, TraitImpl, TraitImplResult},
     impls::{ImplBounds, ImplTable, ImplTableSimple},
-    ir::{converter::IRFunctionConverter, IRFunction},
+    ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
         EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath,
@@ -207,10 +207,10 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
 
         let item_info = &items.items[item_id.index()];
         let did = item_info.did;
-        let is_constant = !item_info.item.is_function();
+        let ir_kind = item_info.item.ir_kind();
 
         let res = self.call(move |ctx| {
-            let res = build_ir(ctx, did, is_constant);
+            let res = build_ir(ctx, did, ir_kind);
             if let Some(res) = res {
                 res
             } else {
@@ -240,7 +240,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
 fn build_ir<'vm, 'tcx>(
     ctx: &RustCContext<'vm, 'tcx>,
     did: LocalDefId,
-    is_constant: bool,
+    ir_kind: IRKind,
 ) -> Option<Arc<IRFunction<'vm>>> {
     let hir = ctx.tcx.hir();
 
@@ -254,7 +254,7 @@ fn build_ir<'vm, 'tcx>(
             did,
             body,
             types,
-            is_constant,
+            ir_kind,
         )))
     } else {
         None
@@ -319,7 +319,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     items.index_item(kind, item_path, local_id, vm);
                 }
                 HirItemKind::Static(..) => {
-                    // todo
+                    let item_path = path_from_rustc(&hir.def_path(local_id), vm);
+                    let kind = ItemKind::new_static();
+
+                    items.index_item(kind, item_path, local_id, vm);
                 }
                 HirItemKind::Struct(variant, _) | HirItemKind::Union(variant, _) => {
                     let adt_id = {
@@ -713,8 +716,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     continue;
                 }
 
-                let is_constant = !item.item.is_function();
-                if let Some(ir) = build_ir(&ctx, item.did, is_constant) {
+                let ir_kind = item.item.ir_kind();
+                if let Some(ir) = build_ir(&ctx, item.did, ir_kind) {
                     item.item.set_raw_ir(ir);
                 }
             }

@@ -10,7 +10,7 @@ use crate::{
     closure::Closure,
     crate_provider::TraitImplResult,
     impls::find_trait_impl_crate,
-    ir::{glue_builder::glue_for_ctor, IRFunction},
+    ir::{glue_builder::glue_for_ctor, IRFunction, IRKind},
     lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
@@ -257,6 +257,20 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
                 writer.write_byte_slice(&ir_block);
             }
+            ItemKind::Static { ir, .. } => {
+                writer.write_byte('s' as u8);
+
+                let ir_block = self
+                    .raw_ir()
+                    .map(|ir| {
+                        let mut writer = writer.new_child_writer();
+                        ir.persist_write(&mut writer);
+                        writer.flip()
+                    })
+                    .unwrap_or_else(|| Vec::new());
+
+                writer.write_byte_slice(&ir_block);
+            }
             ItemKind::AssociatedType { virtual_info } => {
                 writer.write_byte('y' as u8);
                 virtual_info.persist_write(writer);
@@ -456,6 +470,12 @@ pub enum ItemKind<'vm> {
         mono_values: Mutex<AHashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
+    },
+    /// Statics operate similarly to constants, but don't need monomorphized,
+    /// and don't need weird logic to determine if they need copied.
+    Static {
+        ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
+        value_ptr: OnceLock<usize>
     },
     AssociatedType {
         virtual_info: VirtualInfo,
@@ -731,6 +751,13 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
+    pub fn new_static() -> Self {
+        Self::Static{
+            ir: Default::default(),
+            value_ptr: Default::default()
+        }
+    }
+
     pub fn new_associated_type(trait_id: ItemId, member_index: u32) -> Self {
         Self::AssociatedType {
             virtual_info: VirtualInfo {
@@ -787,10 +814,19 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn is_function(&self) -> bool {
-        if let ItemKind::Function { .. } = &self.kind {
+        if let ItemKind::Function{..} = &self.kind {
             true
         } else {
             false
+        }
+    }
+
+    pub fn ir_kind(&self) -> IRKind {
+        match self.kind {
+            ItemKind::Function { .. } => IRKind::Function,
+            ItemKind::Constant { .. } => IRKind::Constant,
+            ItemKind::Static { .. } => IRKind::Static,
+            _ => panic!()
         }
     }
 
@@ -828,19 +864,23 @@ impl<'vm> Item<'vm> {
 
     /// Get the IR for a function OR a constant. Subs are used to find specialized IR for trait items.
     pub fn ir<'a>(&self, subs: &'a SubList<'vm>) -> (Arc<IRFunction<'vm>>, Cow<'a, SubList<'vm>>) {
-        let (ir, virtual_info, ctor_for, is_constant) = match &self.kind {
+        let (ir, virtual_info, ctor_for, ir_kind) = match &self.kind {
             ItemKind::Function {
                 ir,
                 virtual_info,
                 ctor_for,
                 ..
-            } => (ir, virtual_info, ctor_for, false),
+            } => (ir, virtual_info, ctor_for, IRKind::Function),
             ItemKind::Constant {
                 ir,
                 virtual_info,
                 ctor_for,
                 ..
-            } => (ir, virtual_info, ctor_for, true),
+            } => (ir, virtual_info, ctor_for, IRKind::Constant),
+            ItemKind::Static {
+                ir,
+                ..
+            } => (ir, &None, &None, IRKind::Static),
             _ => panic!("item kind mismatch"),
         };
 
@@ -854,7 +894,7 @@ impl<'vm> Item<'vm> {
                 subs: subs.clone(),
             });
 
-            let ir = glue_for_ctor(ctor_ty, *ctor_variant, is_constant);
+            let ir = glue_for_ctor(ctor_ty, *ctor_variant, ir_kind);
             return (Arc::new(ir), Cow::Borrowed(subs));
         }
 
@@ -864,7 +904,7 @@ impl<'vm> Item<'vm> {
             let trait_item = crate_items.item_by_id(virtual_info.trait_id);
             let resolved_func = trait_item.find_trait_item_ir(subs, virtual_info.member_index);
             if let Some((ir, new_subs)) = resolved_func {
-                assert!(ir.is_constant == is_constant);
+                assert!(ir.ir_kind == ir_kind);
                 return (ir, Cow::Owned(new_subs));
             }
         }
@@ -873,7 +913,7 @@ impl<'vm> Item<'vm> {
         {
             let mut ir = ir.lock().unwrap();
             if let Some(ir) = ir.as_ref() {
-                assert!(ir.is_constant == is_constant);
+                assert!(ir.ir_kind == ir_kind);
                 return (ir.clone(), Cow::Borrowed(subs));
             } else {
                 let new_ir = self.vm.crate_provider(self.crate_id).build_ir(self.item_id);
@@ -921,15 +961,40 @@ impl<'vm> Item<'vm> {
             let bc =
                 BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
-            let const_thread = self.vm.make_thread();
-            const_thread.run_bytecode(&bc, 0);
+            let eval_thread = self.vm.make_thread();
+            eval_thread.run_bytecode(&bc, 0);
             let ty = ir.sig.output; // todo sub?
 
-            let const_bytes = const_thread.copy_result(0, ty.layout().assert_size() as usize);
-            self.vm.alloc_constant(const_bytes)
+            let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
+            self.vm.alloc_constant(eval_bytes)
         });
 
         result_val
+    }
+
+    // unlike with constants, we should probably ALWAYS be allocating here, even for small values
+    pub fn static_value(&self, subs: &SubList<'vm>) -> *mut u8 {
+        let ItemKind::Static{ir, value_ptr} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        assert!(subs.list.len() == 0);
+
+        let result_val = value_ptr.get_or_init(|| {
+            let (ir, new_subs) = self.ir(subs);
+
+            let bc =
+                BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
+
+            let eval_thread = self.vm.make_thread();
+            eval_thread.run_bytecode(&bc, 0);
+            let ty = ir.sig.output; // todo sub?
+
+            let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
+            self.vm.alloc_static(eval_bytes) as usize
+        });
+
+        *result_val as _
     }
 
     pub fn ctor_info(&self) -> Option<(ItemId, u32)> {

@@ -630,6 +630,22 @@ pub fn compile_rust_intrinsic<'vm>(
                 out_bc.push(copy);
             }
         }
+        "copy_nonoverlapping" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 3);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg_size = arg_ty.layout().assert_size();
+
+            if arg_size == 1 {
+                out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], arg_slots[2]));
+            } else {
+                let usize_ty = vm.common_types().usize;
+                let size_slot = stack.alloc(usize_ty);
+                out_bc.push(bytecode_select::copy(size_slot, arg_slots[2], usize_ty).unwrap());
+                panic!("non-trivial copy {}",arg_size);
+            }
+        }
         "ctpop" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 1);
@@ -743,7 +759,7 @@ pub fn compile_rust_intrinsic<'vm>(
         }
         // ugh
         "add_with_overflow" => {
-            // TODO make this actually work, probably just implement more arithmetic instructions :(
+            // TODO make this actually work -- I'd rather not add more arithmetic instructions
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);
 
@@ -751,6 +767,20 @@ pub fn compile_rust_intrinsic<'vm>(
             let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
 
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
+            // signed: same signs on inputs, differ from output
+            // unsigned: (a + b < a)
+        }
+        "mul_with_overflow" => {
+            // TODO make this actually work -- I'd rather not add more arithmetic instructions
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
             out_bc.push(bytecode_select::literal(0, 1, carry_slot));
             // signed: same signs on inputs, differ from output

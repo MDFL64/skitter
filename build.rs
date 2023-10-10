@@ -466,9 +466,6 @@ fn write_exec_match() {
         let offset = index * *elem_size as usize;
         write_stack(stack, *arg_out, offset);
     }
-    Instr::Return => break,
-    Instr::Bad => panic!("encountered bad instruction"),
-    Instr::Debug(_) => (),
     Instr::WriteBytes { size, dst, val, count } => {
         let dst: *mut u8 = read_stack(stack, *dst);
         let val: u8 = read_stack(stack, *val);
@@ -480,6 +477,20 @@ fn write_exec_match() {
             *byte_dst = val;
         }
     }
+    Instr::MemCopy(src,dst,count) => {
+        let src: *const u8 = read_stack(stack, *dst);
+        let dst: *mut u8 = read_stack(stack, *dst);
+        let count: usize = read_stack(stack, *count);
+
+        for i in 0..count {
+            let byte_src = src.add(i);
+            let byte_dst = dst.add(i);
+            *byte_dst = *byte_src;
+        }
+    }
+    Instr::Return => break,
+    Instr::Bad => panic!("encountered bad instruction"),
+    Instr::Debug(_) => (),
     _ => panic!("NYI {:?}",instr)
 }"#,
     );

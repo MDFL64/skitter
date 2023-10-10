@@ -286,6 +286,9 @@ pub enum Instr<'vm> {
     MovPS8N(Slot, Slot, u16, u16),
     MovPS16N(Slot, Slot, u16, u16),
 
+    /// src, dst, count (bytes) - copies NON-OVERLAPPING memory chunks
+    MemCopy(Slot, Slot, Slot),
+
     ArrayRepeat {
         base: Slot,
         size: u32,

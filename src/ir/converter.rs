@@ -14,7 +14,7 @@ use crate::{
 use super::{
     BinaryOp, BindingMode, Block, Expr, ExprId, ExprKind, FieldPattern, IRFunction,
     IRFunctionBuilder, LogicOp, LoopId, MatchArm, Pattern, PatternId, PatternKind, PointerCast,
-    Stmt, UnaryOp, UpVar,
+    Stmt, UnaryOp, UpVar, IRKind,
 };
 
 /// Converts rust IR to skitter IR.
@@ -34,7 +34,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         func_id: LocalDefId,
         body: &rustc_hir::Body,
         types: &'tcx TypeckResults<'tcx>,
-        is_constant: bool,
+        ir_kind: IRKind,
     ) -> IRFunction<'vm> {
         //println!("func = {:?}",func_id);
         assert!(body.generator_kind.is_none());
@@ -76,7 +76,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
         converter
             .builder
-            .finish(root_expr, is_constant, params, opaque_types)
+            .finish(root_expr, ir_kind, params, opaque_types)
     }
 
     /// Convert binary op from rust IR. Does not handle logical ops.
@@ -410,6 +410,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                     self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)
                             }
+                            DefKind::Static(_) => {
+                                let static_item =
+                                    self.ctx.vm.types.def_from_rustc(did, &[], &self.ctx);
+                                ExprKind::Static(static_item)
+                            }
                             _ => {
                                 ExprKind::Error(format!("def = {:?}", def_kind))
                             }
@@ -462,7 +467,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     .types
                     .closure_from_rustc(closure.def_id.into(), self.ctx);
 
-                let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, false);
+                let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Function);
                 replace_captures(&mut ir, &captures);
 
                 let TypeKind::Closure(_, abstract_sig, abstract_subs) = ty.kind() else {

@@ -227,6 +227,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Block(block) => self.lower_block(block, dst_slot),
             // PLACES:
             ExprKind::NamedConst(_)
+            | ExprKind::Static(_)
             | ExprKind::VarRef { .. }
             | ExprKind::Field { .. }
             | ExprKind::Index { .. }
@@ -1103,9 +1104,25 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let const_ptr = const_ref.item.const_value(&fixed_subs).as_ptr() as usize;
 
-                let ptr_slot = self.stack.alloc(ty);
+                let ptr_slot = self.stack.alloc(ptr_ty);
                 self.out_bc.push(bytecode_select::literal(
                     const_ptr as i128,
+                    ptr_size,
+                    ptr_slot,
+                ));
+
+                Place::Ptr(ptr_slot, 0)
+            }
+            ExprKind::Static(static_ref) => {
+                let ty = self.expr_ty(id);
+                let ptr_ty = ty.ref_to(Mutability::Const);
+                let ptr_size = ptr_ty.layout().assert_size();
+
+                let static_ptr = static_ref.item.static_value(&static_ref.subs) as usize;
+                
+                let ptr_slot = self.stack.alloc(ptr_ty);
+                self.out_bc.push(bytecode_select::literal(
+                    static_ptr as i128,
                     ptr_size,
                     ptr_slot,
                 ));

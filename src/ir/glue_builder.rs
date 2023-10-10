@@ -5,7 +5,7 @@ use crate::{
     vm::VM,
 };
 
-use super::IRFunction;
+use super::{IRFunction, IRKind};
 
 /// used to generate glue code for Fn* traits on regular functions
 pub fn glue_for_fn_trait<'vm>(
@@ -86,10 +86,10 @@ pub fn glue_for_fn_trait<'vm>(
         ty: res_ty,
     });
 
-    builder.finish(root_expr, false, params, vec![])
+    builder.finish(root_expr, IRKind::Function, params, vec![])
 }
 
-pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) -> IRFunction<'vm> {
+pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, ir_kind: IRKind) -> IRFunction<'vm> {
     let TypeKind::Adt(item_with_subs) = adt_ty.kind() else {
         panic!("attempt to get ctor for non-adt");
     };
@@ -132,5 +132,5 @@ pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, is_constant: bool) ->
         ty: adt_ty,
     });
 
-    builder.finish(struct_expr, is_constant, params, vec![])
+    builder.finish(struct_expr, ir_kind, params, vec![])
 }

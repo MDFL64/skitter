@@ -37,7 +37,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
     pub fn finish(
         self,
         root_expr: ExprId,
-        is_constant: bool,
+        ir_kind: IRKind,
         params: Vec<PatternId>,
         opaque_types: Vec<OpaqueTypeMapping<'vm>>,
     ) -> IRFunction<'vm> {
@@ -51,7 +51,7 @@ impl<'vm> IRFunctionBuilder<'vm> {
 
         IRFunction {
             sig,
-            is_constant,
+            ir_kind,
             closure_kind: None,
             params,
             root_expr,
@@ -66,13 +66,42 @@ impl<'vm> IRFunctionBuilder<'vm> {
 
 pub struct IRFunction<'vm> {
     pub sig: FunctionSig<'vm>,
-    pub is_constant: bool,
+    pub ir_kind: IRKind,
     pub closure_kind: Option<FnTrait>,
     pub root_expr: ExprId,
     pub params: Vec<PatternId>,
     pub opaque_types: Vec<OpaqueTypeMapping<'vm>>,
     exprs: Vec<Expr<'vm>>,
     patterns: Vec<Pattern<'vm>>,
+}
+
+#[derive(Copy,Clone,Eq,PartialEq)]
+pub enum IRKind {
+    Function,
+    Constant,
+    Static
+}
+
+impl<'vm> Persist<'vm> for IRKind {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let b = reader.read_byte();
+        match b {
+            0 => IRKind::Function,
+            1 => IRKind::Constant,
+            2 => IRKind::Static,
+            _ => panic!()
+        }
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        let b = match self {
+            IRKind::Function => 0,
+            IRKind::Constant => 1,
+            IRKind::Static => 2,
+        };
+
+        writer.write_byte(b);
+    }
 }
 
 impl<'vm> Debug for IRFunction<'vm> {
@@ -94,7 +123,7 @@ impl<'vm> IRFunction<'vm> {
     pub fn clone_ir(&self) -> Self {
         Self {
             sig: self.sig.clone(),
-            is_constant: self.is_constant,
+            ir_kind: self.ir_kind,
             closure_kind: self.closure_kind,
             root_expr: self.root_expr,
             params: self.params.clone(),
@@ -229,6 +258,9 @@ pub enum ExprKind<'vm> {
     ArrayRepeat(ExprId, ArraySize),
 
     NamedConst(ItemWithSubs<'vm>),
+    /// Subs are included for consistency, they should be empty?
+    Static(ItemWithSubs<'vm>),
+
     //Function(ItemWithSubs<'vm>),
     Ref(ExprId, Mutability),
     DeRef(ExprId),
@@ -361,7 +393,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         let sig_inputs = Persist::persist_read(reader);
         let sig_output = Persist::persist_read(reader);
 
-        let is_constant = Persist::persist_read(reader);
+        let ir_kind = Persist::persist_read(reader);
         let root_expr = Persist::persist_read(reader);
 
         let params = Persist::persist_read(reader);
@@ -375,7 +407,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
                 inputs: sig_inputs,
                 output: sig_output,
             },
-            is_constant,
+            ir_kind,
             closure_kind: None,
             root_expr,
 
@@ -393,7 +425,7 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         self.sig.inputs.persist_write(writer);
         self.sig.output.persist_write(writer);
 
-        self.is_constant.persist_write(writer);
+        self.ir_kind.persist_write(writer);
 
         self.root_expr.persist_write(writer);
         self.params.persist_write(writer);
