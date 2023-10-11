@@ -2,11 +2,11 @@ use rustc_hir as hir;
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::ty::TypeckResults;
 
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use crate::{
     closure::ClosureSig,
-    ir::OpaqueTypeMapping,
+    ir::{OpaqueTypeMapping, MatchGuard},
     rustc_worker::RustCContext,
     types::{FloatWidth, Mutability, Sub, Type, TypeKind},
 };
@@ -291,13 +291,23 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 }
             }
             hir::ExprKind::Match(arg, arms, _) => {
+                use rustc_hir::Guard;
+                
                 let arg = self.expr(arg);
                 let arms = arms
                     .iter()
-                    .map(|arm| MatchArm {
-                        pattern: self.pattern(arm.pat),
-                        body: self.expr(arm.body),
-                        has_guard: arm.guard.is_some(),
+                    .map(|arm| {
+                        let guard = match arm.guard {
+                            Some(Guard::If(expr)) => MatchGuard::If(self.expr(&expr)),
+                            Some(Guard::IfLet(_)) => MatchGuard::IfLet,
+                            None => MatchGuard::None
+                        };
+
+                        MatchArm {
+                            pattern: self.pattern(arm.pat),
+                            body: self.expr(arm.body),
+                            guard
+                        }
                     })
                     .collect();
                 ExprKind::Match { arg, arms }
@@ -442,6 +452,16 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let block = self.block(block);
                 ExprKind::Block(block)
             }
+            hir::ExprKind::ConstBlock(const_block) => {
+
+                let hir = self.ctx.tcx.hir();
+                let types = self.ctx.tcx.typeck_body(const_block.body);
+                let body = hir.body(const_block.body);
+
+                let const_body = IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Constant);
+
+                ExprKind::ConstBlock(Arc::new(const_body))
+            }
             hir::ExprKind::DropTemps(e) => {
                 // TODO TODO TODO
                 // this may pose an issue when implementing destructors / drop
@@ -493,9 +513,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 closure.set_ir_base(ir);
 
                 ExprKind::Tuple(capture_exprs)
-            }
-            hir::ExprKind::ConstBlock(..) => {
-                ExprKind::Error("const block".to_owned())
             }
             hir::ExprKind::InlineAsm(..) => {
                 ExprKind::Error("inline asm".to_owned())

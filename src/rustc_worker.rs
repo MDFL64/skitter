@@ -207,7 +207,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
 
         let item_info = &items.items[item_id.index()];
         let did = item_info.did;
-        let ir_kind = item_info.item.ir_kind();
+        let ir_kind = item_info.item.ir_kind().expect("item does not contain ir");
 
         let res = self.call(move |ctx| {
             let res = build_ir(ctx, did, ir_kind);
@@ -716,9 +716,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     continue;
                 }
 
-                let ir_kind = item.item.ir_kind();
-                if let Some(ir) = build_ir(&ctx, item.did, ir_kind) {
-                    item.item.set_raw_ir(ir);
+                if let Some(ir_kind) = item.item.ir_kind() {
+                    if let Some(ir) = build_ir(&ctx, item.did, ir_kind) {
+                        item.item.set_raw_ir(ir);
+                    }
                 }
             }
 

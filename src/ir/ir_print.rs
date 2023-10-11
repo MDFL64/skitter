@@ -1,4 +1,4 @@
-use crate::ir::{BinaryOp, Stmt};
+use crate::ir::{BinaryOp, Stmt, MatchGuard};
 
 use super::{Block, ExprId, ExprKind, IRFunction, PatternId, PatternKind, UnaryOp};
 
@@ -166,7 +166,10 @@ impl<'vm> IRFunction<'vm> {
                     for _ in 0..sub_indent {
                         print!("   ");
                     }
-                    assert!(!a.has_guard);
+                    match a.guard {
+                        MatchGuard::None => (),
+                        _ => panic!("print match guard")
+                    }
                     self.print_pattern(a.pattern);
                     print!(" => ");
                     self.print_expr(a.body, sub_indent);

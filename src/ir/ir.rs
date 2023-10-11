@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     closure::FnTrait,
@@ -208,6 +208,7 @@ pub enum ExprKind<'vm> {
     PointerCast(ExprId, PointerCast),
 
     Block(Block),
+    ConstBlock(Arc<IRFunction<'vm>>),
 
     /// Variable reference
     VarRef(u32),
@@ -383,7 +384,35 @@ pub enum PointerCast {
 pub struct MatchArm {
     pub pattern: PatternId,
     pub body: ExprId,
-    pub has_guard: bool,
+    pub guard: MatchGuard,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchGuard {
+    If(ExprId),
+    IfLet,
+    None
+}
+
+impl<'vm> Persist<'vm> for MatchGuard {
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        panic!("read match guard");
+    }
+
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        match self {
+            MatchGuard::If(n) => {
+                writer.write_byte(0);
+                n.persist_write(writer);
+            }
+            MatchGuard::IfLet => {
+                writer.write_byte(1);
+            }
+            MatchGuard::None => {
+                writer.write_byte(2);
+            }
+        }
+    }
 }
 
 // Persistence!
@@ -1059,19 +1088,19 @@ impl<'vm> Persist<'vm> for BinaryOp {
 impl<'vm> Persist<'vm> for MatchArm {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.pattern.persist_write(writer);
-        self.has_guard.persist_write(writer);
+        self.guard.persist_write(writer);
         self.body.persist_write(writer);
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         let pattern = Persist::persist_read(reader);
-        let has_guard = Persist::persist_read(reader);
+        let guard = Persist::persist_read(reader);
         let body = Persist::persist_read(reader);
 
         Self {
             pattern,
             body,
-            has_guard,
+            guard,
         }
     }
 }

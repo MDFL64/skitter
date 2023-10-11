@@ -5,7 +5,7 @@ use crate::closure::FnTrait;
 use crate::ir::const_util::ConstStatus;
 use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, Pattern,
-    PatternId, PatternKind, PointerCast, Stmt,
+    PatternId, PatternKind, PointerCast, Stmt, MatchGuard,
 };
 use crate::items::FunctionAbi;
 use crate::types::{ArraySize, Mutability, SubList, Type, TypeKind};
@@ -227,6 +227,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Block(block) => self.lower_block(block, dst_slot),
             // PLACES:
             ExprKind::NamedConst(_)
+            | ExprKind::ConstBlock(_)
             | ExprKind::Static(_)
             | ExprKind::VarRef { .. }
             | ExprKind::Field { .. }
@@ -952,14 +953,29 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let mut jump_gaps = Vec::new();
 
                 for arm in arms {
-                    assert!(!arm.has_guard); // todo
                     self.match_pattern(arm.pattern, arg_slot, Some(match_result_slot));
                     let check_end_index = self.skip_instr();
+
+                    // guard clause
+                    let guard_end_index = if let MatchGuard::If(guard) = arm.guard {
+                        self.lower_expr(guard, Some(match_result_slot));
+                        Some(self.skip_instr())
+                    } else if let MatchGuard::IfLet = arm.guard {
+                        panic!("if-let match arm");
+                    } else {
+                        None
+                    };
+
                     self.lower_expr(arm.body, Some(dst_slot));
                     jump_gaps.push(self.skip_instr());
 
                     self.out_bc[check_end_index] =
                         Instr::JumpF(-self.get_jump_offset(check_end_index), match_result_slot);
+
+                    if let Some(guard_end_index) = guard_end_index {
+                        self.out_bc[guard_end_index] =
+                            Instr::JumpF(-self.get_jump_offset(guard_end_index), match_result_slot);
+                    }
                 }
 
                 for gap_index in jump_gaps {
@@ -1094,6 +1110,29 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     _ => panic!("cannot index {:?}", lhs_kind),
                 }
                 Place::Ptr(index_slot, 0)
+            }
+            ExprKind::ConstBlock(const_ir) => {
+                let bc =
+                    BytecodeCompiler::compile(self.vm, &const_ir, self.in_func_subs, "<const block>", self.in_func_subs);
+                
+                let eval_thread = self.vm.make_thread();
+                eval_thread.run_bytecode(&bc, 0);
+                
+                let ty = const_ir.sig.output; // todo sub?
+                let ptr_ty = ty.ref_to(Mutability::Const);
+                let ptr_size = ptr_ty.layout().assert_size();
+    
+                let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
+                let const_ptr = self.vm.alloc_constant(eval_bytes).as_ptr() as usize;
+                
+                let ptr_slot = self.stack.alloc(ptr_ty);
+                self.out_bc.push(bytecode_select::literal(
+                    const_ptr as i128,
+                    ptr_size,
+                    ptr_slot,
+                ));
+
+                Place::Ptr(ptr_slot, 0)
             }
             ExprKind::NamedConst(const_ref) => {
                 let ty = self.expr_ty(id);

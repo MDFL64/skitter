@@ -607,9 +607,7 @@ impl<'vm> ImplBounds<'vm> {
             // NOTE: whether this is resolvable is probably dependant on eval order
             (TypeKind::AssociatedType(item), _) => {
                 let for_tys = item.subs.sub(&res_map.result_subs);
-                println!("<<< {}",for_tys);
                 let at = item.item.resolve_associated_ty(&for_tys);
-                println!(">>> {}",at);
                 Self::match_types(at,rhs,res_map)
             }
             (_, TypeKind::AssociatedType(item)) => panic!("assoc ty rhs"),

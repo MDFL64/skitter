@@ -821,12 +821,12 @@ impl<'vm> Item<'vm> {
         }
     }
 
-    pub fn ir_kind(&self) -> IRKind {
+    pub fn ir_kind(&self) -> Option<IRKind> {
         match self.kind {
-            ItemKind::Function { .. } => IRKind::Function,
-            ItemKind::Constant { .. } => IRKind::Constant,
-            ItemKind::Static { .. } => IRKind::Static,
-            _ => panic!()
+            ItemKind::Function { .. } => Some(IRKind::Function),
+            ItemKind::Constant { .. } => Some(IRKind::Constant),
+            ItemKind::Static { .. } => Some(IRKind::Static),
+            _ => None
         }
     }
 
@@ -941,6 +941,7 @@ impl<'vm> Item<'vm> {
         let ir = match &self.kind {
             ItemKind::Function { ir, .. } => ir,
             ItemKind::Constant { ir, .. } => ir,
+            ItemKind::Static { ir, .. } => ir,
             _ => panic!("item kind mismatch"),
         };
 
