@@ -221,7 +221,7 @@ impl<'vm> TypeContext<'vm> {
         args: &[GenericArg<'tcx>],
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> ItemWithSubs<'vm> {
-        if ctx.vm.lookup_local_impls && did.krate == rustc_hir::def_id::LOCAL_CRATE {
+        if ctx.vm.cli_args.debug_local_impls && did.krate == rustc_hir::def_id::LOCAL_CRATE {
             if let Some(parent_impl) = ctx.tcx.impl_of_method(did) {
                 let subject = ctx.tcx.impl_subject(parent_impl).skip_binder();
                 if let ImplSubject::Inherent(ty) = subject {

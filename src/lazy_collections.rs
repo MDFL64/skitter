@@ -256,10 +256,7 @@ where
 
         let final_index = if t1_index >= 0 {
             // fast path
-            if t1_index == TABLE_SLOT_INVALID {
-                return None;
-            }
-            t1_index as usize
+            t1_index
         } else {
             // slow path, seed a secondary hasher
             let t2_index = {
@@ -268,10 +265,14 @@ where
                 self.table_2[hasher.finish() as usize % self.table_2.len()]
             };
 
-            t2_index as usize
+            t2_index
         };
 
-        let item = self.array.get(final_index);
+        if final_index == TABLE_SLOT_INVALID {
+            return None;
+        }
+
+        let item = self.array.get(final_index as usize);
 
         let item_key = <T as LazyKey>::key(item).map(|key| key.borrow());
         if item_key != Some(key) {

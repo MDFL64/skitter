@@ -1,4 +1,4 @@
-use crate::ir::{BinaryOp, Stmt, MatchGuard};
+use crate::ir::{BinaryOp, MatchGuard, Stmt};
 
 use super::{Block, ExprId, ExprKind, IRFunction, PatternId, PatternKind, UnaryOp};
 
@@ -168,7 +168,7 @@ impl<'vm> IRFunction<'vm> {
                     }
                     match a.guard {
                         MatchGuard::None => (),
-                        _ => panic!("print match guard")
+                        _ => panic!("print match guard"),
                     }
                     self.print_pattern(a.pattern);
                     print!(" => ");

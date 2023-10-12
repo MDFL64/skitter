@@ -512,10 +512,10 @@ pub fn cast<'vm>(arg_ty: Type, res_ty: Type) -> fn(Slot, Slot) -> Instr<'vm> {
                 arg_size, res_size, sign
             ),
         },
-        (TypeKind::Adt(_),TypeKind::Int(..)) => {
+        (TypeKind::Adt(_), TypeKind::Int(..)) => {
             let adt_info = arg_ty.adt_info();
             if let Some(enum_info) = adt_info.enum_info() {
-                let f = cast(enum_info.discriminant_internal,res_ty);
+                let f = cast(enum_info.discriminant_internal, res_ty);
                 //println!("{:?}",f(Slot::new(0),Slot::new(0)));
                 return f;
             }

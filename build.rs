@@ -478,7 +478,7 @@ fn write_exec_match() {
         }
     }
     Instr::MemCopy(src,dst,count) => {
-        let src: *const u8 = read_stack(stack, *dst);
+        let src: *const u8 = read_stack(stack, *src);
         let dst: *mut u8 = read_stack(stack, *dst);
         let count: usize = read_stack(stack, *count);
 

@@ -250,11 +250,7 @@ fn build_ir<'vm, 'tcx>(
         let types = ctx.tcx.typeck(did);
 
         Some(Arc::new(IRFunctionConverter::run(
-            ctx,
-            did,
-            body,
-            types,
-            ir_kind,
+            ctx, did, body, types, ir_kind,
         )))
     } else {
         None
@@ -284,7 +280,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
         let t = Instant::now();
         let hir_items = hir.items();
-        if vm.is_verbose {
+        if vm.cli_args.verbose {
             println!("rustc hir items took {:?}", t.elapsed());
         }
 
@@ -702,7 +698,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             }
         }
 
-        if vm.is_verbose {
+        if vm.cli_args.verbose {
             println!("item aggregation took {:?}", t.elapsed());
             println!("n = {}", ctx.items.items.len());
         }

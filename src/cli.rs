@@ -36,4 +36,8 @@ pub struct CliArgs {
     /// Compile dependencies instead of loading cached IR. SLOW.
     #[clap(long)]
     pub debug_no_load: bool,
+
+    /// Log the arguments and return value of every function call.
+    #[clap(long)]
+    pub debug_trace_calls: bool,
 }

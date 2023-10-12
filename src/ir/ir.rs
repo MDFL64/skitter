@@ -75,11 +75,11 @@ pub struct IRFunction<'vm> {
     patterns: Vec<Pattern<'vm>>,
 }
 
-#[derive(Copy,Clone,Eq,PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum IRKind {
     Function,
     Constant,
-    Static
+    Static,
 }
 
 impl<'vm> Persist<'vm> for IRKind {
@@ -89,7 +89,7 @@ impl<'vm> Persist<'vm> for IRKind {
             0 => IRKind::Function,
             1 => IRKind::Constant,
             2 => IRKind::Static,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 
@@ -286,7 +286,7 @@ pub enum ExprKind<'vm> {
     },
 
     /// Error, for unsupported exprs
-    Error(String)
+    Error(String),
 }
 
 #[derive(Debug, Clone)]
@@ -391,12 +391,21 @@ pub struct MatchArm {
 pub enum MatchGuard {
     If(ExprId),
     IfLet,
-    None
+    None,
 }
 
 impl<'vm> Persist<'vm> for MatchGuard {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        panic!("read match guard");
+        let b = reader.read_byte();
+        match b {
+            0 => {
+                let e = Persist::persist_read(reader);
+                MatchGuard::If(e)
+            }
+            1 => MatchGuard::IfLet,
+            2 => MatchGuard::None,
+            _ => panic!(),
+        }
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -570,6 +579,11 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 let n = Persist::persist_read(reader);
                 ExprKind::LiteralValue(n)
             }
+            'o' => {
+                let ir = IRFunction::persist_read(reader);
+                let ir = Arc::new(ir);
+                ExprKind::ConstBlock(ir)
+            }
             'u' => {
                 let op = match reader.read_byte() {
                     0 => UnaryOp::Not,
@@ -578,6 +592,10 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 };
                 let arg = Persist::persist_read(reader);
                 ExprKind::Unary(op, arg)
+            }
+            's' => {
+                let item = Persist::persist_read(reader);
+                ExprKind::Static(item)
             }
             'v' => {
                 let n = Persist::persist_read(reader);
@@ -711,7 +729,7 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
             }
             '~' => {
                 let error_msg = String::persist_read(reader);
-                println!("error expr = {}",error_msg);
+                println!("error expr = {}", error_msg);
                 panic!();
             }
             _ => panic!("todo read expr '{}'", c),
@@ -742,9 +760,17 @@ impl<'vm> Persist<'vm> for Expr<'vm> {
                 func.persist_write(writer);
                 args.persist_write(writer);
             }
+            ExprKind::ConstBlock(ref func) => {
+                writer.write_byte(b'o');
+                func.persist_write(writer);
+            }
             ExprKind::LiteralValue(x) => {
                 writer.write_byte(b'n');
                 x.persist_write(writer);
+            }
+            ExprKind::Static(ref item_with_subs) => {
+                writer.write_byte(b's');
+                item_with_subs.persist_write(writer);
             }
             ExprKind::Unary(op, e) => {
                 writer.write_byte(b'u');

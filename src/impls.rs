@@ -73,7 +73,7 @@ pub trait ImplTable<'vm> {
         if let Some(list) = self.get_inherent_table(full_key) {
             for value in list {
                 let bounds = self.get_bounds(value.bounds_id);
-                if bounds.check_inherent(ty,ty.vm()) {
+                if bounds.check_inherent(ty, ty.vm()) {
                     return Some(value.value.clone());
                 }
             }
@@ -483,10 +483,8 @@ impl<'vm> ImplTable<'vm> for ImplTableLazy<'vm> {
 
 impl<'vm> ImplBounds<'vm> {
     pub fn check(&self, for_tys: &SubList<'vm>, vm: &'vm VM<'vm>) -> Option<SubList<'vm>> {
-        
         let mut sub_map = SubMap::new(self.generic_counts.clone(), vm);
         if Self::match_subs(&self.for_tys, for_tys, &mut sub_map) {
-
             // this is an ATTEMPT to deal with GATs -- it may not be entirely correct
             if for_tys.list.len() > self.for_tys.list.len() {
                 let result_subs = sub_map.get_result();
@@ -600,7 +598,6 @@ impl<'vm> ImplBounds<'vm> {
                     panic!("bidirectional bound not permitted");
                 }*/
             }*/
-
             (TypeKind::Param(param_num), _) => res_map.set_param(*param_num, rhs),
             (_, TypeKind::Param(param_num)) => panic!("param rhs"),
 
@@ -608,7 +605,7 @@ impl<'vm> ImplBounds<'vm> {
             (TypeKind::AssociatedType(item), _) => {
                 let for_tys = item.subs.sub(&res_map.result_subs);
                 let at = item.item.resolve_associated_ty(&for_tys);
-                Self::match_types(at,rhs,res_map)
+                Self::match_types(at, rhs, res_map)
             }
             (_, TypeKind::AssociatedType(item)) => panic!("assoc ty rhs"),
 
@@ -646,7 +643,7 @@ enum SubSide {
 #[derive(Debug)]
 struct SubMap<'vm> {
     result_subs: SubList<'vm>,
-    generic_counts: GenericCounts
+    generic_counts: GenericCounts,
 }
 
 impl<'vm> SubMap<'vm> {
@@ -665,7 +662,7 @@ impl<'vm> SubMap<'vm> {
 impl<'vm> SubMap<'vm> {
     fn set_param(&mut self, n: u32, val: Type<'vm>) -> bool {
         let result_subs = self.get_result();
-        
+
         let entry = &mut result_subs.list[n as usize];
 
         if let Sub::Type(current_val) = entry {
@@ -673,7 +670,7 @@ impl<'vm> SubMap<'vm> {
                 if current_val.kind() == &TypeKind::Unknown {
                     *current_val = val;
                 } else {
-                    println!("{} {}",current_val,val);
+                    println!("{} {}", current_val, val);
                     panic!("yeet");
                 }
             }

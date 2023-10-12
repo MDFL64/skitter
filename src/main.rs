@@ -39,6 +39,7 @@ mod profiler;
 mod rustc_worker;
 mod test;
 mod types;
+mod value_debug;
 
 use std::{
     cell::LazyCell,

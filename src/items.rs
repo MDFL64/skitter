@@ -347,6 +347,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     info: OnceLock::new(),
                 }
             }
+            's' => {
+                ir = reader.read_byte_slice();
+                ItemKind::new_static()
+            }
             't' => {
                 let builtin = Option::<BuiltinTrait>::persist_read(reader);
                 let assoc_value_map = AHashMap::<ItemPath, u32>::persist_read(reader);
@@ -475,7 +479,8 @@ pub enum ItemKind<'vm> {
     /// and don't need weird logic to determine if they need copied.
     Static {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
-        value_ptr: OnceLock<usize>
+        value_ptr: OnceLock<usize>,
+        closures: Mutex<AHashMap<Vec<u32>, &'vm Closure<'vm>>>,
     },
     AssociatedType {
         virtual_info: VirtualInfo,
@@ -752,9 +757,10 @@ impl<'vm> ItemKind<'vm> {
     }
 
     pub fn new_static() -> Self {
-        Self::Static{
+        Self::Static {
             ir: Default::default(),
-            value_ptr: Default::default()
+            value_ptr: Default::default(),
+            closures: Default::default(),
         }
     }
 
@@ -814,7 +820,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn is_function(&self) -> bool {
-        if let ItemKind::Function{..} = &self.kind {
+        if let ItemKind::Function { .. } = &self.kind {
             true
         } else {
             false
@@ -826,7 +832,7 @@ impl<'vm> Item<'vm> {
             ItemKind::Function { .. } => Some(IRKind::Function),
             ItemKind::Constant { .. } => Some(IRKind::Constant),
             ItemKind::Static { .. } => Some(IRKind::Static),
-            _ => None
+            _ => None,
         }
     }
 
@@ -877,10 +883,7 @@ impl<'vm> Item<'vm> {
                 ctor_for,
                 ..
             } => (ir, virtual_info, ctor_for, IRKind::Constant),
-            ItemKind::Static {
-                ir,
-                ..
-            } => (ir, &None, &None, IRKind::Static),
+            ItemKind::Static { ir, .. } => (ir, &None, &None, IRKind::Static),
             _ => panic!("item kind mismatch"),
         };
 
@@ -929,6 +932,7 @@ impl<'vm> Item<'vm> {
         let ir = match &self.kind {
             ItemKind::Function { ir, .. } => ir,
             ItemKind::Constant { ir, .. } => ir,
+            ItemKind::Static { ir, .. } => ir,
             _ => panic!("item kind mismatch"),
         };
 
@@ -975,7 +979,7 @@ impl<'vm> Item<'vm> {
 
     // unlike with constants, we should probably ALWAYS be allocating here, even for small values
     pub fn static_value(&self, subs: &SubList<'vm>) -> *mut u8 {
-        let ItemKind::Static{ir, value_ptr} = &self.kind else {
+        let ItemKind::Static{ir, value_ptr, ..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -1010,7 +1014,7 @@ impl<'vm> Item<'vm> {
         // TODO just place the closures map on all items?
         // fns and consts will probably account for a majority of items anyway
         match &self.kind {
-            ItemKind::Function { closures, .. } => {
+            ItemKind::Function { closures, .. } | ItemKind::Static { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
 
                 closures.entry(path_indices.clone()).or_insert_with(|| {

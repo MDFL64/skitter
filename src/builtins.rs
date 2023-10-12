@@ -417,15 +417,36 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let ptr_ty = subs.list[0].assert_ty();
             let offset_ty = subs.list[1].assert_ty();
+
+            // todo wide pointers?
             assert!(ptr_ty.layout().assert_size() == POINTER_SIZE.bytes());
 
-            let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
+            let elem_size = if let TypeKind::Ptr(child, _) = ptr_ty.kind() {
+                child.layout().assert_size()
+            } else {
+                panic!("offset intrinsic used on non-ptr");
+            };
 
-            out_bc.push(offset_ctor(out_slot, arg_slots[0], arg_slots[1]));
+            if elem_size == 1 {
+                let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
 
-            //panic!("offset {:?} {:?} {:?}",out_slot,arg_slots[0],arg_slots[1]);
+                out_bc.push(offset_ctor(out_slot, arg_slots[0], arg_slots[1]));
+            } else {
+                // out = size
+                out_bc.push(bytecode_select::literal(
+                    elem_size as _,
+                    POINTER_SIZE.bytes(),
+                    out_slot,
+                ));
 
-            // TODO wide pointers?
+                // out = size * n
+                let (mul_ctor, _) = bytecode_select::binary(BinaryOp::Mul, offset_ty);
+                out_bc.push(mul_ctor(out_slot, out_slot, arg_slots[1]));
+
+                // out = base + size * n
+                let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
+                out_bc.push(offset_ctor(out_slot, out_slot, arg_slots[0]));
+            }
         }
         "min_align_of" => {
             assert!(subs.list.len() == 1);
@@ -631,6 +652,8 @@ pub fn compile_rust_intrinsic<'vm>(
             }
         }
         "copy_nonoverlapping" => {
+            // generally rust will check that the regions are not overlapping
+            // no need to assert it here
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 3);
 
@@ -643,7 +666,7 @@ pub fn compile_rust_intrinsic<'vm>(
                 let usize_ty = vm.common_types().usize;
                 let size_slot = stack.alloc(usize_ty);
                 out_bc.push(bytecode_select::copy(size_slot, arg_slots[2], usize_ty).unwrap());
-                panic!("non-trivial copy {}",arg_size);
+                panic!("non-trivial copy {}", arg_size);
             }
         }
         "ctpop" => {

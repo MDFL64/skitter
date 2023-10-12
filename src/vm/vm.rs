@@ -2,6 +2,7 @@ use ahash::AHashMap;
 use ahash::AHashSet;
 use colosseum::sync::Arena;
 
+use crate::abi::align;
 use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::cli::CliArgs;
@@ -26,6 +27,7 @@ use crate::types::SubList;
 use crate::types::Type;
 use crate::types::TypeContext;
 use crate::types::TypeKind;
+use crate::value_debug::print_value;
 use crate::vm::instr::Slot;
 use crate::CratePath;
 use std::borrow::Cow;
@@ -44,9 +46,8 @@ use std::sync::atomic::AtomicPtr;
 use super::instr::Instr;
 
 pub struct VM<'vm> {
+    pub cli_args: CliArgs,
     pub types: TypeContext<'vm>,
-    pub is_verbose: bool,
-    pub lookup_local_impls: bool,
     pub core_crate: OnceLock<CrateId>,
     common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
@@ -66,6 +67,8 @@ pub struct VM<'vm> {
     next_closure_id: AtomicU32,
 }
 
+static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
+
 pub struct VMThread<'vm> {
     vm: &'vm VM<'vm>,
     stack: Vec<u128>,
@@ -73,11 +76,39 @@ pub struct VMThread<'vm> {
 
 impl<'vm> VMThread<'vm> {
     pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
-        /*{
-            let bytes: [u8;16] = unsafe { read_stack(self.stack.as_ptr() as *mut u8, Slot::new(stack_offset)) };
-            println!("enter {}{}: {:?}",func.source.debug_name(),func.subs,bytes);
-        }*/
         let native = func.get_native();
+
+        if self.vm.cli_args.debug_trace_calls && !native.is_some() {
+            let mut call_depth = TRACE_CALL_DEPTH.lock().unwrap();
+
+            let (ir, inner_subs) = func.source.ir(&func.subs);
+
+            let ret_ty = ir.sig.output.sub(&inner_subs);
+
+            let mut arg_offset = ret_ty.layout().assert_size();
+
+            let arg_ptr = unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
+
+            for _ in 0..*call_depth {
+                print!("  ");
+            }
+            *call_depth += 1;
+
+            print!("CALL {}( ", func.source.debug_name());
+
+            for (i, arg_ty) in ir.sig.inputs.iter().enumerate() {
+                let arg_ty = arg_ty.sub(&inner_subs);
+                let arg_layout = arg_ty.layout();
+                if i != 0 {
+                    print!(" , ");
+                }
+                arg_offset = align(arg_offset, arg_layout.align);
+                unsafe { print_value(arg_ty, arg_ptr.offset(arg_offset as isize), 0) }
+                arg_offset += arg_layout.assert_size();
+            }
+            println!(" )");
+        }
+
         if let Some(native) = native {
             unsafe {
                 let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
@@ -89,10 +120,25 @@ impl<'vm> VMThread<'vm> {
         // fetch bytecode
         let bc = func.bytecode();
         self.run_bytecode(bc, stack_offset);
-        /*{
-            let bytes: [u8;16] = unsafe { read_stack(self.stack.as_ptr() as *mut u8, Slot::new(stack_offset)) };
-            println!("exit {}{}: {:?}",func.source.debug_name(),func.subs,bytes);
-        }*/
+
+        if self.vm.cli_args.debug_trace_calls && !native.is_some() {
+            let mut call_depth = TRACE_CALL_DEPTH.lock().unwrap();
+
+            let (ir, inner_subs) = func.source.ir(&func.subs);
+
+            let ret_ty = ir.sig.output.sub(&inner_subs);
+
+            let ret_ptr = unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
+
+            *call_depth -= 1;
+            for _ in 0..*call_depth {
+                print!("  ");
+            }
+
+            print!("RET  {} -> ", func.source.debug_name());
+            unsafe { print_value(ret_ty, ret_ptr, 0) }
+            println!();
+        }
     }
 
     pub fn run_bytecode(&self, bc: &[Instr<'vm>], stack_offset: u32) {
@@ -122,8 +168,7 @@ impl<'vm> VMThread<'vm> {
 impl<'vm> VM<'vm> {
     pub fn new(cli_args: &CliArgs) -> Self {
         Self {
-            is_verbose: cli_args.verbose,
-            lookup_local_impls: cli_args.debug_local_impls,
+            cli_args: cli_args.clone(),
 
             core_crate: OnceLock::new(),
             types: TypeContext::new(),
@@ -378,7 +423,7 @@ impl<'vm> FunctionSource<'vm> {
 pub struct Function<'vm> {
     source: FunctionSource<'vm>,
     subs: SubList<'vm>,
-    /// Store a void pointer because function pointers can't be stored by this(?)
+    /// Store a void pointer because function pointers can't be stored by AtomicPtr(?)
     native: AtomicPtr<std::ffi::c_void>,
     bytecode: AtomicPtr<Vec<Instr<'vm>>>,
 }

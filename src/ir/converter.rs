@@ -6,15 +6,15 @@ use std::{str::FromStr, sync::Arc};
 
 use crate::{
     closure::ClosureSig,
-    ir::{OpaqueTypeMapping, MatchGuard},
+    ir::{MatchGuard, OpaqueTypeMapping},
     rustc_worker::RustCContext,
     types::{FloatWidth, Mutability, Sub, Type, TypeKind},
 };
 
 use super::{
     BinaryOp, BindingMode, Block, Expr, ExprId, ExprKind, FieldPattern, IRFunction,
-    IRFunctionBuilder, LogicOp, LoopId, MatchArm, Pattern, PatternId, PatternKind, PointerCast,
-    Stmt, UnaryOp, UpVar, IRKind,
+    IRFunctionBuilder, IRKind, LogicOp, LoopId, MatchArm, Pattern, PatternId, PatternKind,
+    PointerCast, Stmt, UnaryOp, UpVar,
 };
 
 /// Converts rust IR to skitter IR.
@@ -292,7 +292,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             }
             hir::ExprKind::Match(arg, arms, _) => {
                 use rustc_hir::Guard;
-                
+
                 let arg = self.expr(arg);
                 let arms = arms
                     .iter()
@@ -300,13 +300,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         let guard = match arm.guard {
                             Some(Guard::If(expr)) => MatchGuard::If(self.expr(&expr)),
                             Some(Guard::IfLet(_)) => MatchGuard::IfLet,
-                            None => MatchGuard::None
+                            None => MatchGuard::None,
                         };
 
                         MatchArm {
                             pattern: self.pattern(arm.pat),
                             body: self.expr(arm.body),
-                            guard
+                            guard,
                         }
                     })
                     .collect();
@@ -425,9 +425,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                     self.ctx.vm.types.def_from_rustc(did, &[], &self.ctx);
                                 ExprKind::Static(static_item)
                             }
-                            _ => {
-                                ExprKind::Error(format!("def = {:?}", def_kind))
-                            }
+                            _ => ExprKind::Error(format!("def = {:?}", def_kind)),
                         }
                     }
                     hir::def::Res::SelfCtor(_) => {
@@ -453,12 +451,12 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 ExprKind::Block(block)
             }
             hir::ExprKind::ConstBlock(const_block) => {
-
                 let hir = self.ctx.tcx.hir();
                 let types = self.ctx.tcx.typeck_body(const_block.body);
                 let body = hir.body(const_block.body);
 
-                let const_body = IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Constant);
+                let const_body =
+                    IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Constant);
 
                 ExprKind::ConstBlock(Arc::new(const_body))
             }
@@ -487,7 +485,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     .types
                     .closure_from_rustc(closure.def_id.into(), self.ctx);
 
-                let mut ir = IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Function);
+                let mut ir =
+                    IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Function);
                 replace_captures(&mut ir, &captures);
 
                 let TypeKind::Closure(_, abstract_sig, abstract_subs) = ty.kind() else {
@@ -514,9 +513,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 ExprKind::Tuple(capture_exprs)
             }
-            hir::ExprKind::InlineAsm(..) => {
-                ExprKind::Error("inline asm".to_owned())
-            }
+            hir::ExprKind::InlineAsm(..) => ExprKind::Error("inline asm".to_owned()),
             _ => panic!("todo expr kind {:?}", expr.kind),
         };
 

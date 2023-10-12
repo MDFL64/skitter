@@ -4,8 +4,8 @@ use crate::bytecode_select;
 use crate::closure::FnTrait;
 use crate::ir::const_util::ConstStatus;
 use crate::ir::{
-    BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, Pattern,
-    PatternId, PatternKind, PointerCast, Stmt, MatchGuard,
+    BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, MatchGuard,
+    Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
 use crate::types::{ArraySize, Mutability, SubList, Type, TypeKind};
@@ -49,7 +49,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         path: &str,
         original_subs: &'f SubList<'vm>,
     ) -> Vec<Instr<'vm>> {
-        if vm.is_verbose {
+        if vm.cli_args.verbose {
             println!("compiling {}{}", path, original_subs);
             //ir.print();
         }
@@ -105,7 +105,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
         compiler.out_bc.push(Instr::Return);
 
-        if compiler.vm.is_verbose {
+        if vm.cli_args.verbose {
             for (i, bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}", i, bc);
             }
@@ -122,7 +122,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         subs: &'f SubList<'vm>,
         root_expr: ExprId,
     ) -> (usize, Option<usize>) {
-        if vm.is_verbose {
+        if vm.cli_args.verbose {
             println!("compiling promoted const");
         }
 
@@ -141,7 +141,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         let place = compiler.expr_to_place(root_expr);
         compiler.out_bc.push(Instr::Return);
 
-        if compiler.vm.is_verbose {
+        if vm.cli_args.verbose {
             for (i, bc) in compiler.out_bc.iter().enumerate() {
                 println!("  {} {:?}", i, bc);
             }
@@ -175,7 +175,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     }
 
     fn debug<S: Into<String>>(&mut self, f: impl Fn() -> S) {
-        if self.vm.is_verbose {
+        if self.vm.cli_args.verbose {
             let bc = Instr::Debug(Box::new(f().into()));
             self.out_bc.push(bc);
         }
@@ -1112,19 +1112,24 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 Place::Ptr(index_slot, 0)
             }
             ExprKind::ConstBlock(const_ir) => {
-                let bc =
-                    BytecodeCompiler::compile(self.vm, &const_ir, self.in_func_subs, "<const block>", self.in_func_subs);
-                
+                let bc = BytecodeCompiler::compile(
+                    self.vm,
+                    &const_ir,
+                    self.in_func_subs,
+                    "<const block>",
+                    self.in_func_subs,
+                );
+
                 let eval_thread = self.vm.make_thread();
                 eval_thread.run_bytecode(&bc, 0);
-                
+
                 let ty = const_ir.sig.output; // todo sub?
                 let ptr_ty = ty.ref_to(Mutability::Const);
                 let ptr_size = ptr_ty.layout().assert_size();
-    
+
                 let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
                 let const_ptr = self.vm.alloc_constant(eval_bytes).as_ptr() as usize;
-                
+
                 let ptr_slot = self.stack.alloc(ptr_ty);
                 self.out_bc.push(bytecode_select::literal(
                     const_ptr as i128,
@@ -1158,7 +1163,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ptr_size = ptr_ty.layout().assert_size();
 
                 let static_ptr = static_ref.item.static_value(&static_ref.subs) as usize;
-                
+
                 let ptr_slot = self.stack.alloc(ptr_ty);
                 self.out_bc.push(bytecode_select::literal(
                     static_ptr as i128,
