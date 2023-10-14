@@ -332,6 +332,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     mono_values: Default::default(),
                     virtual_info,
                     ctor_for,
+                    closures: Default::default(),
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -465,7 +466,7 @@ pub enum ItemKind<'vm> {
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
         extern_name: Option<(FunctionAbi, String)>,
-        closures: Mutex<AHashMap<Vec<u32>, &'vm Closure<'vm>>>,
+        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -474,13 +475,14 @@ pub enum ItemKind<'vm> {
         mono_values: Mutex<AHashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
+        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
     },
     /// Statics operate similarly to constants, but don't need monomorphized,
     /// and don't need weird logic to determine if they need copied.
     Static {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         value_ptr: OnceLock<usize>,
-        closures: Mutex<AHashMap<Vec<u32>, &'vm Closure<'vm>>>,
+        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
     },
     AssociatedType {
         virtual_info: VirtualInfo,
@@ -732,6 +734,7 @@ impl<'vm> ItemKind<'vm> {
             mono_values: Default::default(),
             virtual_info: None,
             ctor_for: None,
+            closures: Default::default(),
         }
     }
 
@@ -744,6 +747,7 @@ impl<'vm> ItemKind<'vm> {
                 member_index,
             }),
             ctor_for: None,
+            closures: Default::default(),
         }
     }
 
@@ -753,6 +757,7 @@ impl<'vm> ItemKind<'vm> {
             mono_values: Default::default(),
             virtual_info: None,
             ctor_for: Some((adt_id, variant)),
+            closures: Default::default(),
         }
     }
 
@@ -1010,22 +1015,19 @@ impl<'vm> Item<'vm> {
         }
     }
 
-    pub fn child_closure(&self, path_indices: Vec<u32>) -> &'vm Closure<'vm> {
+    pub fn child_closure(&self, full_path: &'vm str) -> &'vm Closure<'vm> {
         // TODO just place the closures map on all items?
         // fns and consts will probably account for a majority of items anyway
         match &self.kind {
-            ItemKind::Function { closures, .. } | ItemKind::Static { closures, .. } => {
+            ItemKind::Function { closures, .. }
+            | ItemKind::Static { closures, .. }
+            | ItemKind::Constant { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
 
-                closures.entry(path_indices.clone()).or_insert_with(|| {
+                closures.entry(full_path).or_insert_with(|| {
                     self.vm
-                        .alloc_closure(self.crate_id, self.item_id, path_indices)
+                        .alloc_closure(self.crate_id, self.item_id, full_path)
                 })
-            }
-            ItemKind::Constant { .. } => {
-                println!("TODO CLOSURE IN CONSTANT!");
-                self.vm
-                    .alloc_closure(self.crate_id, self.item_id, path_indices)
             }
             _ => {
                 panic!("attempt to get child closure on {:?}", self)
@@ -1240,7 +1242,15 @@ pub fn path_from_rustc<'vm>(
                 is_debug = true;
             }
             DefPathData::ClosureExpr => {
-                result.push_str("::{closure}");
+                write!(result, "::{{closure#{}}}", elem.disambiguator).unwrap();
+                is_debug = true;
+            }
+            DefPathData::AnonConst => {
+                write!(result, "::{{const_block#{}}}", elem.disambiguator).unwrap();
+                is_debug = true;
+            }
+            DefPathData::ImplTrait => {
+                write!(result, "::{{impl_type#{}}}", elem.disambiguator).unwrap();
                 is_debug = true;
             }
             DefPathData::Ctor => {
@@ -1271,6 +1281,27 @@ pub fn path_from_rustc<'vm>(
         }
     } else {
         panic!("zero element path?");
+    }
+}
+
+/// Find the DefId for the containing item.
+pub fn parent_def_from_rustc<'vm, 'tcx>(
+    mut did: rustc_hir::def_id::DefId,
+    ctx: &RustCContext<'vm, 'tcx>,
+) -> rustc_hir::def_id::DefId {
+    loop {
+        use rustc_hir::def::DefKind;
+
+        let kind = ctx.tcx.def_kind(did);
+        match kind {
+            DefKind::Closure | DefKind::InlineConst | DefKind::OpaqueTy => {
+                did = ctx.tcx.parent(did);
+            }
+            DefKind::Fn | DefKind::Static(_) | DefKind::Const => {
+                return did;
+            }
+            _ => panic!("def parent? {:?}", kind),
+        }
     }
 }
 

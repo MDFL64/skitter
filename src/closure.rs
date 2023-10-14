@@ -90,7 +90,7 @@ pub struct Closure<'vm> {
     // may exist for the same (crate,item,indices) key
     pub def_crate: CrateId,
     pub def_item: ItemId,
-    pub def_path_indices: Vec<u32>,
+    pub def_full_path: &'vm str,
 
     abstract_sig: OnceLock<ClosureSig<'vm>>,
 
@@ -107,7 +107,7 @@ impl<'vm> Closure<'vm> {
         unique_id: u32,
         def_crate: CrateId,
         def_item: ItemId,
-        def_path_indices: Vec<u32>,
+        def_full_path: &'vm str,
         vm: &'vm VM<'vm>,
     ) -> Self {
         Self {
@@ -116,7 +116,7 @@ impl<'vm> Closure<'vm> {
 
             def_crate,
             def_item,
-            def_path_indices,
+            def_full_path,
 
             abstract_sig: Default::default(),
 

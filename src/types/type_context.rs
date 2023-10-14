@@ -10,7 +10,7 @@ use rustc_middle::ty::{
 use crate::{
     closure::{Closure, ClosureSig},
     impls::find_inherent_impl_crate,
-    items::{path_from_rustc, AssocValue, FunctionSig},
+    items::{parent_def_from_rustc, path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
     types::{AutoTraitSet, Sub},
     vm::VM,
@@ -308,33 +308,14 @@ impl<'vm> TypeContext<'vm> {
         mut did: DefId,
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> &'vm Closure<'vm> {
-        let mut path_indices = Vec::new();
-
         let mut def_path = ctx.tcx.def_path(did);
 
-        loop {
-            let last = def_path.data.last().expect("closure missing parent");
+        let full_path = path_from_rustc(&def_path, ctx.vm);
 
-            match last.data {
-                DefPathData::ClosureExpr => {
-                    path_indices.push(last.disambiguator);
-                    def_path.data.pop();
-                    did = ctx.tcx.parent(did);
-                }
-                DefPathData::ValueNs(_) => break,
-                d => panic!("closure resolve {:?}", d),
-            }
-        }
+        let parent_did = parent_def_from_rustc(did, ctx);
+        let parent_item = self.def_from_rustc(parent_did, &[], ctx);
 
-        // sanity check
-        {
-            let check_path = ctx.tcx.def_path(did);
-            assert!(def_path.data == check_path.data);
-        }
-
-        let parent_item = self.def_from_rustc(did, &[], ctx);
-
-        parent_item.item.child_closure(path_indices)
+        parent_item.item.child_closure(full_path.as_string())
     }
 
     /// This is similar to closure_from_rustc. Sadly we still need multiple path indices, since
@@ -344,34 +325,15 @@ impl<'vm> TypeContext<'vm> {
         mut did: DefId,
         args: &[GenericArg<'tcx>],
         ctx: &RustCContext<'vm, 'tcx>,
-    ) -> (ItemWithSubs<'vm>, Vec<u32>) {
-        let mut path_indices = Vec::new();
-
+    ) -> (ItemWithSubs<'vm>, &'vm str) {
         let mut def_path = ctx.tcx.def_path(did);
 
-        loop {
-            let last = def_path.data.last().expect("closure missing parent");
+        let full_path = path_from_rustc(&def_path, ctx.vm);
 
-            match last.data {
-                DefPathData::ImplTrait => {
-                    path_indices.push(last.disambiguator);
-                    def_path.data.pop();
-                    did = ctx.tcx.parent(did);
-                }
-                DefPathData::ValueNs(_) => break,
-                d => panic!("closure resolve {:?}", d),
-            }
-        }
+        let parent_did = parent_def_from_rustc(did, ctx);
+        let parent_item = self.def_from_rustc(parent_did, args, ctx);
 
-        // sanity check
-        {
-            let check_path = ctx.tcx.def_path(did);
-            assert!(def_path.data == check_path.data);
-        }
-
-        let parent_item = self.def_from_rustc(did, args, ctx);
-
-        (parent_item, path_indices)
+        (parent_item, full_path.as_string())
     }
 
     pub fn intern(&'vm self, kind: TypeKind<'vm>, vm: &'vm VM<'vm>) -> Type<'vm> {

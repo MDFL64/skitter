@@ -292,12 +292,12 @@ impl<'vm> VM<'vm> {
         &'vm self,
         def_crate: CrateId,
         def_item: ItemId,
-        def_path_indices: Vec<u32>,
+        def_full_path: &'vm str,
     ) -> &'vm Closure<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
 
         self.arena_closures
-            .alloc(Closure::new(n, def_crate, def_item, def_path_indices, self))
+            .alloc(Closure::new(n, def_crate, def_item, def_full_path, self))
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {

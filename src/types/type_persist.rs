@@ -154,7 +154,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 // write closure ref
                 closure.def_crate.persist_write(writer);
                 closure.def_item.persist_write(writer);
-                closure.def_path_indices.persist_write(writer);
+                writer.write_str(closure.def_full_path);
 
                 // write sig
                 sig.kind.persist_write(writer);
@@ -169,10 +169,10 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 crate_id.persist_write(writer);
                 writer.write_str(path);
             }
-            TypeKind::Opaque(item_with_subs, sub_id) => {
+            TypeKind::Opaque(item_with_subs, full_path) => {
                 writer.write_byte(36);
                 item_with_subs.persist_write(writer);
-                sub_id.persist_write(writer);
+                writer.write_str(full_path);
             }
             TypeKind::Dynamic {
                 primary_trait,

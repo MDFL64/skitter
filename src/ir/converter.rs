@@ -43,7 +43,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             .concrete_opaque_types
             .iter()
             .map(|(key, val)| {
-                let (item, path_indices) =
+                let (item, full_path) =
                     ctx.vm
                         .types
                         .opaque_type_from_rustc(key.def_id.into(), key.substs, ctx);
@@ -52,7 +52,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 OpaqueTypeMapping {
                     source_item: item,
-                    source_path_indices: path_indices,
+                    source_full_path: full_path,
                     destination_ty,
                 }
             })

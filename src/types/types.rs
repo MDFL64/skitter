@@ -40,7 +40,7 @@ pub enum TypeKind<'vm> {
     // we currently skip them, but it might be nicer just to have consistency with most other types
     Foreign(CrateId, &'vm str),
 
-    Opaque(ItemWithSubs<'vm>, Vec<u32>),
+    Opaque(ItemWithSubs<'vm>, &'vm str),
     FunctionPointer(FunctionSig<'vm>),
     Closure(&'vm Closure<'vm>, ClosureSig<'vm>, SubList<'vm>),
 
@@ -54,8 +54,8 @@ pub enum TypeKind<'vm> {
     Param(u32),
     Unknown, //Error
 }
-
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+
 pub enum IntSign {
     Signed,
     Unsigned,
@@ -280,7 +280,7 @@ impl<'vm> Type<'vm> {
                 *self
             }
 
-            TypeKind::Opaque(item_with_subs, path_indices) => {
+            TypeKind::Opaque(item_with_subs, full_path) => {
                 let new_subs = item_with_subs.subs.sub(subs);
 
                 //println!("new subs {}",new_subs);
@@ -291,7 +291,7 @@ impl<'vm> Type<'vm> {
                     // TODO is this always true?
                     assert!(candidate.source_item.item == item_with_subs.item);
 
-                    if candidate.source_path_indices == *path_indices {
+                    if candidate.source_full_path == *full_path {
                         let final_subs = candidate.source_item.subs.sub(&ir_subs);
 
                         // TODO just use new_subs if this assumption is correct

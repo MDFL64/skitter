@@ -1161,7 +1161,7 @@ impl<'vm> Persist<'vm> for PointerCast {
 #[derive(Clone, Debug)]
 pub struct OpaqueTypeMapping<'vm> {
     pub source_item: ItemWithSubs<'vm>,
-    pub source_path_indices: Vec<u32>,
+    pub source_full_path: &'vm str,
     pub destination_ty: Type<'vm>,
 }
 
@@ -1172,7 +1172,7 @@ impl<'vm> Persist<'vm> for OpaqueTypeMapping<'vm> {
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.source_item.persist_write(writer);
-        self.source_path_indices.persist_write(writer);
+        writer.write_str(self.source_full_path);
         self.destination_ty.persist_write(writer);
     }
 }
