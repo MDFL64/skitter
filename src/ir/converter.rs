@@ -5,10 +5,9 @@ use rustc_middle::ty::TypeckResults;
 use std::{str::FromStr, sync::Arc};
 
 use crate::{
-    closure::ClosureSig,
     ir::{MatchGuard, OpaqueTypeMapping},
     rustc_worker::RustCContext,
-    types::{FloatWidth, Mutability, Sub, Type, TypeKind},
+    types::{FloatWidth, Mutability, Type, TypeKind},
 };
 
 use super::{

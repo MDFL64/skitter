@@ -1037,7 +1037,6 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 writer.write_byte(b'~');
                 msg.persist_write(writer);
             }
-            _ => panic!("todo write pattern {:?}", self.kind),
         }
     }
 }
@@ -1167,6 +1166,7 @@ pub struct OpaqueTypeMapping<'vm> {
 
 impl<'vm> Persist<'vm> for OpaqueTypeMapping<'vm> {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let _item = ItemWithSubs::persist_read(reader);
         panic!("read opaque type mapping");
     }
 

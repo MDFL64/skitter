@@ -2,7 +2,6 @@ use std::sync::Mutex;
 
 use ahash::AHashMap;
 use rustc_hir::def_id::DefId;
-use rustc_hir::definitions::DefPathData;
 use rustc_middle::ty::{
     AliasKind, FloatTy, GenericArg, GenericArgKind, ImplSubject, IntTy, Ty, TyKind, UintTy,
 };
@@ -155,7 +154,7 @@ impl<'vm> TypeContext<'vm> {
 
                             primary_trait = Some(item);
                         }
-                        ExistentialPredicate::Projection(x) => {
+                        ExistentialPredicate::Projection(_) => {
                             println!("todo projection on dyn???");
                         }
                         ExistentialPredicate::AutoTrait(did) => {
@@ -289,7 +288,7 @@ impl<'vm> TypeContext<'vm> {
 
                         panic!("failed to find inherent impl");
                     }
-                    ImplSubject::Trait(trait_ref) => {
+                    ImplSubject::Trait(_) => {
                         panic!("todo trait ref");
                     }
                 }
@@ -305,10 +304,10 @@ impl<'vm> TypeContext<'vm> {
 
     pub fn closure_from_rustc<'tcx>(
         &'vm self,
-        mut did: DefId,
+        did: DefId,
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> &'vm Closure<'vm> {
-        let mut def_path = ctx.tcx.def_path(did);
+        let def_path = ctx.tcx.def_path(did);
 
         let full_path = path_from_rustc(&def_path, ctx.vm);
 
@@ -322,11 +321,11 @@ impl<'vm> TypeContext<'vm> {
     /// impl types can be nested: impl T<S = impl U>
     pub fn opaque_type_from_rustc<'tcx>(
         &'vm self,
-        mut did: DefId,
+        did: DefId,
         args: &[GenericArg<'tcx>],
         ctx: &RustCContext<'vm, 'tcx>,
     ) -> (ItemWithSubs<'vm>, &'vm str) {
-        let mut def_path = ctx.tcx.def_path(did);
+        let def_path = ctx.tcx.def_path(did);
 
         let full_path = path_from_rustc(&def_path, ctx.vm);
 

@@ -190,8 +190,8 @@ impl<'vm> IRFunction<'vm> {
         match pat.kind {
             PatternKind::LocalBinding {
                 local_id,
-                mode,
                 sub_pattern,
+                ..
             } => {
                 assert!(sub_pattern.is_none());
                 print!("var{}", local_id);

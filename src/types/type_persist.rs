@@ -1,7 +1,6 @@
-use std::{borrow::Cow, rc::Rc};
+use std::rc::Rc;
 
 use crate::{
-    items::FunctionSig,
     lazy_collections::LazyItem,
     persist::{Persist, PersistReader, PersistWriteContext, PersistWriter},
     types::{IntSign, IntWidth},

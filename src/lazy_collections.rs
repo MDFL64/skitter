@@ -200,7 +200,7 @@ where
                     }
 
                     if new_indices.len() == bucket_keys.len() {
-                        for (hash_index, item_index, key) in new_indices {
+                        for (hash_index, item_index, _key) in new_indices {
                             table_2[hash_index] = *item_index as i32;
                             /*println!(
                                 "> {:?} t1[{}]={} t2[{}]={}",

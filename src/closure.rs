@@ -4,7 +4,7 @@ use ahash::AHashMap;
 
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
-    items::{CrateId, FunctionSig, ItemId},
+    items::{CrateId, ItemId},
     persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
@@ -20,6 +20,7 @@ pub enum FnTrait {
 
 impl<'vm> Persist<'vm> for FnTrait {
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let _b = reader.read_byte();
         panic!("read fn trait");
     }
 
@@ -219,7 +220,6 @@ fn build_ir_for_trait<'vm>(
         FnTrait::Fn => self_ty.ref_to(Mutability::Const),
         FnTrait::FnMut => self_ty.ref_to(Mutability::Mut),
         FnTrait::FnOnce => self_ty,
-        _ => panic!("todo self ty"),
     };
 
     let args_tuple = vm.ty_tuple(ir_in.sig.inputs.clone());

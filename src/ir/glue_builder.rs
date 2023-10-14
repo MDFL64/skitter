@@ -2,7 +2,6 @@ use crate::{
     closure::FnTrait,
     ir::{BindingMode, Expr, ExprKind, IRFunctionBuilder, Pattern, PatternKind},
     types::{Mutability, Type, TypeKind},
-    vm::VM,
 };
 
 use super::{IRFunction, IRKind};
@@ -13,7 +12,6 @@ pub fn glue_for_fn_trait<'vm>(
     func_ty: Type<'vm>,
     args_ty: Type<'vm>,
     res_ty: Type<'vm>,
-    vm: &'vm VM<'vm>,
 ) -> IRFunction<'vm> {
     assert!(func_ty.is_concrete());
     assert!(args_ty.is_concrete());

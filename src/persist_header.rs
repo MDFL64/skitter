@@ -1,8 +1,4 @@
-use std::{
-    error::Error,
-    ffi::OsStr,
-    path::{Path, PathBuf},
-};
+use std::{error::Error, path::PathBuf};
 
 use rustc_middle::ty::TyCtxt;
 

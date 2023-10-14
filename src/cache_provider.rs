@@ -1,19 +1,16 @@
 use std::{
     error::Error,
-    path::Path,
-    rc::Rc,
     sync::{Arc, OnceLock},
 };
 
 use crate::{
-    crate_provider::{CrateProvider, TraitImpl, TraitImplResult},
+    crate_provider::{CrateProvider, TraitImpl},
     impls::{ImplTable, ImplTableLazy},
     ir::IRFunction,
     items::{AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
-    profiler::profile,
     types::{SubList, Type},
     vm::VM,
     CratePath,

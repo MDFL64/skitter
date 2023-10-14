@@ -53,7 +53,7 @@ pub struct SubList<'vm> {
 
 impl<'vm> SubList<'vm> {
     pub fn from_summary(summary: &GenericCounts, vm: &'vm VM<'vm>) -> Self {
-        let total = summary.lifetimes + summary.types + summary.consts;
+        let total = summary.total();
         let mut list = Vec::with_capacity(total as usize);
 
         for _ in 0..summary.lifetimes {
@@ -95,12 +95,11 @@ impl<'vm> SubList<'vm> {
                     }
                 }
                 Sub::Const => {
-                    // TODO
+                    panic!("const is identity?");
                 }
                 Sub::Lifetime => {
                     // don't care
                 }
-                _ => panic!("is_identity? {}", self),
             }
         }
 

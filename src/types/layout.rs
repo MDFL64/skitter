@@ -17,12 +17,6 @@ impl Layout {
         self.maybe_size.expect("unsized type not permitted")
     }
 
-    pub fn is_sized(&self) -> bool {
-        self.maybe_size.is_some()
-    }
-}
-
-impl Layout {
     pub fn from<'vm>(ty: Type<'vm>) -> Self {
         let kind = ty.kind();
         match kind {
@@ -127,7 +121,7 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
-            TypeKind::Closure(_, sig, subs) => {
+            TypeKind::Closure(_, sig, _) => {
                 assert!(sig.env_ty.is_concrete());
                 sig.env_ty.layout().clone()
             }

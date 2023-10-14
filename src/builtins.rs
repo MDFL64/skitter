@@ -5,11 +5,11 @@ use crate::{
     bytecode_compiler::CompilerStack,
     bytecode_select,
     closure::FnTrait,
-    crate_provider::{TraitImpl, TraitImplResult},
+    crate_provider::TraitImpl,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
-    items::{AssocValue, CrateId, GenericCounts, IRFlag, Item, ItemPath},
+    items::{AssocValue, CrateId, IRFlag, Item, ItemPath},
     persist::Persist,
-    types::{Mutability, Sub, SubList, Type, TypeKind},
+    types::{Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
         VM,
@@ -162,7 +162,6 @@ impl BuiltinTrait {
                                     func_ty,
                                     fn_args_ty,
                                     sig.output,
-                                    vm,
                                 );
 
                                 return Some(trait_impl(
@@ -189,7 +188,6 @@ impl BuiltinTrait {
                                     func_ty,
                                     fn_args_ty,
                                     sig.output,
-                                    vm,
                                 );
 
                                 return Some(trait_impl(
@@ -202,13 +200,8 @@ impl BuiltinTrait {
                                 ));
                             }
                             BuiltinTrait::Fn => {
-                                let call_ir = glue_for_fn_trait(
-                                    FnTrait::Fn,
-                                    func_ty,
-                                    fn_args_ty,
-                                    sig.output,
-                                    vm,
-                                );
+                                let call_ir =
+                                    glue_for_fn_trait(FnTrait::Fn, func_ty, fn_args_ty, sig.output);
 
                                 return Some(trait_impl(
                                     for_tys.clone(),
@@ -245,7 +238,6 @@ impl BuiltinTrait {
                                     func_ty,
                                     fn_args_ty,
                                     sig.output,
-                                    vm,
                                 );
 
                                 return Some(trait_impl(
@@ -272,7 +264,6 @@ impl BuiltinTrait {
                                     func_ty,
                                     fn_args_ty,
                                     sig.output,
-                                    vm,
                                 );
 
                                 return Some(trait_impl(
@@ -285,13 +276,8 @@ impl BuiltinTrait {
                                 ));
                             }
                             BuiltinTrait::Fn => {
-                                let call_ir = glue_for_fn_trait(
-                                    FnTrait::Fn,
-                                    func_ty,
-                                    fn_args_ty,
-                                    sig.output,
-                                    vm,
-                                );
+                                let call_ir =
+                                    glue_for_fn_trait(FnTrait::Fn, func_ty, fn_args_ty, sig.output);
 
                                 return Some(trait_impl(
                                     for_tys.clone(),
@@ -305,7 +291,7 @@ impl BuiltinTrait {
                             _ => panic!(),
                         }
                     }
-                    TypeKind::Closure(closure, closure_sig, closure_subs) => {
+                    TypeKind::Closure(closure, _, closure_subs) => {
                         let fn_trait = match self {
                             BuiltinTrait::FnOnce => FnTrait::FnOnce,
                             BuiltinTrait::FnMut => FnTrait::FnMut,

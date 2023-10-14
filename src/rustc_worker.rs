@@ -1,7 +1,5 @@
 use std::{
-    path::PathBuf,
     rc::Rc,
-    str::FromStr,
     sync::{Arc, Barrier, Mutex, OnceLock},
     time::Instant,
 };
@@ -17,7 +15,7 @@ use rustc_session::config;
 
 use crate::{
     builtins::BuiltinTrait,
-    crate_provider::{CrateProvider, TraitImpl, TraitImplResult},
+    crate_provider::{CrateProvider, TraitImpl},
     impls::{ImplBounds, ImplTable, ImplTableSimple},
     ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
@@ -27,7 +25,7 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
-    types::{IntSign, IntWidth, ItemWithSubs, Sub, SubList, Type, TypeKind},
+    types::{Sub, SubList, Type},
     vm::VM,
     CratePath,
 };
@@ -220,7 +218,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
         res.wait()
     }
 
-    fn build_adt(&self, id: ItemId) -> AdtInfo<'vm> {
+    fn build_adt(&self, _id: ItemId) -> AdtInfo<'vm> {
         panic!("rustc worker should create all adt info eagerly");
     }
 
@@ -647,7 +645,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         assoc_value_source.push((ItemPath::for_type(key), AssocValue::Type(ty)));
                     }
 
-                    let mut subject_key = key_ty.impl_key();
+                    let subject_key = key_ty.impl_key();
 
                     let assoc_values =
                         trait_item.trait_build_assoc_values_for_impl(&assoc_value_source);

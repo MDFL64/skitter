@@ -3,7 +3,7 @@ use std::{hash::Hash, sync::Arc};
 use ahash::AHashMap;
 
 use crate::{
-    crate_provider::{TraitImpl, TraitImplResult},
+    crate_provider::TraitImpl,
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
     lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
     persist::{Persist, PersistReader, PersistWriter},
@@ -132,7 +132,7 @@ pub struct ImplBounds<'vm> {
 impl<'vm> LazyItem<'vm> for ImplBounds<'vm> {
     type Input = Self;
 
-    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+    fn build(input: Self::Input, _: &'vm VM<'vm>) -> Self {
         input
     }
 }
@@ -175,7 +175,7 @@ pub struct ImplTableSimple<'vm> {
 }
 
 #[derive(Debug, Clone)]
-struct InherentMember<'vm> {
+pub struct InherentMember<'vm> {
     bounds_id: u32,
     value: AssocValue<'vm>,
 }
@@ -194,7 +194,7 @@ impl<'vm> Persist<'vm> for InherentMember<'vm> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct TraitKey {
+pub struct TraitKey {
     crate_id: CrateId,
     item_id: ItemId,
 }
@@ -207,7 +207,7 @@ impl Hash for TraitKey {
 }
 
 #[derive(Clone, Debug)]
-struct TraitValue<'vm> {
+pub struct TraitValue<'vm> {
     bounds_id: u32,
     values: Arc<[Option<AssocValue<'vm>>]>,
 }
@@ -242,7 +242,7 @@ struct TraitKeyValue<'vm> {
 impl<'vm> LazyItem<'vm> for TraitKeyValue<'vm> {
     type Input = Self;
 
-    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+    fn build(input: Self::Input, _: &'vm VM<'vm>) -> Self {
         input
     }
 }
@@ -300,7 +300,7 @@ struct InherentKeyValue<'vm> {
 impl<'vm> LazyItem<'vm> for InherentKeyValue<'vm> {
     type Input = Self;
 
-    fn build(input: Self::Input, vm: &'vm VM<'vm>) -> Self {
+    fn build(input: Self::Input, _: &'vm VM<'vm>) -> Self {
         input
     }
 }
@@ -491,7 +491,7 @@ impl<'vm> ImplBounds<'vm> {
 
                 let start = self.for_tys.list.len();
                 let end = for_tys.list.len();
-                for i in (start..end) {
+                for i in start..end {
                     let sub = for_tys.list[i].clone();
                     result_subs.list.push(sub);
                 }
@@ -599,7 +599,7 @@ impl<'vm> ImplBounds<'vm> {
                 }*/
             }*/
             (TypeKind::Param(param_num), _) => res_map.set_param(*param_num, rhs),
-            (_, TypeKind::Param(param_num)) => panic!("param rhs"),
+            (_, TypeKind::Param(_)) => panic!("param rhs"),
 
             // NOTE: whether this is resolvable is probably dependant on eval order
             (TypeKind::AssociatedType(item), _) => {
@@ -607,7 +607,7 @@ impl<'vm> ImplBounds<'vm> {
                 let at = item.item.resolve_associated_ty(&for_tys);
                 Self::match_types(at, rhs, res_map)
             }
-            (_, TypeKind::AssociatedType(item)) => panic!("assoc ty rhs"),
+            (_, TypeKind::AssociatedType(_)) => panic!("assoc ty rhs"),
 
             (TypeKind::Adt(_), _)
             | (_, TypeKind::Adt(_))
@@ -634,23 +634,15 @@ impl<'vm> ImplBounds<'vm> {
     }
 }
 
-#[derive(PartialEq, Debug)]
-enum SubSide {
-    Lhs,
-    Rhs,
-}
-
 #[derive(Debug)]
 struct SubMap<'vm> {
     result_subs: SubList<'vm>,
-    generic_counts: GenericCounts,
 }
 
 impl<'vm> SubMap<'vm> {
     fn new(generic_counts: GenericCounts, vm: &'vm VM<'vm>) -> Self {
         Self {
             result_subs: SubList::from_summary(&generic_counts, vm),
-            generic_counts,
         }
     }
 

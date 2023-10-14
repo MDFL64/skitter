@@ -1,5 +1,4 @@
-use ahash::AHashMap;
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 use colosseum::sync::Arena;
 
 use crate::abi::align;
@@ -7,21 +6,17 @@ use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::cli::CliArgs;
 use crate::closure::Closure;
-use crate::closure::FnTrait;
 use crate::crate_provider::CrateProvider;
-use crate::crate_provider::TraitImpl;
 use crate::crate_provider::TraitImplResult;
 use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::items::ItemId;
-use crate::persist::PersistReadContext;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
 use crate::types::ItemWithSubs;
-use crate::types::Mutability;
 use crate::types::Sub;
 use crate::types::SubList;
 use crate::types::Type;
@@ -30,18 +25,11 @@ use crate::types::TypeKind;
 use crate::value_debug::print_value;
 use crate::vm::instr::Slot;
 use crate::CratePath;
-use std::borrow::Cow;
-use std::cell::OnceCell;
-use std::error::Error;
-use std::path::Path;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::OnceLock;
-use std::sync::RwLock;
 
-use std::sync::atomic::AtomicPtr;
+use std::{
+    borrow::Cow, error::Error, sync::atomic::AtomicPtr, sync::atomic::AtomicU32,
+    sync::atomic::Ordering, sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
+};
 
 use super::instr::Instr;
 
@@ -414,7 +402,7 @@ impl<'vm> FunctionSource<'vm> {
     pub fn debug_name(&self) -> &str {
         match self {
             Self::Item(item) => item.path.as_string(),
-            Self::Closure(closure) => "[closure]",
+            Self::Closure(_) => "[closure]",
         }
     }
 }

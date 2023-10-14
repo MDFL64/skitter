@@ -1,7 +1,7 @@
 use std::{
-    borrow::{BorrowMut, Cow},
+    borrow::Cow,
     hash::Hash,
-    sync::{Arc, Mutex, OnceLock, RwLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
     lazy_collections::{LazyItem, LazyKey},
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
-    types::{ItemWithSubs, Sub, SubList, Type, TypeKind},
+    types::{ItemWithSubs, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
 use ahash::AHashMap;
@@ -219,6 +219,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 virtual_info,
                 extern_name,
                 ctor_for,
+                ir,
                 ..
             } => {
                 writer.write_byte('f' as u8);
@@ -226,8 +227,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
                 extern_name.persist_write(writer);
 
-                let ir_block = self
-                    .raw_ir()
+                let ir_block = ir
+                    .lock()
+                    .unwrap()
+                    .as_ref()
                     .map(|ir| {
                         let mut writer = writer.new_child_writer();
                         ir.persist_write(&mut writer);
@@ -240,14 +243,17 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             ItemKind::Constant {
                 virtual_info,
                 ctor_for,
+                ir,
                 ..
             } => {
                 writer.write_byte('c' as u8);
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
 
-                let ir_block = self
-                    .raw_ir()
+                let ir_block = ir
+                    .lock()
+                    .unwrap()
+                    .as_ref()
                     .map(|ir| {
                         let mut writer = writer.new_child_writer();
                         ir.persist_write(&mut writer);
@@ -260,8 +266,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             ItemKind::Static { ir, .. } => {
                 writer.write_byte('s' as u8);
 
-                let ir_block = self
-                    .raw_ir()
+                let ir_block = ir
+                    .lock()
+                    .unwrap()
+                    .as_ref()
                     .map(|ir| {
                         let mut writer = writer.new_child_writer();
                         ir.persist_write(&mut writer);
@@ -795,7 +803,7 @@ impl<'vm> ItemKind<'vm> {
         assoc_value_map: AHashMap<ItemPath<'vm>, u32>,
         builtin: Option<BuiltinTrait>,
     ) -> Self {
-        let mut builtin_lock = OnceLock::new();
+        let builtin_lock = OnceLock::new();
 
         if let Some(builtin) = builtin {
             builtin_lock.set(builtin).unwrap();
@@ -931,21 +939,6 @@ impl<'vm> Item<'vm> {
         }
     }
 
-    /// Try getting the IR without any complicated lookup.
-    /// This is used when saving IR to the disk.
-    pub fn raw_ir(&self) -> Option<Arc<IRFunction<'vm>>> {
-        let ir = match &self.kind {
-            ItemKind::Function { ir, .. } => ir,
-            ItemKind::Constant { ir, .. } => ir,
-            ItemKind::Static { ir, .. } => ir,
-            _ => panic!("item kind mismatch"),
-        };
-
-        let ir = ir.lock().unwrap();
-
-        ir.clone()
-    }
-
     pub fn set_raw_ir(&self, new_ir: Arc<IRFunction<'vm>>) {
         let ir = match &self.kind {
             ItemKind::Function { ir, .. } => ir,
@@ -984,7 +977,7 @@ impl<'vm> Item<'vm> {
 
     // unlike with constants, we should probably ALWAYS be allocating here, even for small values
     pub fn static_value(&self, subs: &SubList<'vm>) -> *mut u8 {
-        let ItemKind::Static{ir, value_ptr, ..} = &self.kind else {
+        let ItemKind::Static{value_ptr, ..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -1186,12 +1179,7 @@ impl<'vm> Item<'vm> {
         {
             // dynamic (trait objects)
             let self_ty = for_tys.list[0].assert_ty();
-            if let TypeKind::Dynamic {
-                primary_trait,
-                auto_traits,
-                is_dyn_star,
-            } = self_ty.kind()
-            {
+            if let TypeKind::Dynamic { primary_trait, .. } = self_ty.kind() {
                 if let Some(primary_trait) = primary_trait {
                     if primary_trait.item == self {
                         return TraitImplResult::Dynamic;

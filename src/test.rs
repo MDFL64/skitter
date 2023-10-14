@@ -3,8 +3,8 @@ use std::{
     error::Error,
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
-    process::{self, Command},
-    sync::{Arc, LazyLock, Mutex},
+    process::Command,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 

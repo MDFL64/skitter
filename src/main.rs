@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![feature(rustc_private)]
 #![feature(drain_filter)]
 #![feature(lazy_cell)]
@@ -49,7 +50,6 @@ use std::{
 };
 
 use clap::Parser;
-use profiler::profile;
 use types::SubList;
 use vm::VM;
 

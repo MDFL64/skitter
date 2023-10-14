@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use crate::{
     items::{CrateId, Item},
     lazy_collections::{LazyArray, LazyTable},
-    types::{Type, TypeKind, WriterTypes},
+    types::{Type, WriterTypes},
     vm::VM,
 };
 
@@ -157,8 +157,10 @@ impl<'vm> PersistReader<'vm> {
     }
 
     pub fn read_item_ref(&mut self) -> &'vm Item<'vm> {
-        let crate_id = usize::persist_read(self);
+        let crate_id = CrateId::new(usize::persist_read(self) as _);
         let item_id = usize::persist_read(self);
+
+        assert!(crate_id == self.context.this_crate);
 
         let items = self.context.items.get().unwrap();
 

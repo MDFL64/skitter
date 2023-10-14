@@ -1,11 +1,9 @@
-use std::{fmt::Display, rc::Rc, sync::Arc};
-
-use ahash::AHashMap;
+use std::fmt::Display;
 
 use crate::{
     closure::{Closure, ClosureSig},
-    items::{AdtInfo, AssocValue, CrateId, FunctionSig, Item, ItemId},
-    persist::{Persist, PersistReadContext, PersistReader, PersistWriteContext, PersistWriter},
+    items::{AdtInfo, CrateId, FunctionSig, Item, ItemId},
+    persist::{Persist, PersistReader, PersistWriter},
     vm::VM,
 };
 
@@ -270,8 +268,8 @@ impl<'vm> Type<'vm> {
 
             TypeKind::Dynamic {
                 primary_trait,
-                auto_traits,
                 is_dyn_star,
+                ..
             } => {
                 let primary_trait = primary_trait.as_ref().expect("no primary trait");
                 assert!(!is_dyn_star);
@@ -395,18 +393,6 @@ impl<'vm> Type<'vm> {
             // TODO? assume true?
             TypeKind::Dynamic { .. } => true,
             _ => panic!("is_interior_mut? {}", self),
-        }
-    }
-
-    /// Find the crate that the type is defined in. Used to request inherent impl setup.
-    /// TODO: Some primitive types may have inherent impls in multiple crates (core,alloc,std)
-    fn find_impl_crate(&self) -> CrateId {
-        match self.kind() {
-            // primitive types have impls in core
-            TypeKind::Int(..) => *self.1.core_crate.get().unwrap(),
-
-            TypeKind::Adt(item) => item.item.crate_id,
-            _ => panic!("find_impl_crate {:?}", self.kind()),
         }
     }
 
