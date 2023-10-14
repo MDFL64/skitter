@@ -95,7 +95,7 @@ impl<'vm> SubList<'vm> {
                     }
                 }
                 Sub::Const => {
-                    panic!("const is identity?");
+                    println!("const is identity?");
                 }
                 Sub::Lifetime => {
                     // don't care

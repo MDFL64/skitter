@@ -141,19 +141,12 @@ impl<'vm> Persist<'vm> for ImplBounds<'vm> {
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
         let for_tys = Persist::persist_read(reader);
         let bounds = Persist::persist_read(reader);
-
-        let lifetimes = Persist::persist_read(reader);
-        let types = Persist::persist_read(reader);
-        let consts = Persist::persist_read(reader);
+        let generic_counts = Persist::persist_read(reader);
 
         Self {
             for_tys,
             bounds,
-            generic_counts: GenericCounts {
-                lifetimes,
-                types,
-                consts,
-            },
+            generic_counts
         }
     }
 
@@ -161,9 +154,7 @@ impl<'vm> Persist<'vm> for ImplBounds<'vm> {
         self.for_tys.persist_write(writer);
         self.bounds.persist_write(writer);
 
-        self.generic_counts.lifetimes.persist_write(writer);
-        self.generic_counts.types.persist_write(writer);
-        self.generic_counts.consts.persist_write(writer);
+        self.generic_counts.persist_write(writer);
     }
 }
 

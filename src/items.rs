@@ -17,6 +17,9 @@ use crate::{
     types::{ItemWithSubs, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
+
+use skitter_macro::Persist;
+
 use ahash::AHashMap;
 
 pub struct ExternCrate {
@@ -110,7 +113,7 @@ impl<'vm> Persist<'vm> for CrateId {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Persist)]
 pub struct ItemId(u32);
 
 impl ItemId {
@@ -120,16 +123,6 @@ impl ItemId {
 
     pub fn index(&self) -> usize {
         self.0 as usize
-    }
-}
-
-impl<'vm> Persist<'vm> for ItemId {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        Self::new(Persist::persist_read(reader))
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.0.persist_write(writer);
     }
 }
 
@@ -675,7 +668,7 @@ pub enum BoundKind<'vm> {
     Projection(ItemWithSubs<'vm>, Type<'vm>),
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Persist)]
 pub struct GenericCounts {
     pub lifetimes: u32,
     pub types: u32,
@@ -1285,10 +1278,10 @@ pub fn parent_def_from_rustc<'vm, 'tcx>(
             DefKind::Closure | DefKind::InlineConst | DefKind::OpaqueTy => {
                 did = ctx.tcx.parent(did);
             }
-            DefKind::Fn | DefKind::Static(_) | DefKind::Const => {
+            DefKind::Fn | DefKind::AssocFn | DefKind::Static(_) | DefKind::Const => {
                 return did;
             }
-            _ => panic!("def parent? {:?}", kind),
+            _ => panic!("def parent? {:?} / {:?}", kind, did),
         }
     }
 }
