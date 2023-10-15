@@ -5,28 +5,18 @@ use ahash::AHashMap;
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
     items::{CrateId, ItemId},
-    persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+use skitter_macro::Persist;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Persist)]
 #[repr(u8)]
 pub enum FnTrait {
     Fn,
     FnMut,
     FnOnce,
-}
-
-impl<'vm> Persist<'vm> for FnTrait {
-    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let _b = reader.read_byte();
-        panic!("read fn trait");
-    }
-
-    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
-        writer.write_byte(*self as u8);
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

@@ -6,7 +6,7 @@ use crate::{
     types::{IntSign, IntWidth},
 };
 
-use super::{ArraySize, FloatWidth, ItemWithSubs, Mutability, Sub, SubList, Type, TypeKind};
+use super::{FloatWidth, ItemWithSubs, Mutability, Type, TypeKind};
 
 impl<'vm> LazyItem<'vm> for Type<'vm> {
     type Input = TypeKind<'vm>;
@@ -294,45 +294,6 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for Sub<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            Sub::Type(ty) => {
-                writer.write_byte('T' as _);
-                ty.persist_write(writer);
-            }
-            Sub::Const => {
-                writer.write_byte('C' as _);
-            }
-            Sub::Lifetime => {
-                writer.write_byte('L' as _);
-            }
-        }
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let c = reader.read_byte() as char;
-        match c {
-            'T' => Sub::Type(Type::persist_read(reader)),
-            'C' => Sub::Const,
-            'L' => Sub::Lifetime,
-            _ => panic!(),
-        }
-    }
-}
-
-impl<'vm> Persist<'vm> for SubList<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.list.persist_write(writer);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        SubList {
-            list: Vec::<Sub>::persist_read(reader),
-        }
-    }
-}
-
 impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         writer.write_item_ref(self.item);
@@ -346,31 +307,6 @@ impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
         let subs = Persist::persist_read(reader);
 
         ItemWithSubs { item, subs }
-    }
-}
-
-impl<'vm> Persist<'vm> for ArraySize {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        let n = u32::persist_read(reader);
-        match b {
-            0 => ArraySize::Static(n),
-            1 => ArraySize::ConstParam(n),
-            _ => panic!(),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            ArraySize::Static(n) => {
-                writer.write_byte(0);
-                (*n).persist_write(writer);
-            }
-            ArraySize::ConstParam(n) => {
-                writer.write_byte(1);
-                (*n).persist_write(writer);
-            }
-        }
     }
 }
 

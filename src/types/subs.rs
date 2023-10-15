@@ -1,10 +1,12 @@
 use std::fmt::Display;
 
+use skitter_macro::Persist;
+
 use crate::{items::GenericCounts, vm::VM};
 
 use super::{Type, TypeKind};
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Persist)]
 pub enum Sub<'vm> {
     Type(Type<'vm>),
     Lifetime,
@@ -46,7 +48,7 @@ impl<'vm> Display for Sub<'vm> {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Persist)]
 pub struct SubList<'vm> {
     pub list: Vec<Sub<'vm>>,
 }

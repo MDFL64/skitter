@@ -11,6 +11,8 @@ use crate::{
     vm::VM,
 };
 
+use skitter_macro::Persist;
+
 /// Find candidate crates for a trait impl on a list of types.
 ///
 /// TODO smallvec
@@ -122,7 +124,7 @@ pub trait ImplTable<'vm> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Persist)]
 pub struct ImplBounds<'vm> {
     pub for_tys: SubList<'vm>,
     pub bounds: Vec<BoundKind<'vm>>,
@@ -137,27 +139,6 @@ impl<'vm> LazyItem<'vm> for ImplBounds<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for ImplBounds<'vm> {
-    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let for_tys = Persist::persist_read(reader);
-        let bounds = Persist::persist_read(reader);
-        let generic_counts = Persist::persist_read(reader);
-
-        Self {
-            for_tys,
-            bounds,
-            generic_counts
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.for_tys.persist_write(writer);
-        self.bounds.persist_write(writer);
-
-        self.generic_counts.persist_write(writer);
-    }
-}
-
 pub struct ImplTableSimple<'vm> {
     crate_id: CrateId,
     inherent_table: AHashMap<String, Vec<InherentMember<'vm>>>,
@@ -165,23 +146,10 @@ pub struct ImplTableSimple<'vm> {
     bounds_table: Vec<ImplBounds<'vm>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub struct InherentMember<'vm> {
     bounds_id: u32,
     value: AssocValue<'vm>,
-}
-
-impl<'vm> Persist<'vm> for InherentMember<'vm> {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let bounds_id = Persist::persist_read(reader);
-        let value = Persist::persist_read(reader);
-        Self { bounds_id, value }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.bounds_id.persist_write(writer);
-        self.value.persist_write(writer);
-    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -282,7 +250,7 @@ impl<'vm> Persist<'vm> for TraitKeyValue<'vm> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Persist)]
 struct InherentKeyValue<'vm> {
     key: String,
     list: Vec<InherentMember<'vm>>,
@@ -305,19 +273,6 @@ impl<'vm> LazyKey<'vm> for InherentKeyValue<'vm> {
 
     fn key_for_input(input: &Self::Input) -> Option<&Self::Key> {
         Some(&input.key)
-    }
-}
-
-impl<'vm> Persist<'vm> for InherentKeyValue<'vm> {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let key = Persist::persist_read(reader);
-        let list = Persist::persist_read(reader);
-        InherentKeyValue { key, list }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.key.persist_write(writer);
-        self.list.persist_write(writer);
     }
 }
 

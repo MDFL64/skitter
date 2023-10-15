@@ -3,7 +3,6 @@ use std::fmt::Display;
 use crate::{
     closure::{Closure, ClosureSig},
     items::{AdtInfo, CrateId, FunctionSig, Item, ItemId},
-    persist::{Persist, PersistReader, PersistWriter},
     vm::VM,
 };
 
@@ -12,6 +11,8 @@ use super::{
     subs::{Sub, SubList},
     Type,
 };
+
+use skitter_macro::Persist;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum TypeKind<'vm> {
@@ -93,7 +94,7 @@ impl<'vm> Display for ItemWithSubs<'vm> {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Persist)]
 pub enum ArraySize {
     Static(u32),
     ConstParam(u32),
@@ -520,7 +521,7 @@ impl<'vm> Display for Type<'vm> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
 pub struct AutoTraitSet(u16);
 
 impl AutoTraitSet {
@@ -530,15 +531,5 @@ impl AutoTraitSet {
 
     pub fn add(&mut self, other: Self) {
         self.0 |= other.0;
-    }
-}
-
-impl<'vm> Persist<'vm> for AutoTraitSet {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        Self(Persist::persist_read(reader))
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.0.persist_write(writer);
     }
 }

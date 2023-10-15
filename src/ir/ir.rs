@@ -1,5 +1,7 @@
 use std::{fmt::Debug, sync::Arc};
 
+use skitter_macro::Persist;
+
 use crate::{
     closure::FnTrait,
     items::FunctionSig,
@@ -75,33 +77,11 @@ pub struct IRFunction<'vm> {
     patterns: Vec<Pattern<'vm>>,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Persist)]
 pub enum IRKind {
     Function,
     Constant,
     Static,
-}
-
-impl<'vm> Persist<'vm> for IRKind {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        match b {
-            0 => IRKind::Function,
-            1 => IRKind::Constant,
-            2 => IRKind::Static,
-            _ => panic!(),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        let b = match self {
-            IRKind::Function => 0,
-            IRKind::Constant => 1,
-            IRKind::Static => 2,
-        };
-
-        writer.write_byte(b);
-    }
 }
 
 impl<'vm> Debug for IRFunction<'vm> {
@@ -148,9 +128,9 @@ impl<'vm> IRFunction<'vm> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Persist)]
 pub struct ExprId(u32);
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Persist)]
 pub struct PatternId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -162,13 +142,13 @@ impl LoopId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub result: Option<ExprId>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub enum Stmt {
     Expr(ExprId),
     Let {
@@ -330,7 +310,7 @@ pub enum BindingMode {
     Ref,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub struct FieldPattern {
     pub field: u32,
     pub pattern: PatternId,
@@ -342,7 +322,7 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Persist)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -370,7 +350,7 @@ pub enum LogicOp {
     Or,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Persist)]
 pub enum PointerCast {
     ReifyFnPointer,
     UnsafeFnPointer,
@@ -380,48 +360,18 @@ pub enum PointerCast {
     UnSize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub struct MatchArm {
     pub pattern: PatternId,
     pub body: ExprId,
     pub guard: MatchGuard,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Persist)]
 pub enum MatchGuard {
     If(ExprId),
     IfLet,
     None,
-}
-
-impl<'vm> Persist<'vm> for MatchGuard {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        match b {
-            0 => {
-                let e = Persist::persist_read(reader);
-                MatchGuard::If(e)
-            }
-            1 => MatchGuard::IfLet,
-            2 => MatchGuard::None,
-            _ => panic!(),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            MatchGuard::If(n) => {
-                writer.write_byte(0);
-                n.persist_write(writer);
-            }
-            MatchGuard::IfLet => {
-                writer.write_byte(1);
-            }
-            MatchGuard::None => {
-                writer.write_byte(2);
-            }
-        }
-    }
 }
 
 // Persistence!
@@ -472,83 +422,6 @@ impl<'vm> Persist<'vm> for IRFunction<'vm> {
         self.patterns.persist_write(writer);
 
         self.opaque_types.persist_write(writer);
-    }
-}
-
-impl<'vm> Persist<'vm> for ExprId {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        Self(u32::persist_read(reader))
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.0.persist_write(writer)
-    }
-}
-
-impl<'vm> Persist<'vm> for PatternId {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        Self(u32::persist_read(reader))
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.0.persist_write(writer)
-    }
-}
-
-impl<'vm> Persist<'vm> for Block {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let stmts = Persist::persist_read(reader);
-        let result = Persist::persist_read(reader);
-
-        Block { stmts, result }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.stmts.persist_write(writer);
-        self.result.persist_write(writer);
-    }
-}
-
-impl<'vm> Persist<'vm> for Stmt {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let n = reader.read_byte();
-        match n {
-            0 => {
-                let expr = Persist::persist_read(reader);
-                Stmt::Expr(expr)
-            }
-            1 => {
-                let pattern = Persist::persist_read(reader);
-                let init = Persist::persist_read(reader);
-                let else_block = Persist::persist_read(reader);
-
-                Stmt::Let {
-                    pattern,
-                    init,
-                    else_block,
-                }
-            }
-            _ => panic!("{}", n),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            Stmt::Expr(e) => {
-                writer.write_byte(0);
-                e.persist_write(writer);
-            }
-            Stmt::Let {
-                pattern,
-                init,
-                else_block,
-            } => {
-                writer.write_byte(1);
-                pattern.persist_write(writer);
-                init.persist_write(writer);
-                else_block.persist_write(writer);
-            }
-        }
     }
 }
 
@@ -1038,122 +911,6 @@ impl<'vm> Persist<'vm> for Pattern<'vm> {
                 msg.persist_write(writer);
             }
         }
-    }
-}
-
-impl<'vm> Persist<'vm> for FieldPattern {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.field.persist_write(writer);
-        self.pattern.persist_write(writer);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let field = Persist::persist_read(reader);
-        let pattern = Persist::persist_read(reader);
-
-        Self { field, pattern }
-    }
-}
-
-impl<'vm> Persist<'vm> for BinaryOp {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let c = reader.read_byte() as char;
-        match c {
-            '+' => BinaryOp::Add,
-            '-' => BinaryOp::Sub,
-            '*' => BinaryOp::Mul,
-            '/' => BinaryOp::Div,
-            '%' => BinaryOp::Rem,
-
-            '&' => BinaryOp::BitAnd,
-            '|' => BinaryOp::BitOr,
-            '^' => BinaryOp::BitXor,
-
-            'U' => BinaryOp::ShiftL,
-            'D' => BinaryOp::ShiftR,
-
-            '=' => BinaryOp::Eq,
-            '!' => BinaryOp::NotEq,
-
-            '<' => BinaryOp::Lt,
-            '>' => BinaryOp::Gt,
-            'L' => BinaryOp::LtEq,
-            'G' => BinaryOp::GtEq,
-
-            _ => panic!("todo read binop {}", c),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            BinaryOp::Add => writer.write_byte(b'+'),
-            BinaryOp::Sub => writer.write_byte(b'-'),
-            BinaryOp::Mul => writer.write_byte(b'*'),
-            BinaryOp::Div => writer.write_byte(b'/'),
-            BinaryOp::Rem => writer.write_byte(b'%'),
-
-            BinaryOp::BitAnd => writer.write_byte(b'&'),
-            BinaryOp::BitOr => writer.write_byte(b'|'),
-            BinaryOp::BitXor => writer.write_byte(b'^'),
-
-            BinaryOp::ShiftL => writer.write_byte(b'U'),
-            BinaryOp::ShiftR => writer.write_byte(b'D'),
-
-            BinaryOp::Eq => writer.write_byte(b'='),
-            BinaryOp::NotEq => writer.write_byte(b'!'),
-
-            BinaryOp::Lt => writer.write_byte(b'<'),
-            BinaryOp::Gt => writer.write_byte(b'>'),
-            BinaryOp::LtEq => writer.write_byte(b'L'),
-            BinaryOp::GtEq => writer.write_byte(b'G'),
-        }
-    }
-}
-
-impl<'vm> Persist<'vm> for MatchArm {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.pattern.persist_write(writer);
-        self.guard.persist_write(writer);
-        self.body.persist_write(writer);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let pattern = Persist::persist_read(reader);
-        let guard = Persist::persist_read(reader);
-        let body = Persist::persist_read(reader);
-
-        Self {
-            pattern,
-            body,
-            guard,
-        }
-    }
-}
-
-impl<'vm> Persist<'vm> for PointerCast {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        match b {
-            0 => PointerCast::ReifyFnPointer,
-            1 => PointerCast::UnsafeFnPointer,
-            2 => PointerCast::ClosureFnPointer,
-            3 => PointerCast::MutToConstPointer,
-            4 => PointerCast::ArrayToPointer,
-            5 => PointerCast::UnSize,
-            _ => panic!(),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        let b = match self {
-            PointerCast::ReifyFnPointer => 0,
-            PointerCast::UnsafeFnPointer => 1,
-            PointerCast::ClosureFnPointer => 2,
-            PointerCast::MutToConstPointer => 3,
-            PointerCast::ArrayToPointer => 4,
-            PointerCast::UnSize => 5,
-        };
-        writer.write_byte(b);
     }
 }
 
