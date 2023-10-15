@@ -8,7 +8,7 @@ use std::{
 use ahash::AHashMap;
 
 use crate::{
-    items::{CrateId, Item},
+    items::{CrateId, Item, ItemId},
     lazy_collections::{LazyArray, LazyTable},
     types::{Type, WriterTypes},
     vm::VM,
@@ -157,14 +157,16 @@ impl<'vm> PersistReader<'vm> {
     }
 
     pub fn read_item_ref(&mut self) -> &'vm Item<'vm> {
-        let crate_id = CrateId::new(usize::persist_read(self) as _);
-        let item_id = usize::persist_read(self);
+        let crate_id = CrateId::persist_read(self);
+        let item_id = ItemId::persist_read(self);
 
+        // TODO: keep doing this for local items,
+        // otherwise request the item from another crate
         assert!(crate_id == self.context.this_crate);
 
         let items = self.context.items.get().unwrap();
 
-        *items.array.get(item_id)
+        *items.array.get(item_id.index())
     }
 
     pub fn reset(&mut self, data: &'vm [u8]) {
@@ -288,6 +290,26 @@ impl<'vm> Persist<'vm> for String {
     }
 }
 
+impl<'vm> Persist<'vm> for &'vm str {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        writer.write_str(&self);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        reader.read_str()
+    }
+}
+
+impl<'vm> Persist<'vm> for &'vm [u8] {
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        writer.write_byte_slice(&self);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        reader.read_byte_slice()
+    }
+}
+
 #[cfg(windows)]
 impl<'vm> Persist<'vm> for PathBuf {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -325,6 +347,19 @@ impl<'vm> Persist<'vm> for PathBuf {
     }
 }
 
+impl<'vm, T> Persist<'vm> for Arc<T>
+where
+    T: Persist<'vm>,
+{
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.as_ref().persist_write(writer);
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        T::persist_read(reader).into()
+    }
+}
+
 impl<'vm, T> Persist<'vm> for Vec<T>
 where
     T: Persist<'vm>,
@@ -343,6 +378,27 @@ where
             result.push(T::persist_read(reader));
         }
         result
+    }
+}
+
+impl<'vm, T> Persist<'vm> for Arc<[T]>
+where
+    T: Persist<'vm>,
+{
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
+        self.len().persist_write(writer);
+        for item in self.iter() {
+            item.persist_write(writer);
+        }
+    }
+
+    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
+        let len = usize::persist_read(reader);
+        let mut result = Vec::with_capacity(len);
+        for _ in 0..len {
+            result.push(T::persist_read(reader));
+        }
+        result.into()
     }
 }
 

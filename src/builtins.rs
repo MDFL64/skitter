@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use skitter_macro::Persist;
+
 use crate::{
     abi::POINTER_SIZE,
     bytecode_compiler::CompilerStack,
@@ -8,7 +10,6 @@ use crate::{
     crate_provider::TraitImpl,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
     items::{AssocValue, CrateId, IRFlag, Item, ItemPath},
-    persist::Persist,
     types::{Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
@@ -16,8 +17,7 @@ use crate::{
     },
 };
 
-#[derive(Copy, Clone, Debug)]
-#[repr(u8)]
+#[derive(Copy, Clone, Debug, Persist)]
 pub enum BuiltinTrait {
     Sized,
     Tuple,
@@ -26,18 +26,6 @@ pub enum BuiltinTrait {
     FnMut,
     Fn,
     Pointee,
-}
-
-impl<'vm> Persist<'vm> for BuiltinTrait {
-    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
-        let b = *self as u8;
-        writer.write_byte(b);
-    }
-
-    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let n = reader.read_byte();
-        unsafe { std::mem::transmute(n) }
-    }
 }
 
 /// Used for marker trait impls.

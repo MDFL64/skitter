@@ -2,7 +2,9 @@ use std::{error::Error, path::PathBuf};
 
 use rustc_middle::ty::TyCtxt;
 
-use crate::persist::{Persist, PersistReader, PersistWriter};
+use skitter_macro::Persist;
+
+use crate::persist::{PersistReader, PersistWriter};
 
 const MAGIC: &str = "SKITTER-CRATE\n";
 const BUILD_ID: &str = "TODO"; //include!(concat!(env!("OUT_DIR"), "/build_id.rs"));
@@ -26,13 +28,13 @@ pub fn persist_header_read(reader: &mut PersistReader) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Persist)]
 pub struct PersistCrateHeader {
     pub crate_name: String,
     pub files: Vec<FileVersionEntry>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Persist)]
 pub struct FileVersionEntry {
     pub path: PathBuf,
     pub size: u64,
@@ -97,36 +99,5 @@ impl PersistCrateHeader {
             }
         }
         Ok(())
-    }
-}
-
-impl<'vm> Persist<'vm> for PersistCrateHeader {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let crate_name = Persist::persist_read(reader);
-        let files = Persist::persist_read(reader);
-
-        Self { crate_name, files }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.crate_name.persist_write(writer);
-        self.files.persist_write(writer);
-    }
-}
-
-impl<'vm> Persist<'vm> for FileVersionEntry {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let path = Persist::persist_read(reader);
-        let size = Persist::persist_read(reader);
-        let time = Persist::persist_read(reader);
-
-        Self { path, size, time }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.path.persist_write(writer);
-
-        self.size.persist_write(writer);
-        self.time.persist_write(writer);
     }
 }

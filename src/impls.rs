@@ -6,7 +6,7 @@ use crate::{
     crate_provider::TraitImpl,
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
     lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
-    persist::{Persist, PersistReader, PersistWriter},
+    persist::{PersistReader, PersistWriter},
     types::{Sub, SubList, Type, TypeKind},
     vm::VM,
 };
@@ -152,7 +152,7 @@ pub struct InherentMember<'vm> {
     value: AssocValue<'vm>,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Persist)]
 pub struct TraitKey {
     crate_id: CrateId,
     item_id: ItemId,
@@ -165,34 +165,13 @@ impl Hash for TraitKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Persist)]
 pub struct TraitValue<'vm> {
     bounds_id: u32,
     values: Arc<[Option<AssocValue<'vm>>]>,
 }
 
-impl<'vm> Persist<'vm> for TraitValue<'vm> {
-    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let bounds_id = u32::persist_read(reader);
-
-        let values: Vec<Option<AssocValue<'vm>>> = Persist::persist_read(reader);
-
-        TraitValue {
-            bounds_id,
-            values: values.into(),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.bounds_id.persist_write(writer);
-        self.values.len().persist_write(writer);
-        for val in self.values.iter() {
-            val.persist_write(writer);
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Persist)]
 struct TraitKeyValue<'vm> {
     key: (TraitKey, Option<&'vm str>),
     value: Vec<TraitValue<'vm>>,
@@ -215,38 +194,6 @@ impl<'vm> LazyKey<'vm> for TraitKeyValue<'vm> {
 
     fn key_for_input(input: &Self::Input) -> Option<&Self::Key> {
         Some(&input.key)
-    }
-}
-
-impl<'vm> Persist<'vm> for TraitKeyValue<'vm> {
-    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let crate_id = CrateId::persist_read(reader);
-        let item_id = ItemId::persist_read(reader);
-
-        let b = reader.read_byte();
-        let ty_key = if b == 1 {
-            Some(reader.read_str())
-        } else {
-            None
-        };
-
-        Self {
-            key: (TraitKey { crate_id, item_id }, ty_key),
-            value: Persist::persist_read(reader),
-        }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.key.0.crate_id.persist_write(writer);
-        self.key.0.item_id.persist_write(writer);
-        if let Some(ty_key) = self.key.1 {
-            writer.write_byte(1);
-            writer.write_str(ty_key);
-        } else {
-            writer.write_byte(0);
-        }
-
-        self.value.persist_write(writer);
     }
 }
 

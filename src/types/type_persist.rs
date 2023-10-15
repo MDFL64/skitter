@@ -16,6 +16,7 @@ impl<'vm> LazyItem<'vm> for Type<'vm> {
     }
 }
 
+// cannot use derive: loads from lazy array
 impl<'vm> Persist<'vm> for Type<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         let type_id = self.0.persist_id.get_or_init(|| {
@@ -294,6 +295,7 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
     }
 }
 
+// cannot use derive: item refs need special handling
 impl<'vm> Persist<'vm> for ItemWithSubs<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         writer.write_item_ref(self.item);

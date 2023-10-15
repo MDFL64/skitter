@@ -76,7 +76,7 @@ pub enum FloatWidth {
     F64,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Persist)]
 pub enum Mutability {
     Mut,
     Const,

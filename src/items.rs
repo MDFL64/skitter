@@ -27,7 +27,7 @@ pub struct ExternCrate {
     pub id: CrateId,
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug, PartialOrd, Ord, Persist)]
 pub struct ItemPath<'vm>(NameSpace, &'vm str);
 
 impl<'vm> ItemPath<'vm> {
@@ -54,32 +54,7 @@ impl<'vm> ItemPath<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for ItemPath<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self.0 {
-            NameSpace::Type => writer.write_byte('t' as u8),
-            NameSpace::Value => writer.write_byte('v' as u8),
-            NameSpace::DebugOnly => writer.write_byte('d' as u8),
-        }
-        writer.write_str(self.1);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let ns = reader.read_byte() as char;
-        let ns = match ns {
-            't' => NameSpace::Type,
-            'v' => NameSpace::Value,
-            'd' => NameSpace::DebugOnly,
-            _ => panic!(),
-        };
-
-        let string = reader.read_str();
-
-        Self(ns, string)
-    }
-}
-
-#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, PartialOrd, Ord)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, PartialOrd, Ord, Persist)]
 enum NameSpace {
     /// Structs, Enums, etc.
     Type,
@@ -102,10 +77,13 @@ impl CrateId {
     }
 }
 
+// do not use derive: needs remapping
 impl<'vm> Persist<'vm> for CrateId {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         // TODO remap crate id!
-        Self::new(Persist::persist_read(reader))
+        let crate_id = Self::new(Persist::persist_read(reader));
+        assert!(crate_id == reader.context.this_crate);
+        crate_id
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
@@ -375,38 +353,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for BoundKind<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        match self {
-            BoundKind::Trait(item) => {
-                writer.write_byte(0);
-                item.persist_write(writer);
-            }
-            BoundKind::Projection(item, ty) => {
-                writer.write_byte(1);
-                item.persist_write(writer);
-                ty.persist_write(writer);
-            }
-        }
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let b = reader.read_byte();
-        match b {
-            0 => {
-                let item = ItemWithSubs::persist_read(reader);
-                BoundKind::Trait(item)
-            }
-            1 => {
-                let item = ItemWithSubs::persist_read(reader);
-                let ty = Type::persist_read(reader);
-                BoundKind::Projection(item, ty)
-            }
-            _ => panic!(),
-        }
-    }
-}
-
+// do not derive: block `RawFunctionIR`
 impl<'vm> Persist<'vm> for AssocValue<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         match self {
@@ -440,21 +387,9 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Persist)]
 pub enum FunctionAbi {
     RustIntrinsic,
-}
-
-impl<'vm> Persist<'vm> for (FunctionAbi, String) {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        assert!(self.0 == FunctionAbi::RustIntrinsic);
-        self.1.persist_write(writer);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let ident = String::persist_read(reader);
-        (FunctionAbi::RustIntrinsic, ident)
-    }
 }
 
 ///
@@ -497,7 +432,7 @@ pub enum ItemKind<'vm> {
     },
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
 pub struct FunctionSig<'vm> {
     pub inputs: Vec<Type<'vm>>,
     pub output: Type<'vm>,
@@ -526,30 +461,20 @@ impl<'vm> FunctionSig<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for FunctionSig<'vm> {
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let inputs = Persist::persist_read(reader);
-        let output = Persist::persist_read(reader);
-        Self { inputs, output }
-    }
-
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.inputs.persist_write(writer);
-        self.output.persist_write(writer);
-    }
-}
-
+#[derive(Persist)]
 pub enum AdtKind<'vm> {
     Struct,
     Union,
     Enum(EnumInfo<'vm>),
 }
 
+#[derive(Persist)]
 pub struct EnumInfo<'vm> {
     pub discriminant_external: Type<'vm>,
     pub discriminant_internal: Type<'vm>,
 }
 
+#[derive(Persist)]
 pub struct AdtInfo<'vm> {
     pub variant_fields: Vec<Vec<Type<'vm>>>,
     pub kind: AdtKind<'vm>,
@@ -578,69 +503,11 @@ impl<'vm> AdtInfo<'vm> {
     }
 }
 
-impl<'vm> Persist<'vm> for AdtInfo<'vm> {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.variant_fields.persist_write(writer);
-
-        match self.kind {
-            AdtKind::Struct => {
-                writer.write_byte(0);
-            }
-            AdtKind::Enum(ref info) => {
-                writer.write_byte(1);
-                info.discriminant_internal.persist_write(writer);
-                info.discriminant_external.persist_write(writer);
-            }
-            AdtKind::Union => {
-                writer.write_byte(2);
-            }
-        }
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let variant_fields = <Vec<Vec<Type<'vm>>>>::persist_read(reader);
-
-        let kind = match reader.read_byte() {
-            0 => AdtKind::Struct,
-            1 => {
-                let discriminant_internal = Persist::persist_read(reader);
-                let discriminant_external = Persist::persist_read(reader);
-                AdtKind::Enum(EnumInfo {
-                    discriminant_internal,
-                    discriminant_external,
-                })
-            }
-            2 => AdtKind::Union,
-            _ => panic!(),
-        };
-
-        AdtInfo {
-            variant_fields,
-            kind,
-        }
-    }
-}
-
 /// Always refers to a trait item in the same crate.
+#[derive(Persist)]
 pub struct VirtualInfo {
     pub trait_id: ItemId,
     pub member_index: u32,
-}
-
-impl<'vm> Persist<'vm> for VirtualInfo {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-        self.trait_id.index().persist_write(writer);
-        self.member_index.persist_write(writer);
-    }
-
-    fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        let trait_id = ItemId(u32::persist_read(reader));
-        let member_index = u32::persist_read(reader);
-        Self {
-            trait_id,
-            member_index,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -660,7 +527,7 @@ pub enum IRFlag {
     UseClosureSubs,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Persist)]
 pub enum BoundKind<'vm> {
     /// Is the trait item implemented for the given subs?
     Trait(ItemWithSubs<'vm>),
