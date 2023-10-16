@@ -264,6 +264,8 @@ pub enum ExprKind<'vm> {
         arms: Vec<MatchArm>,
     },
 
+    ConstParam(u32),
+
     /// Error, for unsupported exprs
     Error(String),
 }

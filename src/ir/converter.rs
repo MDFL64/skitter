@@ -424,6 +424,16 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                     self.ctx.vm.types.def_from_rustc(did, &[], &self.ctx);
                                 ExprKind::Static(static_item)
                             }
+                            DefKind::ConstParam => {
+                                let generics = self.ctx.tcx.generics_of(self.func_id);
+
+                                let n = generics
+                                    .param_def_id_to_index
+                                    .get(&did)
+                                    .expect("can't find const param");
+
+                                ExprKind::ConstParam(*n)
+                            }
                             _ => ExprKind::Error(format!("def = {:?}", def_kind)),
                         }
                     }

@@ -11,3 +11,7 @@ fn f() -> &'static [i32] {
 ```
 
 Probably trait objects as well?
+
+------------
+
+Rustc evaluates {expression} const params before we get them, and could do so inconsistently!

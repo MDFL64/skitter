@@ -11,7 +11,7 @@ use crate::{
     impls::find_inherent_impl_crate,
     items::{parent_def_from_rustc, path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
-    types::{AutoTraitSet, Sub, ConstGeneric},
+    types::{AutoTraitSet, ConstGeneric, Sub},
     vm::VM,
 };
 
@@ -222,14 +222,12 @@ impl<'vm> TypeContext<'vm> {
                             let n = val.to_bits(val.size()).unwrap();
                             ConstGeneric::Value(n as i128)
                         }
-                        ConstKind::Param(n) => {
-                            ConstGeneric::Param(n.index)
-                        }
-                        _ => panic!("lower const {:?}",c.kind())
+                        ConstKind::Param(n) => ConstGeneric::Param(n.index),
+                        _ => panic!("lower const {:?}", c.kind()),
                     };
 
                     Sub::Const(ty, kind)
-                },
+                }
             })
             .collect();
         SubList { list }

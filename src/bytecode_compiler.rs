@@ -984,6 +984,25 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
+            ExprKind::ConstParam(n) => {
+                // the result value
+                let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+
+                let param = self
+                    .in_func_subs
+                    .list
+                    .get(*n as usize)
+                    .expect("can't find const param");
+                let c = param.assert_const(expr_ty);
+                let val = c.get_value();
+                self.out_bc.push(bytecode_select::literal(
+                    val,
+                    expr_ty.layout().assert_size(),
+                    dst_slot,
+                ));
+
+                dst_slot
+            }
             _ => panic!("todo lower expr {:?}", expr.kind),
         }
     }

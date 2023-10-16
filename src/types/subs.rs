@@ -10,20 +10,29 @@ use super::{Type, TypeKind};
 pub enum Sub<'vm> {
     Type(Type<'vm>),
     Lifetime,
-    Const(Type<'vm>,ConstGeneric),
+    Const(Type<'vm>, ConstGeneric),
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Persist)]
 pub enum ConstGeneric {
     Value(i128),
     Param(u32),
-    Unknown
+    Unknown,
 }
 
 impl<'vm> Sub<'vm> {
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
         match self {
             Sub::Type(ty) => Sub::Type(ty.sub(subs)),
+            Sub::Const(ty, ConstGeneric::Param(sub_n)) => {
+                let new_const = subs
+                    .list
+                    .get(*sub_n as usize)
+                    .expect("const index out of bounds")
+                    .assert_const(*ty);
+
+                Sub::Const(*ty, new_const.clone())
+            }
             _ => self.clone(),
         }
     }
@@ -32,9 +41,8 @@ impl<'vm> Sub<'vm> {
         match self {
             Sub::Type(ty) => ty.is_concrete(),
             Sub::Lifetime => true,
-            Sub::Const(ty,ConstGeneric::Value(_)) => ty.is_concrete(),
-            Sub::Const(_,ConstGeneric::Param(_)) |
-            Sub::Const(_,ConstGeneric::Unknown) => false,
+            Sub::Const(ty, ConstGeneric::Value(_)) => ty.is_concrete(),
+            Sub::Const(_, ConstGeneric::Param(_)) | Sub::Const(_, ConstGeneric::Unknown) => false,
         }
     }
 
@@ -42,6 +50,16 @@ impl<'vm> Sub<'vm> {
         match self {
             Sub::Type(ty) => *ty,
             _ => panic!("not a type"),
+        }
+    }
+
+    pub fn assert_const(&self, expect_ty: Type<'vm>) -> &ConstGeneric {
+        match self {
+            Sub::Const(ty, c) => {
+                assert!(*ty == expect_ty);
+                c
+            }
+            _ => panic!("not a const generic"),
         }
     }
 }
@@ -53,6 +71,15 @@ impl<'vm> Display for Sub<'vm> {
             Sub::Type(ty) => write!(f, "{}", ty),
             Sub::Lifetime => write!(f, "'_"),
             Sub::Const(..) => write!(f, "<const>"),
+        }
+    }
+}
+
+impl ConstGeneric {
+    pub fn get_value(&self) -> i128 {
+        match self {
+            ConstGeneric::Value(n) => *n,
+            _ => panic!("cannot get value from: {:?}", self),
         }
     }
 }
@@ -76,7 +103,7 @@ impl<'vm> SubList<'vm> {
             list.push(Sub::Type(unk_ty));
         }
         for _ in 0..summary.consts {
-            list.push(Sub::Const(unk_ty,ConstGeneric::Unknown));
+            list.push(Sub::Const(unk_ty, ConstGeneric::Unknown));
         }
 
         SubList { list }
@@ -105,7 +132,7 @@ impl<'vm> SubList<'vm> {
                         panic!("is_identity? ty: {}", ty);
                     }
                 }
-                Sub::Const(_,kind) => {
+                Sub::Const(_, kind) => {
                     if let ConstGeneric::Param(p) = kind {
                         if *p != i as u32 {
                             return false;
