@@ -10,7 +10,14 @@ use super::{Type, TypeKind};
 pub enum Sub<'vm> {
     Type(Type<'vm>),
     Lifetime,
-    Const,
+    Const(Type<'vm>,ConstGeneric),
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Persist)]
+pub enum ConstGeneric {
+    Value(i128),
+    Param(u32),
+    Unknown
 }
 
 impl<'vm> Sub<'vm> {
@@ -25,7 +32,9 @@ impl<'vm> Sub<'vm> {
         match self {
             Sub::Type(ty) => ty.is_concrete(),
             Sub::Lifetime => true,
-            Sub::Const => todo!(),
+            Sub::Const(ty,ConstGeneric::Value(_)) => ty.is_concrete(),
+            Sub::Const(_,ConstGeneric::Param(_)) |
+            Sub::Const(_,ConstGeneric::Unknown) => false,
         }
     }
 
@@ -43,7 +52,7 @@ impl<'vm> Display for Sub<'vm> {
         match self {
             Sub::Type(ty) => write!(f, "{}", ty),
             Sub::Lifetime => write!(f, "'_"),
-            Sub::Const => write!(f, "<const>"),
+            Sub::Const(..) => write!(f, "<const>"),
         }
     }
 }
@@ -58,16 +67,16 @@ impl<'vm> SubList<'vm> {
         let total = summary.total();
         let mut list = Vec::with_capacity(total as usize);
 
+        let unk_ty = vm.common_types().unknown;
+
         for _ in 0..summary.lifetimes {
             list.push(Sub::Lifetime);
         }
         for _ in 0..summary.types {
-            let ty = vm.common_types().unknown;
-
-            list.push(Sub::Type(ty));
+            list.push(Sub::Type(unk_ty));
         }
         for _ in 0..summary.consts {
-            list.push(Sub::Const);
+            list.push(Sub::Const(unk_ty,ConstGeneric::Unknown));
         }
 
         SubList { list }
@@ -96,8 +105,14 @@ impl<'vm> SubList<'vm> {
                         panic!("is_identity? ty: {}", ty);
                     }
                 }
-                Sub::Const => {
-                    println!("const is identity?");
+                Sub::Const(_,kind) => {
+                    if let ConstGeneric::Param(p) = kind {
+                        if *p != i as u32 {
+                            return false;
+                        }
+                    } else {
+                        panic!("is_identity? const: {:?}", kind);
+                    }
                 }
                 Sub::Lifetime => {
                     // don't care

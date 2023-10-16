@@ -11,7 +11,7 @@ use crate::{
     impls::find_inherent_impl_crate,
     items::{parent_def_from_rustc, path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
-    types::{AutoTraitSet, Sub},
+    types::{AutoTraitSet, Sub, ConstGeneric},
     vm::VM,
 };
 
@@ -208,7 +208,28 @@ impl<'vm> TypeContext<'vm> {
             .map(|s| match s.unpack() {
                 GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
                 GenericArgKind::Lifetime(_) => Sub::Lifetime,
-                GenericArgKind::Const(_) => Sub::Const,
+                GenericArgKind::Const(c) => {
+                    let ty = self.type_from_rustc(c.ty(), ctx);
+
+                    use rustc_middle::ty::ConstKind;
+                    use rustc_middle::ty::ValTree;
+
+                    let kind = match c.kind() {
+                        ConstKind::Expr(_) => {
+                            panic!("expr");
+                        }
+                        ConstKind::Value(ValTree::Leaf(val)) => {
+                            let n = val.to_bits(val.size()).unwrap();
+                            ConstGeneric::Value(n as i128)
+                        }
+                        ConstKind::Param(n) => {
+                            ConstGeneric::Param(n.index)
+                        }
+                        _ => panic!("lower const {:?}",c.kind())
+                    };
+
+                    Sub::Const(ty, kind)
+                },
             })
             .collect();
         SubList { list }
