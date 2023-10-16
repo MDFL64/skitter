@@ -17,6 +17,7 @@ pub enum Sub<'vm> {
 pub enum ConstGeneric {
     Value(i128),
     Param(u32),
+    Error,
     Unknown,
 }
 
@@ -24,15 +25,7 @@ impl<'vm> Sub<'vm> {
     pub fn sub(&self, subs: &SubList<'vm>) -> Self {
         match self {
             Sub::Type(ty) => Sub::Type(ty.sub(subs)),
-            Sub::Const(ty, ConstGeneric::Param(sub_n)) => {
-                let new_const = subs
-                    .list
-                    .get(*sub_n as usize)
-                    .expect("const index out of bounds")
-                    .assert_const(*ty);
-
-                Sub::Const(*ty, new_const.clone())
-            }
+            Sub::Const(ty, c) => Sub::Const(*ty, c.sub(subs, *ty)),
             _ => self.clone(),
         }
     }
@@ -41,8 +34,7 @@ impl<'vm> Sub<'vm> {
         match self {
             Sub::Type(ty) => ty.is_concrete(),
             Sub::Lifetime => true,
-            Sub::Const(ty, ConstGeneric::Value(_)) => ty.is_concrete(),
-            Sub::Const(_, ConstGeneric::Param(_)) | Sub::Const(_, ConstGeneric::Unknown) => false,
+            Sub::Const(ty, c) => ty.is_concrete() && c.is_concrete(),
         }
     }
 
@@ -80,6 +72,25 @@ impl ConstGeneric {
         match self {
             ConstGeneric::Value(n) => *n,
             _ => panic!("cannot get value from: {:?}", self),
+        }
+    }
+
+    pub fn is_concrete(&self) -> bool {
+        match self {
+            ConstGeneric::Value(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn sub<'vm>(&self, subs: &SubList<'vm>, expect_ty: Type<'vm>) -> Self {
+        match self {
+            ConstGeneric::Param(sub_n) => subs
+                .list
+                .get(*sub_n as usize)
+                .expect("const index out of bounds")
+                .assert_const(expect_ty)
+                .clone(),
+            _ => self.clone(),
         }
     }
 }

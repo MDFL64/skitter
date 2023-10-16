@@ -53,7 +53,8 @@ fn find_source_crate(ty: Type) -> CrateId {
         | TypeKind::Int(..)
         | TypeKind::Tuple(_)
         | TypeKind::StringSlice
-        | TypeKind::Slice(_) => *ty.vm().core_crate.get().unwrap(),
+        | TypeKind::Slice(_)
+        | TypeKind::Array(..) => *ty.vm().core_crate.get().unwrap(),
         _ => panic!("source crate {}", ty),
     }
 }

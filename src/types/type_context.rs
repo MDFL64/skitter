@@ -18,8 +18,7 @@ use crate::{
 use colosseum::sync::Arena;
 
 use super::{
-    ArraySize, FloatWidth, IntSign, IntWidth, InternedType, ItemWithSubs, Mutability, SubList,
-    Type, TypeKind,
+    FloatWidth, IntSign, IntWidth, InternedType, ItemWithSubs, Mutability, SubList, Type, TypeKind,
 };
 
 pub struct TypeContext<'vm> {
@@ -90,12 +89,9 @@ impl<'vm> TypeContext<'vm> {
                 TypeKind::Tuple(members)
             }
             TyKind::Array(member_ty, count) => {
-                let param_env = rustc_middle::ty::ParamEnv::reveal_all();
-                let count = match count.try_eval_target_usize(ctx.tcx, param_env) {
-                    Some(n) => ArraySize::Static(n as u32),
-                    None => ArraySize::ConstParam(0xFFFF), // todo
-                };
                 let member_ty = self.type_from_rustc(*member_ty, ctx);
+                let (_, count) = self.const_from_rustc(count, ctx);
+
                 TypeKind::Array(member_ty, count)
             }
             TyKind::Slice(member_ty) => {
@@ -208,29 +204,40 @@ impl<'vm> TypeContext<'vm> {
             .map(|s| match s.unpack() {
                 GenericArgKind::Type(ty) => Sub::Type(self.type_from_rustc(ty, ctx)),
                 GenericArgKind::Lifetime(_) => Sub::Lifetime,
-                GenericArgKind::Const(c) => {
-                    let ty = self.type_from_rustc(c.ty(), ctx);
-
-                    use rustc_middle::ty::ConstKind;
-                    use rustc_middle::ty::ValTree;
-
-                    let kind = match c.kind() {
-                        ConstKind::Expr(_) => {
-                            panic!("expr");
-                        }
-                        ConstKind::Value(ValTree::Leaf(val)) => {
-                            let n = val.to_bits(val.size()).unwrap();
-                            ConstGeneric::Value(n as i128)
-                        }
-                        ConstKind::Param(n) => ConstGeneric::Param(n.index),
-                        _ => panic!("lower const {:?}", c.kind()),
-                    };
+                GenericArgKind::Const(ref c) => {
+                    let (ty, kind) = self.const_from_rustc(c, ctx);
 
                     Sub::Const(ty, kind)
                 }
             })
             .collect();
         SubList { list }
+    }
+
+    pub fn const_from_rustc<'tcx>(
+        &'vm self,
+        c: &rustc_middle::ty::Const<'tcx>,
+        ctx: &RustCContext<'vm, 'tcx>,
+    ) -> (Type<'vm>, ConstGeneric) {
+        let ty = self.type_from_rustc(c.ty(), ctx);
+
+        use rustc_middle::ty::ConstKind;
+        use rustc_middle::ty::ValTree;
+
+        let kind = match c.kind() {
+            ConstKind::Expr(_) => {
+                panic!("expr");
+            }
+            ConstKind::Value(ValTree::Leaf(val)) => {
+                let n = val.to_bits(val.size()).unwrap();
+                ConstGeneric::Value(n as i128)
+            }
+            ConstKind::Param(n) => ConstGeneric::Param(n.index),
+            ConstKind::Unevaluated(..) => ConstGeneric::Error,
+            _ => panic!("lower const {:?}", c.kind()),
+        };
+
+        (ty, kind)
     }
 
     pub fn def_from_rustc<'tcx>(

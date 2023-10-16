@@ -8,7 +8,7 @@ use crate::ir::{
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{ArraySize, Mutability, SubList, Type, TypeKind};
+use crate::types::{Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -734,7 +734,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         let meta = match (src_ty.kind(), dst_ty.kind()) {
                             (TypeKind::Array(_, elem_count), TypeKind::Slice(_)) => {
-                                elem_count.assert_static() as usize
+                                elem_count.get_value() as usize
                             }
                             (
                                 _,
@@ -882,12 +882,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 dst_slot
             }
             ExprKind::ArrayRepeat(arg, size) => {
-                // TODO could const eval the whole thing in many cases, but it may be best to
-                // think about that if/when doing more generalized const eval
-                let count = match size {
-                    ArraySize::Static(n) => *n,
-                    ArraySize::ConstParam(_) => panic!("todo const param array size"),
-                };
+                let count = size
+                    .sub(self.in_func_subs, self.vm.common_types().usize)
+                    .get_value() as u32;
 
                 let elem_size = self.expr_ty(*arg).layout().assert_size();
 
@@ -1086,7 +1083,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 match lhs_kind {
                     TypeKind::Array(elem_ty, elem_count) => {
                         let elem_size = elem_ty.layout().assert_size();
-                        let elem_count = elem_count.assert_static();
+                        let elem_count = elem_count.get_value() as u32;
 
                         self.out_bc.push(Instr::IndexCalc {
                             arg_out: index_slot,

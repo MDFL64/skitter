@@ -12,6 +12,18 @@ const fn baz() -> i32 {
     15
 }
 
+fn fud<const N: usize>() {
+    let array = [5;N];
+
+    let mut sum = 0;
+
+    for n in array {
+        sum += n;
+    }
+
+    _builtin::print_int(sum as _);
+}
+
 fn main() {
     foo::<3>();
     foo::<4>();
@@ -22,4 +34,7 @@ fn main() {
 
     foo::<{baz() + 3}>();
     bar::<{baz() + 3}>();
+
+    fud::<9>();
+    fud::<30>();
 }

@@ -5,7 +5,7 @@ use skitter_macro::Persist;
 use crate::{
     closure::FnTrait,
     items::FunctionSig,
-    types::{ArraySize, ItemWithSubs, Mutability, Type},
+    types::{ConstGeneric, ItemWithSubs, Mutability, Type},
 };
 
 #[derive(Default)]
@@ -235,7 +235,7 @@ pub enum ExprKind<'vm> {
     },
     Array(Vec<ExprId>),
     /// Check the type to determine the count.
-    ArrayRepeat(ExprId, ArraySize),
+    ArrayRepeat(ExprId, ConstGeneric),
 
     NamedConst(ItemWithSubs<'vm>),
     /// Subs are included for consistency, they should be empty?

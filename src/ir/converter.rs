@@ -427,12 +427,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             DefKind::ConstParam => {
                                 let generics = self.ctx.tcx.generics_of(self.func_id);
 
-                                let n = generics
-                                    .param_def_id_to_index
-                                    .get(&did)
-                                    .expect("can't find const param");
-
-                                ExprKind::ConstParam(*n)
+                                if let Some(n) = generics.param_def_id_to_index.get(&did) {
+                                    ExprKind::ConstParam(*n)
+                                } else {
+                                    ExprKind::Error(format!("const def = {:?}", def_kind))
+                                }
                             }
                             _ => ExprKind::Error(format!("def = {:?}", def_kind)),
                         }

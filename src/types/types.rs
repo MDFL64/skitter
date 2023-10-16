@@ -9,7 +9,7 @@ use crate::{
 use super::{
     layout::Layout,
     subs::{Sub, SubList},
-    Type,
+    ConstGeneric, Type,
 };
 
 use skitter_macro::Persist;
@@ -26,7 +26,7 @@ pub enum TypeKind<'vm> {
     Ptr(Type<'vm>, Mutability),
 
     Tuple(Vec<Type<'vm>>),
-    Array(Type<'vm>, ArraySize),
+    Array(Type<'vm>, ConstGeneric),
     Slice(Type<'vm>),
     StringSlice,
 
@@ -91,22 +91,6 @@ pub struct ItemWithSubs<'vm> {
 impl<'vm> Display for ItemWithSubs<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.item.path.as_string(), self.subs)
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Persist)]
-pub enum ArraySize {
-    Static(u32),
-    ConstParam(u32),
-}
-
-impl ArraySize {
-    pub fn assert_static(&self) -> u32 {
-        if let ArraySize::Static(n) = self {
-            *n
-        } else {
-            panic!("expected static sized array, got const param");
-        }
     }
 }
 
@@ -212,10 +196,9 @@ impl<'vm> Type<'vm> {
                 vm.types.intern(TypeKind::Tuple(new_fields), vm)
             }
             TypeKind::Array(child_ty, size) => {
-                // todo subs for const size
-                size.assert_static();
+                let size = size.sub(subs, vm.common_types().usize);
                 vm.types
-                    .intern(TypeKind::Array(child_ty.sub(subs), *size), vm)
+                    .intern(TypeKind::Array(child_ty.sub(subs), size), vm)
             }
             TypeKind::Slice(child_ty) => vm.types.intern(TypeKind::Slice(child_ty.sub(subs)), vm),
             TypeKind::Adt(adt) => {
@@ -347,12 +330,7 @@ impl<'vm> Type<'vm> {
                 let args_concrete = sig.inputs.iter().all(|arg| arg.is_concrete());
                 args_concrete && sig.output.is_concrete()
             }
-            TypeKind::Array(child, size) => {
-                if let ArraySize::ConstParam(_) = size {
-                    return false;
-                }
-                child.is_concrete()
-            }
+            TypeKind::Array(child, size) => child.is_concrete() && size.is_concrete(),
             TypeKind::Param(_) | TypeKind::Unknown => false,
             TypeKind::AssociatedType(_) => false,
             _ => panic!("is concrete? {}", self),
