@@ -430,7 +430,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                                 if let Some(n) = generics.param_def_id_to_index.get(&did) {
                                     ExprKind::ConstParam(*n)
                                 } else {
-                                    ExprKind::Error(format!("const def = {:?}", def_kind))
+                                    ExprKind::Error(format!("const def = {:?}", did))
                                 }
                             }
                             _ => ExprKind::Error(format!("def = {:?}", def_kind)),

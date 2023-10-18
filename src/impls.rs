@@ -7,7 +7,7 @@ use crate::{
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
     lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
     persist::{PersistReader, PersistWriter},
-    types::{Sub, SubList, Type, TypeKind},
+    types::{Sub, SubList, Type, TypeKind, ConstGeneric},
     vm::VM,
 };
 
@@ -481,6 +481,11 @@ impl<'vm> ImplBounds<'vm> {
                     true
                 }
             }
+            (TypeKind::Array(lhs_child,lhs_size),TypeKind::Array(rhs_child,rhs_size)) => {
+                let ty_usize = lhs.vm().common_types().usize;
+                Self::match_types(*lhs_child, *rhs_child, res_map) &&
+                Self::match_const(lhs_size, rhs_size, res_map, ty_usize)
+            }
 
             /*(TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
                 panic!("bidirectional bound not permitted");
@@ -526,6 +531,22 @@ impl<'vm> ImplBounds<'vm> {
             }
         }
     }
+
+    fn match_const(lhs: &ConstGeneric, rhs: &ConstGeneric, res_map: &mut SubMap<'vm>, const_ty: Type<'vm>) -> bool {
+        if lhs.is_concrete() && lhs == rhs {
+            return true;
+        }
+
+        match (lhs, rhs) {
+            (ConstGeneric::Param(param_num), _) => {
+                res_map.set_param_const(*param_num, rhs, const_ty)
+            }
+            _ => {
+                println!("match const {:?} {:?}",lhs,rhs);
+                panic!();
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -547,9 +568,7 @@ impl<'vm> SubMap<'vm> {
 
 impl<'vm> SubMap<'vm> {
     fn set_param(&mut self, n: u32, val: Type<'vm>) -> bool {
-        let result_subs = self.get_result();
-
-        let entry = &mut result_subs.list[n as usize];
+        let entry = &mut self.result_subs.list[n as usize];
 
         if let Sub::Type(current_val) = entry {
             if current_val != &val {
@@ -557,13 +576,31 @@ impl<'vm> SubMap<'vm> {
                     *current_val = val;
                 } else {
                     println!("{} {}", current_val, val);
-                    panic!("yeet");
+                    panic!("failed to set type param");
                 }
             }
         } else {
             panic!("attempt to fill non-type sub");
         }
+        true
+    }
 
+    fn set_param_const(&mut self, n: u32, val: &ConstGeneric, ty: Type<'vm>) -> bool {
+        let entry = &mut self.result_subs.list[n as usize];
+
+        if let Sub::Const(current_ty,current_val) = entry {
+            if current_val != val || current_ty != &ty {
+                if current_val == &ConstGeneric::Unknown && current_ty.kind() == &TypeKind::Unknown {
+                    *current_val = val.clone();
+                    *current_ty = ty;
+                } else {
+                    println!("{:?} {:?} / {} {}", current_val, val, current_ty, ty);
+                    panic!("failed to set const param");
+                }
+            }
+        } else {
+            panic!("attempt to fill non-const sub");
+        }
         true
     }
 }

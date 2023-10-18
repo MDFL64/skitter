@@ -354,7 +354,7 @@ pub fn compile_rust_intrinsic<'vm>(
     out_slot: Slot,
 ) {
     match name {
-        "transmute" => {
+        "transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
             assert!(arg_slots.len() == 1);
 
