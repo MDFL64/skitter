@@ -441,6 +441,12 @@ impl<'vm> ImplBounds<'vm> {
                         return false;
                     }
                 }
+                (Sub::Const(lhs_ty,lhs_const),Sub::Const(rhs_ty,rhs_const)) => {
+                    assert!(lhs_ty.is_concrete() && lhs_ty == rhs_ty);
+                    if !Self::match_const(lhs_const, rhs_const, res_map, *lhs_ty) {
+                        return false;
+                    }
+                }
                 _ => {
                     if pair.0 != pair.1 {
                         return false;

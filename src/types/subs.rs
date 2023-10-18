@@ -62,7 +62,7 @@ impl<'vm> Display for Sub<'vm> {
         match self {
             Sub::Type(ty) => write!(f, "{}", ty),
             Sub::Lifetime => write!(f, "'_"),
-            Sub::Const(..) => write!(f, "<const>"),
+            Sub::Const(ty,c) => write!(f, "<const {} {:?}>",ty,c),
         }
     }
 }

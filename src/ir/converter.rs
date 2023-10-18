@@ -427,8 +427,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             DefKind::ConstParam => {
                                 let generics = self.ctx.tcx.generics_of(self.func_id);
 
-                                if let Some(n) = generics.param_def_id_to_index.get(&did) {
-                                    ExprKind::ConstParam(*n)
+                                if let Some(n) = generics.param_def_id_to_index(self.ctx.tcx,did) {
+                                    ExprKind::ConstParam(n)
                                 } else {
                                     ExprKind::Error(format!("const def = {:?}", did))
                                 }
@@ -444,7 +444,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     hir::def::Res::Local(hir_id) => {
                         assert_eq!(hir_id.owner.def_id, self.func_id);
                         let local_id = hir_id.local_id.as_u32();
-
                         ExprKind::VarRef(local_id)
                     }
                     _ => panic!("path = {:?}", res),
@@ -1048,7 +1047,17 @@ fn match_capture(
 ) -> Option<UpVar> {
     let expr = &ir.expr(expr_id).kind;
 
-    if let Some(proj) = capture.place.projections.get(proj_index) {
+    // we actually need to index these in reverse
+    let real_proj_index = if proj_index >= capture.place.projections.len() {
+        None
+    } else {
+        Some(capture.place.projections.len() - 1 - proj_index)
+    };
+
+    if let Some(real_proj_index) = real_proj_index {
+
+        let proj = capture.place.projections.get(real_proj_index).unwrap();
+
         use rustc_middle::hir::place::ProjectionKind;
         match proj.kind {
             ProjectionKind::Field(cap_field, cap_variant) => {
@@ -1077,8 +1086,6 @@ fn match_capture(
             _ => panic!("todo projection {:?}", proj),
         }
     } else {
-        assert!(proj_index == capture.place.projections.len());
-
         if let rustc_middle::hir::place::PlaceBase::Upvar(upvar) = capture.place.base {
             let local_id = upvar.var_path.hir_id.local_id.as_u32();
 

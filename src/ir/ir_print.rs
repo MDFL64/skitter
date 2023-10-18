@@ -113,6 +113,15 @@ impl<'vm> IRFunction<'vm> {
                 self.print_expr(child, indent);
                 print!(" as {} )", expr.ty);
             }
+            ExprKind::PointerCast(child,kind) => {
+                print!("( ");
+                self.print_expr(child, indent);
+                print!(" as {:?} {} )", kind, expr.ty);
+            }
+            ExprKind::Field { lhs, variant, field } => {
+                self.print_expr(lhs, indent);
+                print!(".v{}.f{}",variant,field);
+            }
             ExprKind::Call { func, ref args } => {
                 self.print_expr(func, indent);
                 print!("( ");

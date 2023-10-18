@@ -1629,7 +1629,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 return *slot;
             }
         }
-        panic!("failed to find local");
+        panic!("failed to find local {}",local);
     }
 
     fn find_or_alloc_local(&mut self, local: u32, ty: Type) -> Slot {

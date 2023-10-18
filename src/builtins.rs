@@ -783,7 +783,7 @@ pub fn compile_rust_intrinsic<'vm>(
             // signed: same signs on inputs, differ from output
             // unsigned: (a + b < a)
         }
-        "wrapping_add" => {
+        "unchecked_add" | "wrapping_add" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);
 
