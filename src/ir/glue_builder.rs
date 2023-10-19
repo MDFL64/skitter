@@ -126,7 +126,7 @@ pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, ir_kind: IRKind) -> I
         .collect();
 
     let struct_expr = builder.add_expr(Expr {
-        kind: ExprKind::Adt { variant, fields },
+        kind: ExprKind::Adt { variant, fields, rest: None },
         ty: adt_ty,
     });
 

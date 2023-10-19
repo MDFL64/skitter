@@ -31,6 +31,7 @@ impl<'vm> IRFunction<'vm> {
 
             ExprKind::VarRef(..) | ExprKind::UpVar(_) => false,
 
+            ExprKind::Cast(_) => false,
             ExprKind::Call { .. } => false,
 
             _ => panic!("is_const_alloc {:?} / {}", expr.kind, expr.ty),
@@ -87,12 +88,24 @@ impl<'vm> IRFunction<'vm> {
                     ConstStatus::Not
                 }
             }
+            ExprKind::Index { lhs, index } => {
+                let args_const =
+                    self.const_status(lhs).is_const() && self.const_status(index).is_const();
+
+                if args_const {
+                    ConstStatus::CanPromote
+                } else {
+                    ConstStatus::Not
+                }
+            }
 
             ExprKind::Binary(_, lhs, rhs) => {
                 let args_const =
                     self.const_status(lhs).is_const() && self.const_status(rhs).is_const();
 
                 if args_const {
+                    // i have no recollection of what this means
+                    // arg types should always be primitives in our IR -- otherwise we would have a function?
                     panic!("todo arg types must be primitive")
                 } else {
                     ConstStatus::Not

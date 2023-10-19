@@ -19,4 +19,6 @@ pub fn main() {
     write!(&mut w,"alpha {}\n","beta");
     let x: i32 = 100;
     write!(&mut w,"int {}\n",x);
+    let y: f32 = 5.12;
+    write!(&mut w,"float {}\n",y);
 }

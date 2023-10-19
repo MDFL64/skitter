@@ -132,7 +132,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     });
 
                     if let hir::UnOp::Deref = op {
-                        self.expr_deref_overload(func, arg, ty)
+                        self.expr_deref_overload(func, vec!(arg), ty)
                     } else {
                         ExprKind::Call {
                             func,
@@ -210,6 +210,25 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let rhs = self.expr(rhs);
 
                 ExprKind::Assign(lhs, rhs)
+            }
+            hir::ExprKind::Index(lhs, index) => {
+                let lhs = self.expr(lhs);
+                let index = self.expr(index);
+
+                if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
+                    let subs = self.types.node_substs(expr.hir_id);
+                    let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
+                    let func_ty = self.ctx.vm.ty_func_def(func_item);
+
+                    let func = self.builder.add_expr(Expr {
+                        kind: ExprKind::LiteralVoid,
+                        ty: func_ty,
+                    });
+
+                    self.expr_deref_overload(func, vec!(lhs, index), ty)
+                } else {
+                    ExprKind::Index { lhs, index }
+                }
             }
             hir::ExprKind::Call(func, args) => {
                 if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
@@ -356,23 +375,21 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 ExprKind::Tuple(args)
             }
             hir::ExprKind::Struct(path, fields, rest) => {
-                if rest.is_some() {
-                    ExprKind::Error("adt with rest".to_owned())
-                } else {
-                    let res = self.types.qpath_res(&path, expr.hir_id);
-                    let variant = Self::def_variant(&res, rs_ty);
+                let res = self.types.qpath_res(&path, expr.hir_id);
+                let variant = Self::def_variant(&res, rs_ty);
 
-                    let fields = fields
-                        .iter()
-                        .map(|field| {
-                            let id = self.types.field_index(field.hir_id).as_u32();
-                            let expr = self.expr(field.expr);
-                            (id, expr)
-                        })
-                        .collect();
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        let id = self.types.field_index(field.hir_id).as_u32();
+                        let expr = self.expr(field.expr);
+                        (id, expr)
+                    })
+                    .collect();
 
-                    ExprKind::Adt { variant, fields }
-                }
+                let rest = rest.map(|rest| self.expr(rest));
+
+                ExprKind::Adt { variant, fields, rest }
             }
             hir::ExprKind::Array(args) => {
                 let args = args.iter().map(|a| self.expr(a)).collect();
@@ -384,11 +401,6 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     panic!("bad type for repeated array")
                 };
                 ExprKind::ArrayRepeat(arg, size.clone())
-            }
-            hir::ExprKind::Index(lhs, index) => {
-                let lhs = self.expr(lhs);
-                let index = self.expr(index);
-                ExprKind::Index { lhs, index }
             }
             hir::ExprKind::Field(lhs, _) => {
                 let index = self.types.field_index(expr.hir_id);
@@ -564,7 +576,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             ty: adjust_ty_in.ref_to(Mutability::Const),
                         });
 
-                        let kind = self.expr_deref_overload(func, arg, adjust_ty);
+                        let kind = self.expr_deref_overload(func, vec!(arg), adjust_ty);
                         expr_id = self.builder.add_expr(Expr {
                             kind,
                             ty: adjust_ty,
@@ -611,7 +623,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
     fn expr_deref_overload(
         &mut self,
         func: ExprId,
-        arg: ExprId,
+        args: Vec<ExprId>,
         res_ty: Type<'vm>,
     ) -> ExprKind<'vm> {
         // WARNING: ref mutability not necessarily correct
@@ -622,7 +634,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         let res = self.builder.add_expr(Expr {
             kind: ExprKind::Call {
                 func,
-                args: vec![arg],
+                args,
             },
             ty: ref_ty,
         });

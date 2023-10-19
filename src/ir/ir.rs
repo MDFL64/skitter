@@ -232,6 +232,7 @@ pub enum ExprKind<'vm> {
     Adt {
         variant: u32,
         fields: Vec<(u32, ExprId)>,
+        rest: Option<ExprId>
     },
     Array(Vec<ExprId>),
     /// Check the type to determine the count.

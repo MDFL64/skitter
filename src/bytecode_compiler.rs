@@ -8,7 +8,7 @@ use crate::ir::{
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{Mutability, SubList, Type, TypeKind};
+use crate::types::{Mutability, SubList, Type, TypeKind, ItemWithSubs};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -900,7 +900,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::Adt { variant, fields } => {
+            ExprKind::Adt { variant, fields, rest } => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                 if let Some(enum_info) = expr_ty.adt_info().enum_info() {
@@ -919,6 +919,40 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         expr_layout.field_offsets[*variant as usize][*field_index as usize];
                     let field_slot = dst_slot.offset_by(offset);
                     self.lower_expr(*expr, Some(field_slot));
+                }
+
+                // TODO this will need careful handling for drop
+                if let Some(rest) = rest {
+                    let rest_ty = self.expr_ty(*rest);
+                    assert!(expr_ty == rest_ty);
+
+                    let rest_source = self.lower_expr(*rest, None);
+
+                    // YUCK: we need to get the exact types of all the struct's fields
+                    let TypeKind::Adt(ItemWithSubs{item,subs: adt_subs}) = expr_ty.kind() else {
+                        panic!("non-adt in adt-rest compile");
+                    };
+
+                    let adt_info = item.adt_info();
+                    let adt_subs = adt_subs.sub(self.in_func_subs);
+
+                    let all_offsets =
+                        &expr_layout.field_offsets[*variant as usize];
+                    let all_fields = &adt_info.variant_fields[*variant as usize];
+
+                    for (field_n,(field_ty,field_offset)) in all_fields.iter().zip(all_offsets).enumerate() {
+                        if fields.iter().all(|(f,_)| *f != field_n as u32) {
+                            let field_ty = field_ty.sub(&adt_subs);
+                            let field_src_slot = rest_source.offset_by(*field_offset);
+                            let field_dst_slot = dst_slot.offset_by(*field_offset);
+
+                            let copy_instr = bytecode_select::copy(field_dst_slot, field_src_slot, field_ty);
+
+                            if let Some(copy_instr) = copy_instr {
+                                self.out_bc.push(copy_instr);
+                            }
+                        }
+                    }
                 }
 
                 dst_slot
@@ -1123,7 +1157,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             panic!("invalid local(?!) slice index");
                         }
                     }
-                    _ => panic!("cannot index {:?}", lhs_kind),
+                    _ => panic!("cannot index {} with {}", lhs_ty, index_ty),
                 }
                 Place::Ptr(index_slot, 0)
             }
@@ -1686,6 +1720,8 @@ pub struct CompilerStack {
 
 impl CompilerStack {
     pub fn alloc(&mut self, ty: Type) -> Slot {
+        //println!("alloc {}",ty);
+
         let layout = ty.layout();
 
         self.align(layout.align);

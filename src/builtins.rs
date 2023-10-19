@@ -769,6 +769,18 @@ pub fn compile_rust_intrinsic<'vm>(
             // signed: same signs on inputs, differ from output
             // unsigned: (a + b < a)
         }
+        "sub_with_overflow" => {
+            // TODO make this actually work -- I'd rather not add more arithmetic instructions
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+
+            let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
+            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
+        }
         "mul_with_overflow" => {
             // TODO make this actually work -- I'd rather not add more arithmetic instructions
             assert!(subs.list.len() == 1);
@@ -780,8 +792,6 @@ pub fn compile_rust_intrinsic<'vm>(
             let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
             out_bc.push(bytecode_select::literal(0, 1, carry_slot));
-            // signed: same signs on inputs, differ from output
-            // unsigned: (a + b < a)
         }
         "unchecked_add" | "wrapping_add" => {
             assert!(subs.list.len() == 1);
