@@ -112,7 +112,7 @@ impl<'vm> IRFunction<'vm> {
         }
     }
 
-    pub fn insert_pattern(&mut self, kind: PatternKind, ty: Type<'vm>) -> PatternId {
+    pub fn insert_pattern(&mut self, kind: PatternKind<'vm>, ty: Type<'vm>) -> PatternId {
         let index = self.patterns.len();
         self.patterns.push(Pattern { kind, ty });
         PatternId(index as u32)
@@ -165,7 +165,7 @@ pub struct Expr<'vm> {
 
 #[derive(Debug, Clone, Persist)]
 pub struct Pattern<'vm> {
-    pub kind: PatternKind,
+    pub kind: PatternKind<'vm>,
     pub ty: Type<'vm>,
 }
 
@@ -232,7 +232,7 @@ pub enum ExprKind<'vm> {
     Adt {
         variant: u32,
         fields: Vec<(u32, ExprId)>,
-        rest: Option<ExprId>
+        rest: Option<ExprId>,
     },
     Array(Vec<ExprId>),
     /// Check the type to determine the count.
@@ -272,7 +272,7 @@ pub enum ExprKind<'vm> {
 }
 
 #[derive(Debug, Clone, Persist)]
-pub enum PatternKind {
+pub enum PatternKind<'vm> {
     LocalBinding {
         local_id: u32,
         mode: BindingMode,
@@ -293,6 +293,7 @@ pub enum PatternKind {
     },
     /// Small literals: integer, float, char, or bool types (same as the ExprKind)
     LiteralValue(i128),
+    LiteralBytes(&'vm [u8]),
 
     Range {
         start: Option<ExprId>,

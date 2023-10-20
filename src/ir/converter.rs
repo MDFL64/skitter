@@ -132,7 +132,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     });
 
                     if let hir::UnOp::Deref = op {
-                        self.expr_deref_overload(func, vec!(arg), ty)
+                        self.expr_deref_overload(func, vec![arg], ty)
                     } else {
                         ExprKind::Call {
                             func,
@@ -225,7 +225,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                         ty: func_ty,
                     });
 
-                    self.expr_deref_overload(func, vec!(lhs, index), ty)
+                    self.expr_deref_overload(func, vec![lhs, index], ty)
                 } else {
                     ExprKind::Index { lhs, index }
                 }
@@ -389,7 +389,11 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 let rest = rest.map(|rest| self.expr(rest));
 
-                ExprKind::Adt { variant, fields, rest }
+                ExprKind::Adt {
+                    variant,
+                    fields,
+                    rest,
+                }
             }
             hir::ExprKind::Array(args) => {
                 let args = args.iter().map(|a| self.expr(a)).collect();
@@ -439,7 +443,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             DefKind::ConstParam => {
                                 let generics = self.ctx.tcx.generics_of(self.func_id);
 
-                                if let Some(n) = generics.param_def_id_to_index(self.ctx.tcx,did) {
+                                if let Some(n) = generics.param_def_id_to_index(self.ctx.tcx, did) {
                                     ExprKind::ConstParam(n)
                                 } else {
                                     ExprKind::Error(format!("const def = {:?}", did))
@@ -576,7 +580,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             ty: adjust_ty_in.ref_to(Mutability::Const),
                         });
 
-                        let kind = self.expr_deref_overload(func, vec!(arg), adjust_ty);
+                        let kind = self.expr_deref_overload(func, vec![arg], adjust_ty);
                         expr_id = self.builder.add_expr(Expr {
                             kind,
                             ty: adjust_ty,
@@ -632,10 +636,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         let ref_ty = res_ty.ref_to(Mutability::Const);
 
         let res = self.builder.add_expr(Expr {
-            kind: ExprKind::Call {
-                func,
-                args,
-            },
+            kind: ExprKind::Call { func, args },
             ty: ref_ty,
         });
 
@@ -833,6 +834,8 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 match lit {
                     ExprKind::LiteralValue(val) => PatternKind::LiteralValue(val),
+                    ExprKind::LiteralBytes(val) => PatternKind::LiteralBytes(val),
+
                     _ => PatternKind::Error(format!("pat lit {:?}", lit)),
                 }
             }
@@ -1067,7 +1070,6 @@ fn match_capture(
     };
 
     if let Some(real_proj_index) = real_proj_index {
-
         let proj = capture.place.projections.get(real_proj_index).unwrap();
 
         use rustc_middle::hir::place::ProjectionKind;

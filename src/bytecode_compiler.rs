@@ -8,7 +8,7 @@ use crate::ir::{
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{Mutability, SubList, Type, TypeKind, ItemWithSubs};
+use crate::types::{ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -900,7 +900,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 dst_slot
             }
-            ExprKind::Adt { variant, fields, rest } => {
+            ExprKind::Adt {
+                variant,
+                fields,
+                rest,
+            } => {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                 if let Some(enum_info) = expr_ty.adt_info().enum_info() {
@@ -936,17 +940,19 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let adt_info = item.adt_info();
                     let adt_subs = adt_subs.sub(self.in_func_subs);
 
-                    let all_offsets =
-                        &expr_layout.field_offsets[*variant as usize];
+                    let all_offsets = &expr_layout.field_offsets[*variant as usize];
                     let all_fields = &adt_info.variant_fields[*variant as usize];
 
-                    for (field_n,(field_ty,field_offset)) in all_fields.iter().zip(all_offsets).enumerate() {
-                        if fields.iter().all(|(f,_)| *f != field_n as u32) {
+                    for (field_n, (field_ty, field_offset)) in
+                        all_fields.iter().zip(all_offsets).enumerate()
+                    {
+                        if fields.iter().all(|(f, _)| *f != field_n as u32) {
                             let field_ty = field_ty.sub(&adt_subs);
                             let field_src_slot = rest_source.offset_by(*field_offset);
                             let field_dst_slot = dst_slot.offset_by(*field_offset);
 
-                            let copy_instr = bytecode_select::copy(field_dst_slot, field_src_slot, field_ty);
+                            let copy_instr =
+                                bytecode_select::copy(field_dst_slot, field_src_slot, field_ty);
 
                             if let Some(copy_instr) = copy_instr {
                                 self.out_bc.push(copy_instr);
@@ -1561,7 +1567,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 }
             }
             PatternKind::LiteralValue(n) => {
-                // rufutable pattern, should have a result
+                // refutable pattern, should have a result
                 let match_result_slot = match_result_slot.unwrap();
 
                 let val_slot = match source {
@@ -1588,12 +1594,59 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     .push(cmp_ctor(match_result_slot, val_slot, lit_slot));
                 true
             }
+            PatternKind::LiteralBytes(bytes) => {
+                // refutable pattern, should have a result
+                let match_result_slot = match_result_slot.unwrap();
+
+                let val_slot = match source {
+                    Place::Local(slot) => slot,
+                    Place::Ptr(ref_slot, ref_offset) => {
+                        let ty = self.apply_subs(pat.ty);
+                        let slot = self.stack.alloc(ty);
+                        if let Some(instr) =
+                            bytecode_select::copy_from_ptr(slot, ref_slot, ty, ref_offset)
+                        {
+                            self.out_bc.push(instr);
+                        }
+                        slot
+                    }
+                };
+
+                // check type
+                {
+                    let TypeKind::Ref(slice_ty,_) = pat.ty.kind() else {
+                        panic!("string pattern on {}",pat.ty);
+                    };
+
+                    match slice_ty.kind() {
+                        TypeKind::StringSlice => (),
+                        _ => panic!("string pattern on {}", pat.ty),
+                    }
+                }
+
+                assert!(pat.ty.layout().assert_size() == POINTER_SIZE.bytes() * 2);
+                let ref_slot = self.stack.alloc(pat.ty);
+
+                self.out_bc.push(bytecode_select::literal(
+                    bytes.as_ptr() as _,
+                    POINTER_SIZE.bytes(),
+                    ref_slot,
+                ));
+                self.out_bc.push(bytecode_select::literal(
+                    bytes.len() as _,
+                    POINTER_SIZE.bytes(),
+                    ref_slot.offset_by(POINTER_SIZE.bytes()),
+                ));
+                self.out_bc.push(Instr::MemCompare(match_result_slot, val_slot, ref_slot));
+
+                true
+            }
             PatternKind::Range {
                 start,
                 end,
                 end_is_inclusive,
             } => {
-                // rufutable pattern, should have a result
+                // refutable pattern, should have a result
                 let match_result_slot = match_result_slot.unwrap();
 
                 let val_slot = match source {
@@ -1663,7 +1716,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 return *slot;
             }
         }
-        panic!("failed to find local {}",local);
+        panic!("failed to find local {}", local);
     }
 
     fn find_or_alloc_local(&mut self, local: u32, ty: Type) -> Slot {

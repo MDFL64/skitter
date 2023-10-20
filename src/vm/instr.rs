@@ -288,6 +288,7 @@ pub enum Instr<'vm> {
 
     /// src, dst, count (bytes) - copies NON-OVERLAPPING memory chunks
     MemCopy(Slot, Slot, Slot),
+    MemCompare(Slot, Slot, Slot),
 
     ArrayRepeat {
         base: Slot,

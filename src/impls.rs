@@ -7,7 +7,7 @@ use crate::{
     items::{AssocValue, BoundKind, CrateId, GenericCounts, Item, ItemId},
     lazy_collections::{LazyArray, LazyItem, LazyKey, LazyTable},
     persist::{PersistReader, PersistWriter},
-    types::{Sub, SubList, Type, TypeKind, ConstGeneric},
+    types::{ConstGeneric, Sub, SubList, Type, TypeKind},
     vm::VM,
 };
 
@@ -441,7 +441,7 @@ impl<'vm> ImplBounds<'vm> {
                         return false;
                     }
                 }
-                (Sub::Const(lhs_ty,lhs_const),Sub::Const(rhs_ty,rhs_const)) => {
+                (Sub::Const(lhs_ty, lhs_const), Sub::Const(rhs_ty, rhs_const)) => {
                     assert!(lhs_ty.is_concrete() && lhs_ty == rhs_ty);
                     if !Self::match_const(lhs_const, rhs_const, res_map, *lhs_ty) {
                         return false;
@@ -487,10 +487,10 @@ impl<'vm> ImplBounds<'vm> {
                     true
                 }
             }
-            (TypeKind::Array(lhs_child,lhs_size),TypeKind::Array(rhs_child,rhs_size)) => {
+            (TypeKind::Array(lhs_child, lhs_size), TypeKind::Array(rhs_child, rhs_size)) => {
                 let ty_usize = lhs.vm().common_types().usize;
-                Self::match_types(*lhs_child, *rhs_child, res_map) &&
-                Self::match_const(lhs_size, rhs_size, res_map, ty_usize)
+                Self::match_types(*lhs_child, *rhs_child, res_map)
+                    && Self::match_const(lhs_size, rhs_size, res_map, ty_usize)
             }
 
             /*(TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {
@@ -538,7 +538,12 @@ impl<'vm> ImplBounds<'vm> {
         }
     }
 
-    fn match_const(lhs: &ConstGeneric, rhs: &ConstGeneric, res_map: &mut SubMap<'vm>, const_ty: Type<'vm>) -> bool {
+    fn match_const(
+        lhs: &ConstGeneric,
+        rhs: &ConstGeneric,
+        res_map: &mut SubMap<'vm>,
+        const_ty: Type<'vm>,
+    ) -> bool {
         if lhs.is_concrete() && lhs == rhs {
             return true;
         }
@@ -548,7 +553,7 @@ impl<'vm> ImplBounds<'vm> {
                 res_map.set_param_const(*param_num, rhs, const_ty)
             }
             _ => {
-                println!("match const {:?} {:?}",lhs,rhs);
+                println!("match const {:?} {:?}", lhs, rhs);
                 panic!();
             }
         }
@@ -594,9 +599,10 @@ impl<'vm> SubMap<'vm> {
     fn set_param_const(&mut self, n: u32, val: &ConstGeneric, ty: Type<'vm>) -> bool {
         let entry = &mut self.result_subs.list[n as usize];
 
-        if let Sub::Const(current_ty,current_val) = entry {
+        if let Sub::Const(current_ty, current_val) = entry {
             if current_val != val || current_ty != &ty {
-                if current_val == &ConstGeneric::Unknown && current_ty.kind() == &TypeKind::Unknown {
+                if current_val == &ConstGeneric::Unknown && current_ty.kind() == &TypeKind::Unknown
+                {
                     *current_val = val.clone();
                     *current_ty = ty;
                 } else {

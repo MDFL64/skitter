@@ -488,6 +488,12 @@ fn write_exec_match() {
             *byte_dst = *byte_src;
         }
     }
+    Instr::MemCompare(out,arg1,arg2) => {
+        let arg1: &[u8] = read_stack(stack, *arg1);
+        let arg2: &[u8] = read_stack(stack, *arg2);
+        let res = arg1 == arg2;
+        write_stack(stack, *out, res);
+    }
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),
