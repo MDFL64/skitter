@@ -985,7 +985,13 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 PatternKind::Or { options }
             }
             hir::PatKind::Wild => PatternKind::Hole,
-            hir::PatKind::Slice(..) => PatternKind::Error("todo slice pattern".to_owned()),
+            hir::PatKind::Slice(start, mid, end) => {
+                let start = start.iter().map(|p| self.pattern(p)).collect();
+                let end = end.iter().map(|p| self.pattern(p)).collect();
+                let mid = mid.map(|p| self.pattern(p));
+
+                PatternKind::Slice { start, mid, end }
+            }
             hir::PatKind::Range(start, end, end_kind) => {
                 let start = start.map(|start| self.expr(start));
                 let end = end.map(|end| self.expr(end));

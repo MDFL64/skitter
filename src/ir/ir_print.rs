@@ -94,6 +94,7 @@ impl<'vm> IRFunction<'vm> {
             }
             ExprKind::Binary(op, lhs, rhs) => {
                 let op = match op {
+                    BinaryOp::Add => "+",
                     BinaryOp::Sub => "-",
 
                     BinaryOp::Eq => "==",
@@ -193,6 +194,22 @@ impl<'vm> IRFunction<'vm> {
                     print!("   ");
                 }
                 print!("}}");
+            }
+            ExprKind::Adt {
+                variant,
+                ref fields,
+                rest,
+            } => {
+                print!("{}{{ ", expr.ty);
+                for (i, (field_index, field_expr)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{}: ", field_index);
+                    self.print_expr(*field_expr, indent);
+                }
+                assert!(rest.is_none());
+                print!(" }}");
             }
             _ => print!("^{:?}", expr.kind),
         }

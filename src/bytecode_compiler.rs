@@ -51,7 +51,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     ) -> Vec<Instr<'vm>> {
         if vm.cli_args.verbose {
             println!("compiling {}{}", path, original_subs);
-            //ir.print();
+            ir.print();
         }
 
         let mut compiler = BytecodeCompiler {
@@ -1637,7 +1637,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     POINTER_SIZE.bytes(),
                     ref_slot.offset_by(POINTER_SIZE.bytes()),
                 ));
-                self.out_bc.push(Instr::MemCompare(match_result_slot, val_slot, ref_slot));
+                self.out_bc
+                    .push(Instr::MemCompare(match_result_slot, val_slot, ref_slot));
 
                 true
             }
@@ -1704,6 +1705,109 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 }
 
                 true
+            }
+            PatternKind::Slice { start, mid, end } => {
+                let ty = self.apply_subs(pat.ty);
+
+                match ty.kind() {
+                    TypeKind::Array(elem_ty, array_len) => {
+                        let array_len = array_len.get_value() as usize;
+                        let elem_size = elem_ty.layout().assert_size();
+
+                        let mut jump_gaps = Vec::new();
+                        let mut result = false;
+
+                        // start group
+                        for (i, pat_id) in start.iter().enumerate() {
+                            let sub_pat = self.in_func.pattern(*pat_id);
+
+                            let offset = i as u32 * elem_size;
+                            let refutable = self.match_pattern_internal(
+                                sub_pat,
+                                source.offset_by(offset),
+                                must_copy,
+                                match_result_slot,
+                            );
+                            result |= refutable;
+
+                            if refutable && match_result_slot.is_some() {
+                                jump_gaps.push(self.skip_instr());
+                            }
+                        }
+
+                        // middle group
+                        if let Some(pat_id) = mid {
+                            let sub_pat = self.in_func.pattern(*pat_id);
+                            let sub_ty = self.apply_subs(sub_pat.ty);
+
+                            match sub_ty.kind() {
+                                TypeKind::Array(..) => (), // ok
+                                TypeKind::Ref(child, _) => {
+                                    match child.kind() {
+                                        TypeKind::Array(..) => (), // ok
+                                        _ => panic!("bad slice middle: {}", sub_ty),
+                                    }
+                                }
+                                _ => panic!("bad slice middle: {}", sub_ty),
+                            }
+
+                            let offset = start.len() as u32 * elem_size;
+                            let refutable = self.match_pattern_internal(
+                                sub_pat,
+                                source.offset_by(offset),
+                                must_copy,
+                                match_result_slot,
+                            );
+                            result |= refutable;
+
+                            if refutable && match_result_slot.is_some() {
+                                jump_gaps.push(self.skip_instr());
+                            }
+                        }
+
+                        // end group
+                        for (i, pat_id) in end.iter().enumerate() {
+                            let sub_pat = self.in_func.pattern(*pat_id);
+
+                            let i = array_len - end.len() + i;
+
+                            let offset = i as u32 * elem_size;
+                            let refutable = self.match_pattern_internal(
+                                sub_pat,
+                                source.offset_by(offset),
+                                must_copy,
+                                match_result_slot,
+                            );
+                            result |= refutable;
+
+                            if refutable && match_result_slot.is_some() {
+                                jump_gaps.push(self.skip_instr());
+                            }
+                        }
+
+                        // cut out unnecessary jumps
+                        if let Some(last_gap) = jump_gaps.last() {
+                            if *last_gap == self.out_bc.len() - 1 {
+                                jump_gaps.pop();
+                                self.out_bc.pop();
+                            }
+                        }
+
+                        if let Some(match_result_slot) = match_result_slot {
+                            for gap_index in jump_gaps.iter() {
+                                let gap_offset = -self.get_jump_offset(*gap_index);
+                                self.out_bc[*gap_index] =
+                                    Instr::JumpF(gap_offset, match_result_slot);
+                            }
+                        }
+
+                        result
+                    }
+                    TypeKind::Slice(elem_ty) => {
+                        panic!("todo slice pattern on slice = {}", elem_ty);
+                    }
+                    _ => panic!("todo slice pattern on {}", ty),
+                }
             }
             PatternKind::Hole => false,
             PatternKind::Error(msg) => panic!("error pattern: {}", msg),

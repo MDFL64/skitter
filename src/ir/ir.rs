@@ -300,6 +300,11 @@ pub enum PatternKind<'vm> {
         end: Option<ExprId>,
         end_is_inclusive: bool,
     },
+    Slice {
+        start: Vec<PatternId>,
+        mid: Option<PatternId>,
+        end: Vec<PatternId>,
+    },
 
     Hole,
 
