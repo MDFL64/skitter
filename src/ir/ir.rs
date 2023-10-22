@@ -312,7 +312,7 @@ pub enum PatternKind<'vm> {
     Error(String),
 }
 
-#[derive(Debug, Clone, Copy, Persist)]
+#[derive(Debug, Clone, Copy, PartialEq, Persist)]
 pub enum BindingMode {
     Value,
     Ref,

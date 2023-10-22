@@ -47,7 +47,7 @@ pub fn copy<'vm>(dst: Slot, src: Slot, ty: Type<'vm>) -> Option<Instr<'vm>> {
     }
 }
 
-pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> Option<Instr<'vm>> {
+pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: i32) -> Option<Instr<'vm>> {
     let layout = ty.layout();
     let size = layout.assert_size();
     let align = layout.align;
@@ -67,7 +67,7 @@ pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> O
         let count = size / align;
         // todo: fall back to boxed instruction for large counts and offsets
         let count_narrow: u16 = count.try_into().expect("count too large");
-        let offset_narrow: u16 = offset.try_into().expect("offset too large");
+        let offset_narrow: i16 = offset.try_into().expect("offset too large");
 
         Some(match align {
             1 => Instr::MovSP1N(dst, src, offset_narrow, count_narrow),
@@ -80,7 +80,7 @@ pub fn copy_from_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> O
     }
 }
 
-pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> Option<Instr<'vm>> {
+pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: i32) -> Option<Instr<'vm>> {
     let layout = ty.layout();
     let size = layout.assert_size();
     let align = layout.align;
@@ -100,7 +100,7 @@ pub fn copy_to_ptr<'vm>(dst: Slot, src: Slot, ty: Type<'vm>, offset: u32) -> Opt
         let count = size / align;
         // todo: fall back to boxed instruction for large counts and offsets
         let count_narrow: u16 = count.try_into().expect("count too large");
-        let offset_narrow: u16 = offset.try_into().expect("offset too large");
+        let offset_narrow: i16 = offset.try_into().expect("offset too large");
 
         Some(match align {
             1 => Instr::MovPS1N(dst, src, offset_narrow, count_narrow),

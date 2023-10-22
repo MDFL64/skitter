@@ -60,7 +60,7 @@ fn match_slice(x: &[i32]) {
         [..,3] => 4,
         [5,..,5] => 5,
         [6,6,6,6,6] => 6,
-        [7,a @ ..,7] => a[0] + a[1] + a[2],
+        [7,a @ ..,7] => if a.len() >= 3 { a[0] + a[1] + a[2] } else { -1 },
         [8,8,8,8,ref a @ ..] => a[0],
         [9,9,9,9,9,a @ ..] => a.len() as i32 + 9,
         [..] => 10
@@ -103,15 +103,27 @@ pub fn main() {
     match_array_ref(&[9,9,9,9,9]);
     match_array_ref(&[9,9,1,9,9]);
     _builtin::print_int(111111111);
+    match_slice(&[]);
     match_slice(&[1,0,0,2,3]);
+    match_slice(&[1,0]);
     match_slice(&[1,1,0,2,3]);
+    match_slice(&[1]);
     match_slice(&[2,2,0,2,3]);
+    match_slice(&[2,2,2]);
     match_slice(&[2,1,0,2,3]);
+    match_slice(&[0,0,0,0,0,2,1,0,2,3]);
     match_slice(&[2,1,0,4,3]);
+    match_slice(&[3]);
     match_slice(&[5,1,0,4,5]);
+    match_slice(&[5,1,5]);
     match_slice(&[6,6,6,6,6]);
-    match_slice(&[7,6,6,6,7]);
+    match_slice(&[6,6,6,6,6,6]);
+    match_slice(&[7,1,1,1,7]);
+    match_slice(&[7,2,2,2,2,2,2,7]);
+    match_slice(&[7,2,7]);
     match_slice(&[8,8,8,8,8]);
+    match_slice(&[8,8,8,8,10,10]);
     match_slice(&[9,9,9,9,9]);
-    match_slice(&[9,9,1,9,9]);
+    match_slice(&[9,9,9,9,9,0,0,0,0]);
+    match_slice(&[0,9,9,9,9,0,0,0,0]);
 }

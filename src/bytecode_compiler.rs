@@ -51,7 +51,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     ) -> Vec<Instr<'vm>> {
         if vm.cli_args.verbose {
             println!("compiling {}{}", path, original_subs);
-            ir.print();
+            //ir.print();
         }
 
         let mut compiler = BytecodeCompiler {
@@ -165,7 +165,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let meta = if compiler.expr_ty(root_expr).is_sized() {
                     None
                 } else {
-                    Some(const_thread.copy_ptr(slot.offset_by(POINTER_SIZE.bytes())))
+                    Some(const_thread.copy_ptr(slot.offset_by(POINTER_SIZE.bytes() as i32)))
                 };
 
                 (ptr, meta)
@@ -280,7 +280,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 self.out_bc.push(bytecode_select::literal(
                     len as i128,
                     ptr_size,
-                    dst_slot.offset_by(ptr_size),
+                    dst_slot.offset_by(ptr_size as i32),
                 ));
 
                 dst_slot
@@ -421,7 +421,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 let arg_ty = self.expr_ty(args[0]);
                                 assert!(arg_ty.layout().assert_size() == POINTER_SIZE.bytes() * 2);
                                 let receiver = self.lower_expr(args[0], None);
-                                (receiver, receiver.offset_by(POINTER_SIZE.bytes()))
+                                (receiver, receiver.offset_by(POINTER_SIZE.bytes() as i32))
                             };
 
                             let func_ptr = self.stack.alloc(self.vm.common_types().usize);
@@ -639,7 +639,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.out_bc.push(bytecode_select::literal(
                             ptr_meta as _,
                             ptr_size,
-                            dst_slot.offset_by(ptr_size),
+                            dst_slot.offset_by(ptr_size as i32),
                         ));
                     }
 
@@ -798,7 +798,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.out_bc.push(bytecode_select::literal(
                             meta as i128,
                             ptr_size,
-                            dst_slot.offset_by(ptr_size),
+                            dst_slot.offset_by(ptr_size as i32),
                         ));
 
                         dst_slot
@@ -859,7 +859,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                 for (field, offset) in fields.iter().zip(expr_ty.layout().field_offsets[0].iter()) {
-                    let field_slot = dst_slot.offset_by(*offset);
+                    let field_slot = dst_slot.offset_by(*offset as i32);
                     self.lower_expr(*field, Some(field_slot));
                 }
 
@@ -875,7 +875,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                 for (i, field) in fields.iter().enumerate() {
-                    let field_slot = dst_slot.offset_by(i as u32 * elem_size);
+                    let field_slot = dst_slot.offset_by(i as i32 * elem_size as i32);
                     self.lower_expr(*field, Some(field_slot));
                 }
 
@@ -921,7 +921,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 for (field_index, expr) in fields.iter() {
                     let offset =
                         expr_layout.field_offsets[*variant as usize][*field_index as usize];
-                    let field_slot = dst_slot.offset_by(offset);
+                    let field_slot = dst_slot.offset_by(offset as i32);
                     self.lower_expr(*expr, Some(field_slot));
                 }
 
@@ -948,8 +948,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     {
                         if fields.iter().all(|(f, _)| *f != field_n as u32) {
                             let field_ty = field_ty.sub(&adt_subs);
-                            let field_src_slot = rest_source.offset_by(*field_offset);
-                            let field_dst_slot = dst_slot.offset_by(*field_offset);
+                            let field_src_slot = rest_source.offset_by(*field_offset as i32);
+                            let field_dst_slot = dst_slot.offset_by(*field_offset as i32);
 
                             let copy_instr =
                                 bytecode_select::copy(field_dst_slot, field_src_slot, field_ty);
@@ -1060,7 +1060,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::UpVar(upvar) => {
                 let closure = self.closure.as_ref().expect("upvar in non-closure");
 
-                let field_offset = closure.self_ty.layout().field_offsets[0][upvar.index as usize];
+                let field_offset =
+                    closure.self_ty.layout().field_offsets[0][upvar.index as usize] as i32;
 
                 match closure.kind {
                     // self is a ref to a tuple-like env
@@ -1105,10 +1106,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let layout = self.expr_ty(*lhs).layout();
                 let field_offset = layout.field_offsets[*variant as usize][*field as usize];
 
-                match self.expr_to_place(*lhs) {
-                    Place::Local(base_slot) => Place::Local(base_slot.offset_by(field_offset)),
-                    Place::Ptr(ptr_slot, offset) => Place::Ptr(ptr_slot, offset + field_offset),
-                }
+                self.expr_to_place(*lhs).offset_by(field_offset as i32)
             }
             ExprKind::Index { lhs, index } => {
                 let index_ty = self.expr_ty(*index);
@@ -1151,7 +1149,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         let lhs_place = self.expr_to_place(*lhs);
                         if let Place::Ptr(ptr_slot, offset) = lhs_place {
                             assert_eq!(offset, 0);
-                            let elem_count = ptr_slot.offset_by(POINTER_SIZE.bytes());
+                            let elem_count = ptr_slot.offset_by(POINTER_SIZE.bytes() as i32);
                             self.out_bc.push(Instr::IndexCalcDyn {
                                 arg_out: index_slot,
                                 elem_size,
@@ -1405,7 +1403,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let offset = layout.field_offsets[0][field.field as usize];
                     let refutable = self.match_pattern_internal(
                         field_pattern,
-                        source.offset_by(offset),
+                        source.offset_by(offset as i32),
                         must_copy,
                         match_result_slot,
                     );
@@ -1471,7 +1469,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let refutable = self.match_pattern_internal(
                         field_pattern,
-                        source.offset_by(offset),
+                        source.offset_by(offset as i32),
                         must_copy,
                         match_result_slot,
                     );
@@ -1635,7 +1633,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 self.out_bc.push(bytecode_select::literal(
                     bytes.len() as _,
                     POINTER_SIZE.bytes(),
-                    ref_slot.offset_by(POINTER_SIZE.bytes()),
+                    ref_slot.offset_by(POINTER_SIZE.bytes() as i32),
                 ));
                 self.out_bc
                     .push(Instr::MemCompare(match_result_slot, val_slot, ref_slot));
@@ -1721,7 +1719,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         for (i, pat_id) in start.iter().enumerate() {
                             let sub_pat = self.in_func.pattern(*pat_id);
 
-                            let offset = i as u32 * elem_size;
+                            let offset = i as i32 * elem_size as i32;
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
@@ -1751,7 +1749,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 _ => panic!("bad slice middle: {}", sub_ty),
                             }
 
-                            let offset = start.len() as u32 * elem_size;
+                            let offset = start.len() as i32 * elem_size as i32;
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
@@ -1771,7 +1769,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                             let i = array_len - end.len() + i;
 
-                            let offset = i as u32 * elem_size;
+                            let offset = i as i32 * elem_size as i32;
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
@@ -1804,7 +1802,153 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         result
                     }
                     TypeKind::Slice(elem_ty) => {
-                        panic!("todo slice pattern on slice = {}", elem_ty);
+                        let len_req = start.len() + end.len();
+                        let len_req_is_exact = mid.is_none();
+
+                        let Place::Ptr(ref_slot, ref_offset) = source else {
+                            panic!("attempt to match value slice");
+                        };
+                        assert!(ref_offset == 0);
+
+                        let len_slot = ref_slot.offset_by(POINTER_SIZE.bytes() as i32);
+                        let elem_size = elem_ty.layout().assert_size();
+
+                        let mut jump_gaps = Vec::new();
+                        let result = len_req > 0 || len_req_is_exact;
+
+                        let len_ty = self.vm.common_types().usize;
+
+                        // len check
+                        if result {
+                            let match_result_slot =
+                                match_result_slot.expect("no result for refutable slice pattern?");
+
+                            let len_check_slot = self.stack.alloc(len_ty);
+                            self.out_bc.push(bytecode_select::literal(
+                                len_req as _,
+                                len_ty.layout().assert_size(),
+                                len_check_slot,
+                            ));
+
+                            let len_cmp_op = if len_req_is_exact {
+                                BinaryOp::Eq
+                            } else {
+                                BinaryOp::LtEq
+                            };
+
+                            let (len_cmp_ctor, _) = bytecode_select::binary(len_cmp_op, len_ty);
+
+                            self.out_bc.push(len_cmp_ctor(
+                                match_result_slot,
+                                len_check_slot,
+                                len_slot,
+                            ));
+
+                            jump_gaps.push(self.skip_instr());
+                        }
+
+                        // start group
+                        for (i, pat_id) in start.iter().enumerate() {
+                            let sub_pat = self.in_func.pattern(*pat_id);
+
+                            let offset = i as i32 * elem_size as i32;
+                            let refutable = self.match_pattern_internal(
+                                sub_pat,
+                                source.offset_by(offset),
+                                must_copy,
+                                match_result_slot,
+                            );
+
+                            if refutable && match_result_slot.is_some() {
+                                jump_gaps.push(self.skip_instr());
+                            }
+                        }
+
+                        // middle group
+                        if let Some(pat_id) = mid {
+                            let sub_pat = self.in_func.pattern(*pat_id);
+
+                            match sub_pat.kind {
+                                PatternKind::Hole => (), // do nothing
+                                PatternKind::LocalBinding { local_id, mode, .. } => {
+                                    assert!(mode == BindingMode::Ref);
+
+                                    let sub_ty = self.apply_subs(sub_pat.ty);
+
+                                    match sub_ty.kind() {
+                                        TypeKind::Ref(child, _) => {
+                                            match child.kind() {
+                                                TypeKind::Slice(..) => (), // ok
+                                                _ => panic!("bad slice middle: {}", sub_ty),
+                                            }
+                                        }
+                                        _ => panic!("bad slice middle: {}", sub_ty),
+                                    }
+
+                                    // don't worry whether we "must copy" -- we always create a new slice here
+                                    let var_slot = self.find_or_alloc_local(local_id, sub_ty);
+
+                                    let offset = start.len() as i32 * elem_size as i32;
+                                    let len_sub = (start.len() + end.len()) as i32;
+
+                                    self.out_bc
+                                        .push(Instr::PointerOffset2(var_slot, ref_slot, offset));
+
+                                    self.out_bc.push(Instr::PointerOffset2(
+                                        var_slot.offset_by(POINTER_SIZE.bytes() as i32),
+                                        len_slot,
+                                        -len_sub,
+                                    ));
+                                }
+                                _ => println!("? {:?}", sub_pat.kind),
+                            }
+                        }
+
+                        // end group
+                        if end.len() > 0 {
+                            let end_slot = self.stack.alloc(len_ty);
+                            self.out_bc.push(Instr::IndexCalcEndPointer {
+                                out: end_slot,
+                                slice: ref_slot,
+                                elem_size,
+                            });
+
+                            for (i, pat_id) in end.iter().enumerate() {
+                                let sub_pat = self.in_func.pattern(*pat_id);
+
+                                let i = i - end.len();
+
+                                let offset = i as i32 * elem_size as i32;
+                                let refutable = self.match_pattern_internal(
+                                    sub_pat,
+                                    Place::Ptr(end_slot, offset),
+                                    must_copy,
+                                    match_result_slot,
+                                );
+
+                                if refutable && match_result_slot.is_some() {
+                                    jump_gaps.push(self.skip_instr());
+                                }
+                            }
+                        }
+
+                        // cut out unnecessary jumps
+                        if let Some(last_gap) = jump_gaps.last() {
+                            if *last_gap == self.out_bc.len() - 1 {
+                                jump_gaps.pop();
+                                self.out_bc.pop();
+                            }
+                        }
+
+                        if let Some(match_result_slot) = match_result_slot {
+                            for gap_index in jump_gaps.iter() {
+                                let gap_offset = -self.get_jump_offset(*gap_index);
+                                self.out_bc[*gap_index] =
+                                    Instr::JumpF(gap_offset, match_result_slot);
+                            }
+                        }
+
+                        result
                     }
                     _ => panic!("todo slice pattern on {}", ty),
                 }
@@ -1857,11 +2001,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 enum Place {
     Local(Slot),
     /// Pointer with offset
-    Ptr(Slot, u32),
+    Ptr(Slot, i32),
 }
 
 impl Place {
-    pub fn offset_by(&self, n: u32) -> Self {
+    pub fn offset_by(&self, n: i32) -> Self {
         match self {
             Place::Local(slot) => Place::Local(slot.offset_by(n)),
             Place::Ptr(slot, offset) => Place::Ptr(*slot, offset + n),

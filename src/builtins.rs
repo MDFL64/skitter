@@ -380,8 +380,8 @@ pub fn compile_rust_intrinsic<'vm>(
 
             for i in 0..size {
                 out_bc.push(Instr::MovSS1(
-                    out_slot.offset_by(i),
-                    arg_slot.offset_by(size - i - 1),
+                    out_slot.offset_by(i as i32),
+                    arg_slot.offset_by((size - i - 1) as i32),
                 ));
             }
         }
@@ -490,7 +490,8 @@ pub fn compile_rust_intrinsic<'vm>(
                 let ty_usize = vm.common_types().usize;
 
                 let byte_slice_size = || {
-                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size), ty_usize).unwrap()
+                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size as i32), ty_usize)
+                        .unwrap()
                 };
 
                 match arg_ty.kind() {
@@ -508,7 +509,11 @@ pub fn compile_rust_intrinsic<'vm>(
                                 ptr_size,
                                 out_slot,
                             ));
-                            out_bc.push(mul_ctor(out_slot, out_slot, arg_slot.offset_by(ptr_size)));
+                            out_bc.push(mul_ctor(
+                                out_slot,
+                                out_slot,
+                                arg_slot.offset_by(ptr_size as i32),
+                            ));
                         }
                     }
                     TypeKind::StringSlice => out_bc.push(byte_slice_size()),
@@ -590,9 +595,11 @@ pub fn compile_rust_intrinsic<'vm>(
             for (arg_ty, arg_offset) in arg_tys.iter().zip(&args_ty.layout().field_offsets[0]) {
                 let arg_slot = stack.alloc(*arg_ty);
 
-                if let Some(copy) =
-                    bytecode_select::copy(arg_slot, source_slot.offset_by(*arg_offset), *arg_ty)
-                {
+                if let Some(copy) = bytecode_select::copy(
+                    arg_slot,
+                    source_slot.offset_by(*arg_offset as i32),
+                    *arg_ty,
+                ) {
                     out_bc.push(copy);
                 }
             }
@@ -761,7 +768,7 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
 
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
@@ -775,7 +782,7 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
 
             let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
@@ -787,7 +794,7 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size());
+            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
 
             let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));

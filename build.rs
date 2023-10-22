@@ -62,7 +62,7 @@ fn write_bulk_move_sp(instr: &str, ty: &str, source: &mut String) {
         "
     Instr::{instr}(dst, src, offset, n) => {{
         let src_ptr: *mut u8 = read_stack(stack, *src);
-        let src_ptr: *mut {ty} = src_ptr.add(*offset as usize) as _;
+        let src_ptr: *mut {ty} = src_ptr.offset(*offset as isize) as _;
         let dst_ptr = stack.add(dst.index()) as *mut {ty};
         for i in 0..(*n as usize) {{
             let s = src_ptr.add(i);
@@ -79,7 +79,7 @@ fn write_bulk_move_ps(instr: &str, ty: &str, source: &mut String) {
         "
     Instr::{instr}(dst, src, offset, n) => {{
         let dst_ptr: *mut u8 = read_stack(stack, *dst);
-        let dst_ptr: *mut {ty} = dst_ptr.add(*offset as usize) as _;
+        let dst_ptr: *mut {ty} = dst_ptr.offset(*offset as isize) as _;
         let src_ptr = stack.add(src.index()) as *mut {ty};
         for i in 0..(*n as usize) {{
             let s = src_ptr.add(i);
@@ -386,6 +386,7 @@ fn write_exec_match() {
 
     write_bulk_move_ps("MovPS1N", "u8", &mut source);
     write_bulk_move_ps("MovPS4N", "u32", &mut source);
+    write_bulk_move_ps("MovPS8N", "u64", &mut source);
 
     source.push_str(
         r#"
@@ -436,16 +437,16 @@ fn write_exec_match() {
         }
     }
     Instr::PointerOffset3(arg_out,arg_2,offset_n) => {
-        let offset_1: usize = read_stack(stack, *arg_out);
-        let offset_2: usize = read_stack(stack, *arg_2);
+        let offset_1: isize = read_stack(stack, *arg_out);
+        let offset_2: isize = read_stack(stack, *arg_2);
 
-        let res = offset_1 + offset_2 + *offset_n as usize;
+        let res = offset_1 + offset_2 + *offset_n as isize;
         write_stack(stack, *arg_out, res);
     }
     Instr::PointerOffset2(arg_out,arg_2,offset_n) => {
-        let offset_1: usize = read_stack(stack, *arg_2);
+        let offset_1: isize = read_stack(stack, *arg_2);
 
-        let res = offset_1 + *offset_n as usize;
+        let res = offset_1 + *offset_n as isize;
         write_stack(stack, *arg_out, res);
     }
     Instr::IndexCalc { arg_out, elem_size, elem_count } => {
@@ -465,6 +466,11 @@ fn write_exec_match() {
         }
         let offset = index * *elem_size as usize;
         write_stack(stack, *arg_out, offset);
+    }
+    Instr::IndexCalcEndPointer{ out, slice, elem_size } => {
+        let (ptr,len): (isize,isize) = read_stack(stack, *slice);
+        let res = ptr + len * *elem_size as isize;
+        write_stack(stack, *out, res);
     }
     Instr::WriteBytes { size, dst, val, count } => {
         let dst: *mut u8 = read_stack(stack, *dst);

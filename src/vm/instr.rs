@@ -29,8 +29,8 @@ impl Slot {
         self.0 as usize
     }
 
-    pub fn offset_by(&self, offset: u32) -> Self {
-        Self(self.0 + offset)
+    pub fn offset_by(&self, offset: i32) -> Self {
+        Self((self.0 as i32 + offset) as u32)
     }
 }
 
@@ -264,27 +264,29 @@ pub enum Instr<'vm> {
     MovSS16N(Slot, Slot, u32),
 
     // NOTE: we could actually make ONE of these u16's wider, if we change the layout to: (u16, Slot, Slot, u32), or just remove the c abi restriction
-    MovSP1(Slot, Slot, u32),
-    MovSP2(Slot, Slot, u32),
-    MovSP4(Slot, Slot, u32),
-    MovSP8(Slot, Slot, u32),
-    MovSP16(Slot, Slot, u32),
-    MovSP1N(Slot, Slot, u16, u16),
-    MovSP2N(Slot, Slot, u16, u16),
-    MovSP4N(Slot, Slot, u16, u16),
-    MovSP8N(Slot, Slot, u16, u16),
-    MovSP16N(Slot, Slot, u16, u16),
+    MovSP1(Slot, Slot, i32),
+    MovSP2(Slot, Slot, i32),
+    MovSP4(Slot, Slot, i32),
+    MovSP8(Slot, Slot, i32),
+    MovSP16(Slot, Slot, i32),
 
-    MovPS1(Slot, Slot, u32),
-    MovPS2(Slot, Slot, u32),
-    MovPS4(Slot, Slot, u32),
-    MovPS8(Slot, Slot, u32),
-    MovPS16(Slot, Slot, u32),
-    MovPS1N(Slot, Slot, u16, u16),
-    MovPS2N(Slot, Slot, u16, u16),
-    MovPS4N(Slot, Slot, u16, u16),
-    MovPS8N(Slot, Slot, u16, u16),
-    MovPS16N(Slot, Slot, u16, u16),
+    MovPS1(Slot, Slot, i32),
+    MovPS2(Slot, Slot, i32),
+    MovPS4(Slot, Slot, i32),
+    MovPS8(Slot, Slot, i32),
+    MovPS16(Slot, Slot, i32),
+
+    MovSP1N(Slot, Slot, i16, u16),
+    MovSP2N(Slot, Slot, i16, u16),
+    MovSP4N(Slot, Slot, i16, u16),
+    MovSP8N(Slot, Slot, i16, u16),
+    MovSP16N(Slot, Slot, i16, u16),
+
+    MovPS1N(Slot, Slot, i16, u16),
+    MovPS2N(Slot, Slot, i16, u16),
+    MovPS4N(Slot, Slot, i16, u16),
+    MovPS8N(Slot, Slot, i16, u16),
+    MovPS16N(Slot, Slot, i16, u16),
 
     /// src, dst, count (bytes) - copies NON-OVERLAPPING memory chunks
     MemCopy(Slot, Slot, Slot),
@@ -298,8 +300,8 @@ pub enum Instr<'vm> {
 
     SlotAddr(Slot, Slot),
 
-    PointerOffset3(Slot, Slot, u32),
-    PointerOffset2(Slot, Slot, u32),
+    PointerOffset3(Slot, Slot, i32),
+    PointerOffset2(Slot, Slot, i32),
     // name the fields since these are less straightforward
     SlotAddrOffset {
         out: Slot,
@@ -315,6 +317,11 @@ pub enum Instr<'vm> {
         arg_out: Slot,
         elem_size: u32,
         elem_count: Slot,
+    },
+    IndexCalcEndPointer {
+        out: Slot,
+        slice: Slot,
+        elem_size: u32,
     },
 
     //OffsetPtr(Slot, Slot, i32),
