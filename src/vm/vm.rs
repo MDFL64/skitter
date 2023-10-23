@@ -13,6 +13,7 @@ use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::items::ItemId;
+use crate::profiler::profile;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -39,6 +40,8 @@ pub struct VM<'vm> {
     pub core_crate: OnceLock<CrateId>,
     common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
+
+    stack_pool: Mutex<Vec<Vec<u128>>>,
 
     arena_crates: Arena<Box<dyn CrateProvider<'vm>>>,
     arena_items: Arena<Item<'vm>>,
@@ -153,6 +156,16 @@ impl<'vm> VMThread<'vm> {
     }
 }
 
+impl<'vm> std::ops::Drop for VMThread<'vm> {
+    fn drop(&mut self) {
+        let stack = std::mem::take(&mut self.stack);
+
+        // TODO provide some upper limit on stack pool size?
+        let mut stack_pool = self.vm.stack_pool.lock().unwrap();
+        stack_pool.push(stack);
+    }
+}
+
 impl<'vm> VM<'vm> {
     pub fn new(cli_args: &CliArgs) -> Self {
         Self {
@@ -162,6 +175,8 @@ impl<'vm> VM<'vm> {
             types: TypeContext::new(),
             crates: Default::default(),
             common_types: OnceLock::new(),
+
+            stack_pool: Default::default(),
 
             arena_crates: Arena::new(),
             arena_items: Arena::new(),
@@ -184,10 +199,14 @@ impl<'vm> VM<'vm> {
     }
 
     pub fn make_thread(&'vm self) -> VMThread<'vm> {
+        let stack = {
+            let mut stack_pool = self.stack_pool.lock().unwrap();
+            // 1M stack
+            stack_pool.pop().unwrap_or_else(|| vec![0; 65536])
+        };
         VMThread {
             vm: self,
-            // 1M stack
-            stack: vec![0; 65536],
+            stack
         }
     }
 
