@@ -200,7 +200,7 @@ impl<'vm> IRFunction<'vm> {
                 ref fields,
                 rest,
             } => {
-                print!("{}{{ ", expr.ty);
+                print!("{}.{}{{ ", variant, expr.ty);
                 for (i, (field_index, field_expr)) in fields.iter().enumerate() {
                     if i > 0 {
                         print!(", ");

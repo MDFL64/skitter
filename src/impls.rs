@@ -84,6 +84,15 @@ pub trait ImplTable<'vm> {
         None
     }
 
+    fn find_inherent_raw(&self, full_key: &str) -> Option<AssocValue<'vm>> {
+        if let Some(list) = self.get_inherent_table(full_key) {
+            if list.len() == 1 {
+                return Some(list[0].value.clone());
+            }
+        }
+        None
+    }
+
     fn find_trait(&self, trait_item: &Item<'vm>, for_tys: &SubList<'vm>) -> Option<TraitImpl<'vm>> {
         let trait_key = TraitKey {
             crate_id: trait_item.crate_id,

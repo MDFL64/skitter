@@ -89,9 +89,6 @@ fn run(args: &cli::CliArgs) {
     if args.test {
         let mut global_args = Vec::new();
 
-        if args.debug_no_load {
-            global_args.push(OsString::from("--debug-no-load"));
-        }
         if args.debug_local_impls {
             global_args.push(OsString::from("--debug-local-impls"));
         }
@@ -104,54 +101,19 @@ fn run(args: &cli::CliArgs) {
 
     let mut extern_crates = Vec::new();
 
-    /*if args.core {
-        let sysroot = get_sysroot();
-        let core_root = PathBuf::from(format!(
-            "{}/lib/rustlib/src/rust/library/core/src/lib.rs",
-            sysroot
-        ));
-
-        // make sure core root exists
-        assert!(core_root.exists());
-
-        let core_crate = vm.add_rustc_provider(RustCWorkerConfig {
-            source_root: core_root,
-            extern_crates: vec![],
-            save_file: false,
-        });
-
-        assert!(Some(core_crate) == vm.core_crate);
-
-        extern_crates.push(ExternCrate {
-            id: core_crate,
-            name: "core".to_owned(),
-        });
-    }*/
-
     let crate_path = CratePath::new(&args.file_name);
 
-    if !crate_path.is_core() {
-        let core_path = CratePath::new(OsStr::new("@core"));
+    let no_core = crate_path.is_core();
+    let no_alloc = crate_path.is_alloc() || crate_path.is_core();
 
-        let core_id = if args.debug_no_load {
-            vm.add_rustc_provider(RustCWorkerConfig {
-                crate_path: core_path,
-                extern_crates: vec![],
-                save_file: false,
-            })
-        } else {
-            vm.add_cache_provider(&core_path).expect("core load failed")
-        };
-
-        extern_crates.push(ExternCrate {
-            id: core_id,
-            name: "core".to_owned(),
-        });
-
-        vm.core_crate.set(core_id).unwrap();
+    if !no_core {
+        extern_crates.push(get_lib(vm, "core"));
+    }
+    if !no_alloc {
+        extern_crates.push(get_lib(vm, "alloc"));
     }
 
-    let main_crate = vm.add_rustc_provider(RustCWorkerConfig {
+    let main_crate = vm.add_provider_auto(RustCWorkerConfig {
         crate_path,
         extern_crates,
         save_file: args.save,
@@ -168,6 +130,51 @@ fn run(args: &cli::CliArgs) {
 
     let thread = vm.make_thread();
     thread.call(&main_fn, 0);
+}
+
+fn get_lib(vm: &'static VM, name: &str) -> ExternCrate {
+    let id = match name {
+        "core" => {
+            if let Some(id) = vm.core_crate.get() {
+                *id
+            } else {
+                let crate_path = CratePath::new(OsStr::new("@core"));
+
+                let id = vm.add_provider_auto(RustCWorkerConfig {
+                    crate_path,
+                    extern_crates: vec![],
+                    save_file: false,
+                });
+
+                vm.core_crate.set(id).unwrap();
+
+                id
+            }
+        }
+        "alloc" => {
+            if let Some(id) = vm.alloc_crate.get() {
+                *id
+            } else {
+                let crate_path = CratePath::new(OsStr::new("@alloc"));
+    
+                let id = vm.add_provider_auto(RustCWorkerConfig {
+                    crate_path,
+                    extern_crates: vec![get_lib(vm, "core")],
+                    save_file: false,
+                });
+    
+                vm.alloc_crate.set(id).unwrap();
+    
+                id
+            }
+        }
+        _ => panic!("lib = {}", name),
+    };
+
+    ExternCrate {
+        id,
+        name: name.to_owned(),
+    }
 }
 
 /// When any thread panics, close the process.
@@ -203,9 +210,6 @@ impl CratePath {
         if let Some(path) = path.to_str() {
             if path.starts_with('@') {
                 let name = path[1..].to_owned();
-
-                //let mut path = SYSROOT.clone();
-                //path.push(format!("lib/rustlib/src/rust/library/{}/src/lib.rs",name));
 
                 return CratePath { name, path: None };
             }
@@ -244,6 +248,10 @@ impl CratePath {
 
     pub fn is_core(&self) -> bool {
         self.is_internal() && self.name == "core"
+    }
+
+    pub fn is_alloc(&self) -> bool {
+        self.is_internal() && self.name == "alloc"
     }
 
     pub fn cache_path(&self) -> PathBuf {

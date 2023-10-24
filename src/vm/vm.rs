@@ -13,7 +13,6 @@ use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
 use crate::items::ItemId;
-use crate::profiler::profile;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -25,11 +24,10 @@ use crate::types::TypeContext;
 use crate::types::TypeKind;
 use crate::value_debug::print_value;
 use crate::vm::instr::Slot;
-use crate::CratePath;
 
 use std::{
-    borrow::Cow, error::Error, sync::atomic::AtomicPtr, sync::atomic::AtomicU32,
-    sync::atomic::Ordering, sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
+    borrow::Cow, sync::atomic::AtomicPtr, sync::atomic::AtomicU32, sync::atomic::Ordering,
+    sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
 };
 
 use super::instr::Instr;
@@ -37,7 +35,11 @@ use super::instr::Instr;
 pub struct VM<'vm> {
     pub cli_args: CliArgs,
     pub types: TypeContext<'vm>,
+
     pub core_crate: OnceLock<CrateId>,
+    pub alloc_crate: OnceLock<CrateId>,
+    pub std_crate: OnceLock<CrateId>,
+
     common_types: OnceLock<CommonTypes<'vm>>,
     crates: RwLock<Vec<&'vm Box<dyn CrateProvider<'vm>>>>,
 
@@ -172,6 +174,9 @@ impl<'vm> VM<'vm> {
             cli_args: cli_args.clone(),
 
             core_crate: OnceLock::new(),
+            alloc_crate: OnceLock::new(),
+            std_crate: OnceLock::new(),
+
             types: TypeContext::new(),
             crates: Default::default(),
             common_types: OnceLock::new(),
@@ -204,19 +209,45 @@ impl<'vm> VM<'vm> {
             // 1M stack
             stack_pool.pop().unwrap_or_else(|| vec![0; 65536])
         };
-        VMThread {
-            vm: self,
-            stack
-        }
+        VMThread { vm: self, stack }
     }
 
+    /// Attempts to build a cache provider for the given crate, then falls back to rustc if that fails.
+    ///
     /// I tried for so long to get this to work with scoped threads.
     /// Got it working, and then had it break again when transitioning off THIR.
     ///
     /// To hell with it. Just require a static VM to use a rustc worker.
-    pub fn add_rustc_provider(&'static self, worker_config: RustCWorkerConfig) -> CrateId {
+    pub fn add_provider_auto(&'static self, worker_config: RustCWorkerConfig) -> CrateId {
         let mut crates = self.crates.write().unwrap();
         let crate_id = CrateId::new(crates.len() as u32);
+
+        // attempt to load cached IR -- but not if we want to save
+        if !worker_config.save_file {
+            match CacheProvider::new(&worker_config.crate_path, self, crate_id) {
+                Ok(provider) => {
+                    let worker_ref = self.arena_crates.alloc(Box::new(provider));
+                    crates.push(worker_ref);
+
+                    return crate_id;
+                }
+                Err(_) => {
+                    if worker_config.crate_path.is_internal() {
+                        let this_exe = std::env::current_exe().unwrap();
+                        let this_exe = this_exe.file_name().unwrap().to_str().unwrap();
+                        eprintln!(
+                            "| WARNING: Failed to load internal crate '{}' from cache.",
+                            worker_config.crate_path.name
+                        );
+                        eprintln!("| Falling back to rustc. This will be slow.");
+                        eprintln!(
+                            "| To cache the crate, run: {} @{} --save",
+                            this_exe, worker_config.crate_path.name
+                        );
+                    }
+                }
+            }
+        }
 
         let worker = Box::new(RustCWorker::new(worker_config, self, crate_id));
 
@@ -224,21 +255,6 @@ impl<'vm> VM<'vm> {
         crates.push(worker_ref);
 
         crate_id
-    }
-
-    pub fn add_cache_provider(
-        &'vm self,
-        crate_path: &CratePath,
-    ) -> Result<CrateId, Box<dyn Error>> {
-        let mut crates = self.crates.write().unwrap();
-        let crate_id = CrateId::new(crates.len() as u32);
-
-        let worker = Box::new(CacheProvider::new(crate_path, self, crate_id)?);
-
-        let worker_ref = self.arena_crates.alloc(worker);
-        crates.push(worker_ref);
-
-        Ok(crate_id)
     }
 
     pub fn crate_provider(&self, crate_id: CrateId) -> &'vm Box<dyn CrateProvider<'vm>> {

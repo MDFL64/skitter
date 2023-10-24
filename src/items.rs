@@ -389,7 +389,12 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
 
 #[derive(PartialEq, Persist)]
 pub enum FunctionAbi {
-    RustIntrinsic,
+    Rust,          // "default" calling convention -- presumably won't be called from c
+    RustIntrinsic, // intrinsics which are inlined at compile-time
+    C,
+
+    PlatformIntrinsic, // ??? LLVM stuff ???
+    Unadjusted,        // I have no clue what this is.
 }
 
 ///
@@ -418,6 +423,7 @@ pub enum ItemKind<'vm> {
     Static {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         value_ptr: OnceLock<usize>,
+        extern_name: Option<(FunctionAbi, String)>,
         closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
     },
     AssociatedType {
@@ -634,6 +640,16 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             value_ptr: Default::default(),
             closures: Default::default(),
+            extern_name: None,
+        }
+    }
+
+    pub fn new_static_extern(abi: FunctionAbi, name: String) -> Self {
+        Self::Static {
+            ir: Default::default(),
+            value_ptr: Default::default(),
+            closures: Default::default(),
+            extern_name: Some((abi, name)),
         }
     }
 

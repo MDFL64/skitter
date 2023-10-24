@@ -105,6 +105,10 @@ impl<'vm> RustCWorker<'vm> {
         let config = rustc_interface::Config {
             opts: config::Options {
                 crate_name: Some(worker_config.crate_path.name.clone()),
+                // we need to provide an rlib crate type here,
+                // otherwise rustc assumes we're building a binary and
+                // demands an allocator, panic handler, etc.
+                crate_types: vec![config::CrateType::Rlib],
                 edition: rustc_span::edition::Edition::Edition2021,
                 unstable_features: rustc_feature::UnstableFeatures::Cheat,
                 cg: config::CodegenOptions {
@@ -286,6 +290,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         let mut adt_ids = Vec::new();
         let mut impl_items = Vec::new();
 
+        let mut box_new_found = false;
+
         for item_id in hir_items {
             let item = hir.item(item_id);
             let local_id = item.owner_id.def_id;
@@ -418,7 +424,14 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                     vm.alloc_path(&format!("{}::{}", base_path, item.ident)),
                                 );
 
-                                let kind = ItemKind::new_function();
+                                // HACK: we need to treat Box::new as an intrinsic
+                                let kind = if worker_config.crate_path.is_alloc() && item_path.as_string() == "boxed::Box<T>::new" {
+                                    box_new_found = true;
+                                    ItemKind::new_function_extern(FunctionAbi::RustIntrinsic, "skitter_box_new".to_owned())
+                                } else {
+                                    ItemKind::new_function()
+                                };
+
                                 let item_id = items.index_item(kind, item_path, local_id, vm);
 
                                 assoc_values.push((item_name, AssocValue::Item(item_id)));
@@ -459,23 +472,31 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                         let item = hir.foreign_item(item.id);
 
+                        use rustc_target::spec::abi::Abi;
+                        let abi = match abi {
+                            Abi::Rust => FunctionAbi::Rust,
+                            Abi::RustIntrinsic => FunctionAbi::RustIntrinsic,
+                            Abi::C { .. } => FunctionAbi::C,
+                            Abi::PlatformIntrinsic => FunctionAbi::PlatformIntrinsic,
+                            Abi::Unadjusted => FunctionAbi::Unadjusted,
+                            _ => panic!("abi? {:?}", abi),
+                        };
+
                         use rustc_hir::ForeignItemKind;
                         match item.kind {
                             ForeignItemKind::Fn(..) => {
-                                let kind = if abi == rustc_target::spec::abi::Abi::RustIntrinsic {
-                                    let ident = item.ident.as_str().to_owned();
-                                    let abi = FunctionAbi::RustIntrinsic;
-                                    ItemKind::new_function_extern(abi, ident)
-                                } else {
-                                    ItemKind::new_function()
-                                };
-
+                                let ident = item.ident.as_str().to_owned();
+                                let kind = ItemKind::new_function_extern(abi, ident);
+                                items.index_item(kind, item_path, local_id, vm);
+                            }
+                            ForeignItemKind::Static(_, _) => {
+                                let ident = item.ident.as_str().to_owned();
+                                let kind = ItemKind::new_static_extern(abi, ident);
                                 items.index_item(kind, item_path, local_id, vm);
                             }
                             ForeignItemKind::Type => {
                                 // opaque types, eww
                             }
-                            _ => panic!("todo foreign item {:?}", item_path),
                         }
                     }
                 }
@@ -693,6 +714,12 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 let lang_trait = lang_items.pointee_trait().unwrap();
                 let lang_trait = ctx.item_by_did(lang_trait).unwrap();
                 lang_trait.trait_set_builtin(BuiltinTrait::Pointee);
+            }
+        }
+
+        if worker_config.crate_path.is_alloc() {
+            if !box_new_found {
+                panic!("Box::new() was not found!");
             }
         }
 
