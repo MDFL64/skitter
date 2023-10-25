@@ -534,12 +534,39 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 .collect();
 
             let kind = if adt_def.is_enum() {
-                // unless specified, the external discriminant MUST be an isize,
-                // rustc makes some annoying assumptions when generating derive code
-                AdtKind::Enum(EnumInfo {
-                    discriminant_internal: vm.common_types().u32,
-                    discriminant_external: vm.common_types().isize,
-                })
+                let enum_info = if let Some(int) = adt_def.repr().int {
+                    use rustc_abi::{IntegerType,Integer};
+
+                    let d = match int {
+                        IntegerType::Fixed(Integer::I8,false) => vm.common_types().u8,
+                        IntegerType::Fixed(Integer::I16,false) => vm.common_types().u16,
+                        IntegerType::Fixed(Integer::I32,false) => vm.common_types().u32,
+                        IntegerType::Fixed(Integer::I64,false) => vm.common_types().u64,
+                        IntegerType::Fixed(Integer::I128,false) => vm.common_types().u128,
+
+                        IntegerType::Fixed(Integer::I8,true) => vm.common_types().i8,
+                        IntegerType::Fixed(Integer::I16,true) => vm.common_types().i16,
+                        IntegerType::Fixed(Integer::I32,true) => vm.common_types().i32,
+                        IntegerType::Fixed(Integer::I64,true) => vm.common_types().i64,
+                        IntegerType::Fixed(Integer::I128,true) => vm.common_types().i128,
+
+                        _ => panic!("discriminant: {:?}",int)
+                    };
+
+                    EnumInfo {
+                        discriminant_internal: d,
+                        discriminant_external: d
+                    }
+                } else {
+                    // unless specified, the external discriminant MUST be an isize,
+                    // rustc makes some annoying assumptions when generating derive code
+                    EnumInfo {
+                        discriminant_internal: vm.common_types().u32,
+                        discriminant_external: vm.common_types().isize,
+                    }
+                };
+
+                AdtKind::Enum(enum_info)
             } else if adt_def.is_union() {
                 AdtKind::Union
             } else {
