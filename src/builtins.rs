@@ -873,6 +873,29 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
             out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
         }
+
+        // special skitter-specific intrinsics
+        "skitter_box_new" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let layout = arg_ty.layout();
+
+            let size = layout.assert_size();
+            if size == 0 {
+                // dangling pointer
+                out_bc.push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out_slot));
+            } else {
+                out_bc.push(Instr::Alloc{
+                    out: out_slot,
+                    size: layout.assert_size(),
+                    align: layout.align
+                });
+                out_bc.push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
+            }
+        }
+
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);
         }

@@ -503,6 +503,10 @@ fn write_exec_match() {
     Instr::Return => break,
     Instr::Bad => panic!("encountered bad instruction"),
     Instr::Debug(_) => (),
+    Instr::Alloc{out,size,align} => {
+        let res = self.vm.alloc(*size,*align);
+        write_stack(stack, *out, res);
+    }
     _ => panic!("NYI {:?}",instr)
 }"#,
     );

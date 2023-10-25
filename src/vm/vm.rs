@@ -403,6 +403,13 @@ impl<'vm> VM<'vm> {
     pub fn ty_tuple(&'vm self, children: Vec<Type<'vm>>) -> Type<'vm> {
         self.types.intern(TypeKind::Tuple(children), self)
     }
+
+    /// All System allocations in the VM should run through this.
+    /// Size and alloc must describe a valid Layout!
+    pub unsafe fn alloc(&'vm self, size: u32, align: u32) -> *mut u8 {
+        let layout = std::alloc::Layout::from_size_align_unchecked(size as usize,align as usize);
+        std::alloc::alloc(layout)
+    }
 }
 
 unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {

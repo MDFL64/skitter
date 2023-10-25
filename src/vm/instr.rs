@@ -341,6 +341,9 @@ pub enum Instr<'vm> {
     Bad,
     Debug(Box<String>),
 
+    // used for intrinsic Box::new
+    Alloc{out: Slot, size: u32, align: u32},
+
     // RUST INTRINSICS
     WriteBytes {
         size: u16,
