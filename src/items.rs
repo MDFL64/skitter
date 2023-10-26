@@ -254,8 +254,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('y' as u8);
                 virtual_info.persist_write(writer);
             }
-            ItemKind::Adt { info } => {
+            ItemKind::Adt { info, tag } => {
                 writer.write_byte('a' as u8);
+                tag.persist_write(writer);
 
                 let adt_block = {
                     let mut writer = writer.new_child_writer();
@@ -322,8 +323,10 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 kind
             }
             'a' => {
+                let tag = Persist::persist_read(reader);
                 ir = reader.read_byte_slice();
                 ItemKind::Adt {
+                    tag,
                     info: OnceLock::new(),
                 }
             }
@@ -431,11 +434,18 @@ pub enum ItemKind<'vm> {
     },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
+        tag: AdtTag
     },
     Trait {
         assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
         builtin: OnceLock<BuiltinTrait>,
     },
+}
+
+#[derive(Copy, Clone, Persist)]
+pub enum AdtTag {
+    Box,
+    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
@@ -662,9 +672,10 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_adt() -> Self {
+    pub fn new_adt(tag: AdtTag) -> Self {
         Self::Adt {
             info: Default::default(),
+            tag
         }
     }
 
@@ -906,7 +917,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
-        let ItemKind::Adt{info} = &self.kind else {
+        let ItemKind::Adt{info,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -923,11 +934,19 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn set_adt_info(&self, new_info: AdtInfo<'vm>) {
-        let ItemKind::Adt{info} = &self.kind else {
+        let ItemKind::Adt{info,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
         info.set(new_info).ok();
+    }
+
+    pub fn adt_tag(&self) -> AdtTag {
+        let ItemKind::Adt{tag,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+
+        *tag
     }
 
     pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {

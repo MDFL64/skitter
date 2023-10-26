@@ -1,5 +1,9 @@
 mod _builtin;
 
+fn chuck(x: &[i64]) {
+
+}
+
 pub fn main() {
     {
         let mut data = Vec::new();
@@ -10,7 +14,17 @@ pub fn main() {
         _builtin::print_int(data.iter().sum::<i64>() as _);
     }
     {
-        let data = vec!(1,3,5,7);
+        let mut data = vec!(51,12,53,37,52,43,33,65,94,58);
         _builtin::print_int(data.iter().sum::<i64>() as _);
+        for i in 0..5 {
+            data.pop();
+        }
+        _builtin::print_int(data.iter().sum::<i64>() as _);
+        _builtin::print_int(data.capacity() as _);
+        data.shrink_to_fit(); // NOTE: may not behave constantly
+        _builtin::print_int(data.capacity() as _);
+
+        let bs = data.into_boxed_slice();
+        _builtin::print_int(bs.len() as _);
     }
 }

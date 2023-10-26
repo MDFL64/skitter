@@ -99,6 +99,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
         }
 
         TypeKind::Int(IntWidth::I32, IntSign::Signed) => print_raw::<i32>(ptr),
+        TypeKind::Int(IntWidth::I64, IntSign::Signed) => print_raw::<i64>(ptr),
 
         TypeKind::Int(IntWidth::I8, IntSign::Unsigned) => print_raw::<u8>(ptr),
         TypeKind::Int(IntWidth::I32, IntSign::Unsigned) => print_raw::<u32>(ptr),

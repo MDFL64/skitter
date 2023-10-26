@@ -646,8 +646,13 @@ pub fn compile_rust_intrinsic<'vm>(
             } else {
                 let usize_ty = vm.common_types().usize;
                 let size_slot = stack.alloc(usize_ty);
-                out_bc.push(bytecode_select::copy(size_slot, arg_slots[2], usize_ty).unwrap());
-                panic!("non-trivial copy {}", arg_size);
+
+                let (mul_op,_) = bytecode_select::binary(BinaryOp::Mul, usize_ty);
+
+                out_bc.push(bytecode_select::literal(arg_size as _, usize_ty.layout().assert_size(), size_slot));
+                out_bc.push(mul_op(size_slot,size_slot,arg_slots[2]));
+                out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], size_slot));
+                //panic!("non-trivial copy {}", arg_size);
             }
         }
         "ctpop" => {

@@ -20,7 +20,7 @@ use crate::{
     ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
-        EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath,
+        EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, AdtTag,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -290,7 +290,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         let mut adt_ids = Vec::new();
         let mut impl_items = Vec::new();
 
-        let mut box_new_found = false;
+        let mut found_box = false;
+        let mut found_box_new = false;
 
         for item_id in hir_items {
             let item = hir.item(item_id);
@@ -327,7 +328,15 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 HirItemKind::Struct(variant, _) | HirItemKind::Union(variant, _) => {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-                        let kind = ItemKind::new_adt();
+
+                        let mut tag = AdtTag::None;
+                        
+                        if worker_config.crate_path.is_alloc() && item_path.as_string() == "::boxed::Box" {
+                            found_box = true;
+                            tag = AdtTag::Box;
+                        }
+
+                        let kind = ItemKind::new_adt(tag);
 
                         items.index_item(kind, item_path, local_id, vm)
                     };
@@ -343,7 +352,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 HirItemKind::Enum(enum_def, _) => {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-                        let kind = ItemKind::new_adt();
+
+                        let mut tag = AdtTag::None;
+
+                        let kind = ItemKind::new_adt(AdtTag::None);
 
                         items.index_item(kind, item_path, local_id, vm)
                     };
@@ -428,7 +440,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                 let kind = if worker_config.crate_path.is_alloc()
                                     && item_path.as_string() == "boxed::Box<T>::new"
                                 {
-                                    box_new_found = true;
+                                    found_box_new = true;
                                     ItemKind::new_function_extern(
                                         FunctionAbi::RustIntrinsic,
                                         "skitter_box_new".to_owned(),
@@ -750,7 +762,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         }
 
         if worker_config.crate_path.is_alloc() {
-            if !box_new_found {
+            if !found_box {
+                panic!("Box was not found!");
+            }
+            if !found_box_new {
                 panic!("Box::new() was not found!");
             }
         }

@@ -7,7 +7,7 @@ use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, MatchGuard,
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
-use crate::items::FunctionAbi;
+use crate::items::{FunctionAbi, AdtTag};
 use crate::types::{ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -724,7 +724,18 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         fn get_ref_ty<'vm>(ty: Type<'vm>) -> Type<'vm> {
                             match ty.kind() {
-                                TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
+                                TypeKind::Ptr(ref_ty, _) |
+                                TypeKind::Ref(ref_ty, _) => *ref_ty,
+                                TypeKind::Adt(adt_item) => {
+                                    match adt_item.item.adt_tag() {
+                                        AdtTag::Box => {
+                                            adt_item.subs.list[0].assert_ty()
+                                        }
+                                        AdtTag::None => {
+                                            panic!("get ref: {}", ty);
+                                        }
+                                    }
+                                }
                                 _ => panic!("get ref: {}", ty),
                             }
                         }
