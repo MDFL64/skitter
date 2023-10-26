@@ -1,5 +1,9 @@
-use crate::{items::{Item, FunctionAbi}, vm::{VM, instr::Slot}, abi::POINTER_SIZE};
 use super::{read_stack, write_stack};
+use crate::{
+    abi::POINTER_SIZE,
+    items::{FunctionAbi, Item},
+    vm::{instr::Slot, VM},
+};
 
 pub fn get_extern_fn(item: &Item) -> Option<for<'vm> unsafe fn(*mut u8, &'vm VM<'vm>)> {
     let path = item.path.as_string();
@@ -19,6 +23,8 @@ pub fn get_extern_fn(item: &Item) -> Option<for<'vm> unsafe fn(*mut u8, &'vm VM<
             Some(match (item_extern.0, item_extern.1.as_str()) {
                 (FunctionAbi::Rust, "__rust_alloc") => builtin_alloc_zeroed,
                 (FunctionAbi::Rust, "__rust_alloc_zeroed") => builtin_alloc_zeroed,
+                (FunctionAbi::Rust, "__rust_realloc") => builtin_realloc,
+
                 (FunctionAbi::Rust, "panic_impl") => builtin_panic,
                 _ => panic!("todo extern? {:?}", item_extern),
             })
@@ -31,7 +37,9 @@ pub fn get_extern_fn(item: &Item) -> Option<for<'vm> unsafe fn(*mut u8, &'vm VM<
 pub fn get_extern_static(item: &Item) -> Option<*mut u8> {
     if let Some(item_extern) = item.get_extern() {
         Some(match (item_extern.0, item_extern.1.as_str()) {
-            (FunctionAbi::Rust, "__rust_no_alloc_shim_is_unstable") => (&BUILTIN_ALLOC_DUMMY) as *const _ as *mut _,
+            (FunctionAbi::Rust, "__rust_no_alloc_shim_is_unstable") => {
+                (&BUILTIN_ALLOC_DUMMY) as *const _ as *mut _
+            }
             _ => panic!("todo extern? {:?}", item_extern),
         })
     } else {
@@ -87,6 +95,19 @@ unsafe fn builtin_alloc_zeroed<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
     let align: usize = read_stack(stack, Slot::new(ptr_size * 2));
 
     let res = vm.alloc_bytes_zeroed(size, align);
+
+    write_stack(stack, Slot::new(0), res);
+}
+
+unsafe fn builtin_realloc<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+    let ptr_size = POINTER_SIZE.bytes();
+
+    let ptr: *mut u8 = read_stack(stack, Slot::new(ptr_size));
+    let old_size: usize = read_stack(stack, Slot::new(ptr_size * 2));
+    let align: usize = read_stack(stack, Slot::new(ptr_size * 3));
+    let new_size: usize = read_stack(stack, Slot::new(ptr_size * 4));
+
+    let res = vm.realloc(ptr, old_size, align, new_size);
 
     write_stack(stack, Slot::new(0), res);
 }

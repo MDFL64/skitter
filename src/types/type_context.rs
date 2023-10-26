@@ -312,7 +312,7 @@ impl<'vm> TypeContext<'vm> {
                             }
                         }
 
-                        panic!("failed to find inherent impl");
+                        panic!("failed to find inherent impl {:?}", did);
                     }
                     ImplSubject::Trait(_) => {
                         panic!("todo trait ref");

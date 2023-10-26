@@ -30,9 +30,9 @@ use std::{
     sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
 };
 
+use super::externs::get_extern_fn;
 use super::externs::get_extern_static;
 use super::{read_stack, write_stack};
-use super::externs::get_extern_fn;
 
 use super::instr::Instr;
 
@@ -418,6 +418,18 @@ impl<'vm> VM<'vm> {
     pub unsafe fn alloc_bytes_zeroed(&'vm self, size: usize, align: usize) -> *mut u8 {
         let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
         std::alloc::alloc_zeroed(layout)
+    }
+
+    pub unsafe fn realloc(
+        &'vm self,
+        old: *mut u8,
+        old_size: usize,
+        align: usize,
+        new_size: usize,
+    ) -> *mut u8 {
+        //println!("realloc {:?} {} / {} -> {}",old,align,old_size,new_size);
+        let layout = std::alloc::Layout::from_size_align_unchecked(old_size, align);
+        std::alloc::realloc(old, layout, new_size)
     }
 }
 

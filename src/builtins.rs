@@ -736,7 +736,9 @@ pub fn compile_rust_intrinsic<'vm>(
             out_bc.push(Instr::Error(Box::new("abort".to_owned())));
         }
         "caller_location" => {
-            out_bc.push(Instr::Error(Box::new("caller_location not implemented".to_owned())));
+            out_bc.push(Instr::Error(Box::new(
+                "caller_location not implemented".to_owned(),
+            )));
         }
         "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
@@ -822,7 +824,7 @@ pub fn compile_rust_intrinsic<'vm>(
             let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
         }
-        "wrapping_mul" => {
+        "unchecked_mul" | "wrapping_mul" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);
 

@@ -1,6 +1,6 @@
+mod externs;
 pub mod instr;
 mod vm;
-mod externs;
 
 pub use vm::{Function, FunctionSource, VM};
 

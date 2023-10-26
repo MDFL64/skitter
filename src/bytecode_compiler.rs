@@ -722,15 +722,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     PointerCast::UnSize => {
                         assert_eq!(expr_ty.layout().assert_size(), POINTER_SIZE.bytes() * 2);
 
-                        let src_ty = match self.expr_ty(*source).kind() {
-                            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
-                            _ => panic!(),
-                        };
+                        fn get_ref_ty<'vm>(ty: Type<'vm>) -> Type<'vm> {
+                            match ty.kind() {
+                                TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
+                                _ => panic!("get ref: {}", ty),
+                            }
+                        }
 
-                        let dst_ty = match expr_ty.kind() {
-                            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
-                            _ => panic!(),
-                        };
+                        let src_ty = get_ref_ty(self.expr_ty(*source));
+                        let dst_ty = get_ref_ty(expr_ty);
 
                         let meta = match (src_ty.kind(), dst_ty.kind()) {
                             (TypeKind::Array(_, elem_count), TypeKind::Slice(_)) => {
@@ -1219,11 +1219,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let static_ptr = self.vm.static_value(static_ref) as i128;
 
                 let ptr_slot = self.stack.alloc(ptr_ty);
-                self.out_bc.push(bytecode_select::literal(
-                    static_ptr,
-                    ptr_size,
-                    ptr_slot,
-                ));
+                self.out_bc
+                    .push(bytecode_select::literal(static_ptr, ptr_size, ptr_slot));
 
                 Place::Ptr(ptr_slot, 0)
             }

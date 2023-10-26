@@ -22,9 +22,21 @@ pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<Cra
     for sub in for_tys.list.iter() {
         match sub {
             Sub::Type(ty) => {
-                let cid = find_source_crate(*ty);
-                if !res.contains(&cid) {
-                    res.push(cid);
+                let loc = find_source_crate(*ty);
+                match loc {
+                    ImplLocation::Crate(cid) => {
+                        if !res.contains(&cid) {
+                            res.push(cid);
+                        }
+                    }
+                    ImplLocation::Internal => {
+                        let cid_list = get_internal_crates(ty.vm());
+                        for cid in cid_list {
+                            if !res.contains(&cid) {
+                                res.push(cid);
+                            }
+                        }
+                    }
                 }
             }
             _ => (),
@@ -38,24 +50,43 @@ pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<Cra
 ///
 /// TODO smallvec
 pub fn find_inherent_impl_crate(ty: Type) -> Vec<CrateId> {
-    vec![find_source_crate(ty)]
+    match find_source_crate(ty) {
+        ImplLocation::Crate(cid) => {
+            vec![cid]
+        }
+        ImplLocation::Internal => get_internal_crates(ty.vm()).into(),
+    }
 }
 
-fn find_source_crate(ty: Type) -> CrateId {
+fn get_internal_crates(vm: &VM) -> [CrateId; 2] {
+    [
+        *vm.core_crate.get().unwrap(),
+        *vm.alloc_crate.get().unwrap(),
+        // TODO STD
+    ]
+}
+
+enum ImplLocation {
+    Crate(CrateId),
+    Internal,
+}
+
+fn find_source_crate(ty: Type) -> ImplLocation {
     match ty.kind() {
-        TypeKind::Adt(item) => item.item.crate_id,
-        TypeKind::FunctionDef(item) => item.item.crate_id,
+        TypeKind::Adt(item) |
+        TypeKind::FunctionDef(item) => ImplLocation::Crate(item.item.crate_id),
 
         TypeKind::Ref(child, _) => find_source_crate(*child),
 
         TypeKind::Bool
         | TypeKind::Ptr(..) // TODO is this correct?
+        | TypeKind::Closure(..) // TODO is this correct?
         | TypeKind::Float(_)
         | TypeKind::Int(..)
         | TypeKind::Tuple(_)
         | TypeKind::StringSlice
         | TypeKind::Slice(_)
-        | TypeKind::Array(..) => *ty.vm().core_crate.get().unwrap(),
+        | TypeKind::Array(..) => ImplLocation::Internal,
         _ => panic!("source crate {}", ty),
     }
 }

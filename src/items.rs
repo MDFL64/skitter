@@ -745,9 +745,10 @@ impl<'vm> Item<'vm> {
 
     pub fn get_extern(&self) -> &Option<(FunctionAbi, String)> {
         match &self.kind {
-            ItemKind::Function{extern_name,..} |
-            ItemKind::Static{ extern_name,..} => extern_name,
-            _ => panic!("item kind mismatch")
+            ItemKind::Function { extern_name, .. } | ItemKind::Static { extern_name, .. } => {
+                extern_name
+            }
+            _ => panic!("item kind mismatch"),
         }
     }
 
