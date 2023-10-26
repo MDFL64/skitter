@@ -156,15 +156,15 @@ fn get_lib(vm: &'static VM, name: &str) -> ExternCrate {
                 *id
             } else {
                 let crate_path = CratePath::new(OsStr::new("@alloc"));
-    
+
                 let id = vm.add_provider_auto(RustCWorkerConfig {
                     crate_path,
                     extern_crates: vec![get_lib(vm, "core")],
                     save_file: false,
                 });
-    
+
                 vm.alloc_crate.set(id).unwrap();
-    
+
                 id
             }
         }

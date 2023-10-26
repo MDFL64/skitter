@@ -425,9 +425,14 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                 );
 
                                 // HACK: we need to treat Box::new as an intrinsic
-                                let kind = if worker_config.crate_path.is_alloc() && item_path.as_string() == "boxed::Box<T>::new" {
+                                let kind = if worker_config.crate_path.is_alloc()
+                                    && item_path.as_string() == "boxed::Box<T>::new"
+                                {
                                     box_new_found = true;
-                                    ItemKind::new_function_extern(FunctionAbi::RustIntrinsic, "skitter_box_new".to_owned())
+                                    ItemKind::new_function_extern(
+                                        FunctionAbi::RustIntrinsic,
+                                        "skitter_box_new".to_owned(),
+                                    )
                                 } else {
                                     ItemKind::new_function()
                                 };
@@ -535,27 +540,27 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             let kind = if adt_def.is_enum() {
                 let enum_info = if let Some(int) = adt_def.repr().int {
-                    use rustc_abi::{IntegerType,Integer};
+                    use rustc_abi::{Integer, IntegerType};
 
                     let d = match int {
-                        IntegerType::Fixed(Integer::I8,false) => vm.common_types().u8,
-                        IntegerType::Fixed(Integer::I16,false) => vm.common_types().u16,
-                        IntegerType::Fixed(Integer::I32,false) => vm.common_types().u32,
-                        IntegerType::Fixed(Integer::I64,false) => vm.common_types().u64,
-                        IntegerType::Fixed(Integer::I128,false) => vm.common_types().u128,
+                        IntegerType::Fixed(Integer::I8, false) => vm.common_types().u8,
+                        IntegerType::Fixed(Integer::I16, false) => vm.common_types().u16,
+                        IntegerType::Fixed(Integer::I32, false) => vm.common_types().u32,
+                        IntegerType::Fixed(Integer::I64, false) => vm.common_types().u64,
+                        IntegerType::Fixed(Integer::I128, false) => vm.common_types().u128,
 
-                        IntegerType::Fixed(Integer::I8,true) => vm.common_types().i8,
-                        IntegerType::Fixed(Integer::I16,true) => vm.common_types().i16,
-                        IntegerType::Fixed(Integer::I32,true) => vm.common_types().i32,
-                        IntegerType::Fixed(Integer::I64,true) => vm.common_types().i64,
-                        IntegerType::Fixed(Integer::I128,true) => vm.common_types().i128,
+                        IntegerType::Fixed(Integer::I8, true) => vm.common_types().i8,
+                        IntegerType::Fixed(Integer::I16, true) => vm.common_types().i16,
+                        IntegerType::Fixed(Integer::I32, true) => vm.common_types().i32,
+                        IntegerType::Fixed(Integer::I64, true) => vm.common_types().i64,
+                        IntegerType::Fixed(Integer::I128, true) => vm.common_types().i128,
 
-                        _ => panic!("discriminant: {:?}",int)
+                        _ => panic!("discriminant: {:?}", int),
                     };
 
                     EnumInfo {
                         discriminant_internal: d,
-                        discriminant_external: d
+                        discriminant_external: d,
                     }
                 } else {
                     // unless specified, the external discriminant MUST be an isize,

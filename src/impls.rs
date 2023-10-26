@@ -49,6 +49,7 @@ fn find_source_crate(ty: Type) -> CrateId {
         TypeKind::Ref(child, _) => find_source_crate(*child),
 
         TypeKind::Bool
+        | TypeKind::Ptr(..) // TODO is this correct?
         | TypeKind::Float(_)
         | TypeKind::Int(..)
         | TypeKind::Tuple(_)

@@ -609,7 +609,7 @@ pub fn compile_rust_intrinsic<'vm>(
                 out_bc.push(copy);
             }
         }
-        "read_via_copy" => {
+        "read_via_copy" | "volatile_load" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 1);
 
@@ -731,6 +731,12 @@ pub fn compile_rust_intrinsic<'vm>(
                 16 => out_bc.push(Instr::I128_RotateRight(out_slot, arg1, arg2)),
                 _ => panic!("can't ctpop {}", arg_ty),
             }
+        }
+        "abort" => {
+            out_bc.push(Instr::Error(Box::new("abort".to_owned())));
+        }
+        "caller_location" => {
+            out_bc.push(Instr::Error(Box::new("caller_location not implemented".to_owned())));
         }
         "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
@@ -887,12 +893,13 @@ pub fn compile_rust_intrinsic<'vm>(
                 // dangling pointer
                 out_bc.push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out_slot));
             } else {
-                out_bc.push(Instr::Alloc{
+                out_bc.push(Instr::Alloc {
                     out: out_slot,
                     size: layout.assert_size(),
-                    align: layout.align
+                    align: layout.align,
                 });
-                out_bc.push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
+                out_bc
+                    .push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
             }
         }
 

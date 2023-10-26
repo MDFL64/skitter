@@ -30,6 +30,10 @@ use std::{
     sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
 };
 
+use super::externs::get_extern_static;
+use super::{read_stack, write_stack};
+use super::externs::get_extern_fn;
+
 use super::instr::Instr;
 
 pub struct VM<'vm> {
@@ -274,23 +278,23 @@ impl<'vm> VM<'vm> {
             bytecode: Default::default(),
         };
 
-        // hack to glue skitter builtins together
         if let FunctionSource::Item(item) = source {
-            let path = item.path.as_string();
-            if path.starts_with("::_builtin::") {
-                match path {
-                    "::_builtin::print_int" => func.set_native(builtin_print_int),
-                    "::_builtin::print_uint" => func.set_native(builtin_print_uint),
-                    "::_builtin::print_float" => func.set_native(builtin_print_float),
-                    "::_builtin::print_bool" => func.set_native(builtin_print_bool),
-                    "::_builtin::print_char" => func.set_native(builtin_print_char),
-                    "::_builtin::print_raw" => func.set_native(builtin_print_raw),
-                    _ => panic!("unknown builtin {}", path),
-                }
+            let extern_native = get_extern_fn(item);
+
+            if let Some(extern_native) = extern_native {
+                func.set_native(extern_native);
             }
         }
 
         self.arena_functions.alloc(func)
+    }
+
+    pub fn static_value(&'vm self, static_ref: &ItemWithSubs<'vm>) -> *mut u8 {
+        if let Some(res) = get_extern_static(static_ref.item) {
+            res
+        } else {
+            static_ref.item.static_value(&static_ref.subs)
+        }
     }
 
     pub fn alloc_item(&'vm self, item: Item<'vm>) -> &'vm Item<'vm> {
@@ -406,18 +410,15 @@ impl<'vm> VM<'vm> {
 
     /// All System allocations in the VM should run through this.
     /// Size and alloc must describe a valid Layout!
-    pub unsafe fn alloc(&'vm self, size: u32, align: u32) -> *mut u8 {
-        let layout = std::alloc::Layout::from_size_align_unchecked(size as usize,align as usize);
+    pub unsafe fn alloc_bytes(&'vm self, size: usize, align: usize) -> *mut u8 {
+        let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
         std::alloc::alloc(layout)
     }
-}
 
-unsafe fn write_stack<T>(base: *mut u8, slot: Slot, x: T) {
-    *(base.add(slot.index()) as *mut _) = x;
-}
-
-unsafe fn read_stack<T: Copy>(base: *mut u8, slot: Slot) -> T {
-    *(base.add(slot.index()) as *mut _)
+    pub unsafe fn alloc_bytes_zeroed(&'vm self, size: usize, align: usize) -> *mut u8 {
+        let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
+        std::alloc::alloc_zeroed(layout)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -477,7 +478,7 @@ impl<'vm> Function<'vm> {
         }
     }
 
-    pub fn set_native(&self, native: unsafe fn(*mut u8)) {
+    pub fn set_native(&self, native: unsafe fn(*mut u8, &'vm VM<'vm>)) {
         self.native
             .store(unsafe { std::mem::transmute(native) }, Ordering::Release);
     }
@@ -516,34 +517,4 @@ impl<'vm> std::fmt::Debug for Function<'vm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Function(\"{}{}\")", self.source.debug_name(), self.subs)
     }
-}
-
-unsafe fn builtin_print_int(stack: *mut u8) {
-    let x: i128 = read_stack(stack, Slot::new(0));
-    println!("{}", x);
-}
-
-unsafe fn builtin_print_uint(stack: *mut u8) {
-    let x: u128 = read_stack(stack, Slot::new(0));
-    println!("{}", x);
-}
-
-unsafe fn builtin_print_float(stack: *mut u8) {
-    let x: f64 = read_stack(stack, Slot::new(0));
-    println!("{}", x);
-}
-
-unsafe fn builtin_print_bool(stack: *mut u8) {
-    let x: bool = read_stack(stack, Slot::new(0));
-    println!("{}", x);
-}
-
-unsafe fn builtin_print_char(stack: *mut u8) {
-    let x: char = read_stack(stack, Slot::new(0));
-    println!("{}", x);
-}
-
-unsafe fn builtin_print_raw(stack: *mut u8) {
-    let x: &str = read_stack(stack, Slot::new(0));
-    print!("{}", x);
 }

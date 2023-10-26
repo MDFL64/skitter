@@ -387,7 +387,7 @@ impl<'vm> Persist<'vm> for AssocValue<'vm> {
     }
 }
 
-#[derive(PartialEq, Persist)]
+#[derive(PartialEq, Persist, Debug, Copy, Clone)]
 pub enum FunctionAbi {
     Rust,          // "default" calling convention -- presumably won't be called from c
     RustIntrinsic, // intrinsics which are inlined at compile-time
@@ -743,12 +743,12 @@ impl<'vm> Item<'vm> {
         None
     }
 
-    pub fn func_extern(&self) -> &Option<(FunctionAbi, String)> {
-        let ItemKind::Function{extern_name,..} = &self.kind else {
-            panic!("item kind mismatch");
-        };
-
-        extern_name
+    pub fn get_extern(&self) -> &Option<(FunctionAbi, String)> {
+        match &self.kind {
+            ItemKind::Function{extern_name,..} |
+            ItemKind::Static{ extern_name,..} => extern_name,
+            _ => panic!("item kind mismatch")
+        }
     }
 
     pub fn func_sig(&self, subs: &SubList<'vm>) -> FunctionSig<'vm> {

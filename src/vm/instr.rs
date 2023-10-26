@@ -338,11 +338,16 @@ pub enum Instr<'vm> {
     VTableFunc(Slot, Slot, u32),
 
     Return,
-    Bad,
+    Error(Box<String>),
+    Skipped,
     Debug(Box<String>),
 
     // used for intrinsic Box::new
-    Alloc{out: Slot, size: u32, align: u32},
+    Alloc {
+        out: Slot,
+        size: u32,
+        align: u32,
+    },
 
     // RUST INTRINSICS
     WriteBytes {

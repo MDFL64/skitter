@@ -392,7 +392,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ty = self.expr_ty(*func);
                 if let Some(func_ref) = ty.func_item() {
                     if let Some((FunctionAbi::RustIntrinsic, extern_name)) =
-                        func_ref.item.func_extern()
+                        func_ref.item.get_extern()
                     {
                         // inline rust intrinsics
                         let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
@@ -1216,11 +1216,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ptr_ty = ty.ref_to(Mutability::Const);
                 let ptr_size = ptr_ty.layout().assert_size();
 
-                let static_ptr = static_ref.item.static_value(&static_ref.subs) as usize;
+                let static_ptr = self.vm.static_value(static_ref) as i128;
 
                 let ptr_slot = self.stack.alloc(ptr_ty);
                 self.out_bc.push(bytecode_select::literal(
-                    static_ptr as i128,
+                    static_ptr,
                     ptr_size,
                     ptr_slot,
                 ));
@@ -1988,7 +1988,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     fn skip_instr(&mut self) -> usize {
         let index = self.out_bc.len();
-        self.out_bc.push(Instr::Bad);
+        self.out_bc.push(Instr::Skipped);
         index
     }
 

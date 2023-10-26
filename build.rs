@@ -501,10 +501,11 @@ fn write_exec_match() {
         write_stack(stack, *out, res);
     }
     Instr::Return => break,
-    Instr::Bad => panic!("encountered bad instruction"),
+    Instr::Skipped => panic!("encountered skipped instruction, this should never happen"),
+    Instr::Error(msg) => panic!("interpreter error: {}",msg),
     Instr::Debug(_) => (),
     Instr::Alloc{out,size,align} => {
-        let res = self.vm.alloc(*size,*align);
+        let res = self.vm.alloc_bytes(*size as usize,*align as usize);
         write_stack(stack, *out, res);
     }
     _ => panic!("NYI {:?}",instr)
