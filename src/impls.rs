@@ -79,6 +79,7 @@ fn find_source_crate(ty: Type) -> ImplLocation {
         TypeKind::Ref(child, _) => find_source_crate(*child),
 
         TypeKind::Bool
+        | TypeKind::Char
         | TypeKind::Ptr(..) // TODO is this correct?
         | TypeKind::Closure(..) // TODO is this correct?
         | TypeKind::Float(_)
@@ -627,8 +628,7 @@ impl<'vm> SubMap<'vm> {
                 if current_val.kind() == &TypeKind::Unknown {
                     *current_val = val;
                 } else {
-                    println!("{} {}", current_val, val);
-                    panic!("failed to set type param");
+                    return false;
                 }
             }
         } else {

@@ -239,6 +239,19 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.rotate_right(b as u32)",
         source,
     );
+
+    write_binary(
+        &format!("{}_S_SatAdd", big),
+        signed,
+        "a.saturating_add(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_SatAdd", big),
+        unsigned,
+        "a.saturating_add(b)",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {

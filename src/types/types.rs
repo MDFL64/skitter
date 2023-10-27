@@ -347,6 +347,11 @@ impl<'vm> Type<'vm> {
             | TypeKind::FunctionDef(_)
             | TypeKind::FunctionPointer(_) => false,
             TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut()),
+            TypeKind::Closure(_,sig,_) => {
+                let env = sig.env_ty;
+                assert!(env.is_concrete());
+                env.is_interior_mut()
+            }
             TypeKind::Array(child, _) => child.is_interior_mut(),
             TypeKind::Adt(adt) => {
                 // TODO check unsafecell

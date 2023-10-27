@@ -10,7 +10,7 @@ use crate::{
     crate_provider::TraitImpl,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
     items::{AssocValue, CrateId, IRFlag, Item, ItemPath},
-    types::{Sub, SubList, Type, TypeKind},
+    types::{Sub, SubList, Type, TypeKind, IntSign},
     vm::{
         instr::{Instr, Slot},
         VM,
@@ -422,6 +422,23 @@ pub fn compile_rust_intrinsic<'vm>(
                 out_bc.push(offset_ctor(out_slot, out_slot, arg_slots[0]));
             }
         }
+        "ptr_offset_from_unsigned" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let ty = subs.list[0].assert_ty();
+            let size = ty.layout().assert_size();
+
+            let usize_ty = vm.common_types().usize;
+
+            let (sub_ctor, _) = bytecode_select::binary(BinaryOp::Sub, usize_ty);
+
+            if size == 1 {
+                out_bc.push(sub_ctor(out_slot, arg_slots[0], arg_slots[1]));
+            } else {
+                panic!("non-trivial offset");
+            }
+        }
         "min_align_of" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 0);
@@ -735,6 +752,19 @@ pub fn compile_rust_intrinsic<'vm>(
                 8 => out_bc.push(Instr::I64_RotateRight(out_slot, arg1, arg2)),
                 16 => out_bc.push(Instr::I128_RotateRight(out_slot, arg1, arg2)),
                 _ => panic!("can't ctpop {}", arg_ty),
+            }
+        }
+        "saturating_add" => {
+            assert!(subs.list.len() == 1);
+            assert!(arg_slots.len() == 2);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg1 = arg_slots[0];
+            let arg2 = arg_slots[1];
+
+            match (arg_ty.layout().assert_size(),arg_ty.sign()) {
+                (8,IntSign::Unsigned) => out_bc.push(Instr::I64_U_SatAdd(out_slot, arg1, arg2)),
+                _ => panic!("can't saturating_add {}", arg_ty),
             }
         }
         "abort" => {

@@ -379,6 +379,15 @@ pub fn binary<'vm>(op: BinaryOp, ty: Type) -> (fn(Slot, Slot, Slot) -> Instr<'vm
                 _ => panic!(),
             }
         }
+        (BinaryOp::GtEq, TypeKind::Ptr(..), _) => {
+            swap = true;
+            assert_eq!(size, POINTER_SIZE.bytes());
+            match size {
+                4 => Instr::I32_U_LtEq,
+                8 => Instr::I64_U_LtEq,
+                _ => panic!(),
+            }
+        }
 
         _ => panic!("no binary op: {:?} {:?}", op, ty),
     };
