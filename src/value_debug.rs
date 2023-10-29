@@ -78,6 +78,28 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
             }
             print!(" }}");
         }
+        TypeKind::Tuple(children) => {
+            if children.len() == 0 {
+                print!("()");
+            } else {
+                let tup_layout = ty.layout();
+                print!("( ");
+
+                for (i, (ty, offset)) in children
+                    .iter()
+                    .zip(&tup_layout.field_offsets[0])
+                    .enumerate()
+                {
+                    if i != 0 {
+                        print!(" , ");
+                    }
+
+                    let field_ptr = ptr.offset(*offset as isize);
+                    print_value(*ty, field_ptr, 0);
+                }
+                print!(" )");
+            }
+        }
 
         TypeKind::StringSlice => {
             let byte_slice = std::slice::from_raw_parts(ptr, meta);

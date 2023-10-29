@@ -568,6 +568,8 @@ impl<'vm> ImplBounds<'vm> {
             | (_, TypeKind::Bool)
             | (TypeKind::Char, _)
             | (_, TypeKind::Char)
+            | (TypeKind::StringSlice, _)
+            | (_, TypeKind::StringSlice)
             | (TypeKind::Never, _)
             | (_, TypeKind::Never)
             | (TypeKind::Int(..), _)

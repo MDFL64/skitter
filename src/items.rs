@@ -434,7 +434,7 @@ pub enum ItemKind<'vm> {
     },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
-        tag: AdtTag
+        tag: AdtTag,
     },
     Trait {
         assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
@@ -445,7 +445,7 @@ pub enum ItemKind<'vm> {
 #[derive(Copy, Clone, Persist)]
 pub enum AdtTag {
     Box,
-    None
+    None,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
@@ -675,7 +675,7 @@ impl<'vm> ItemKind<'vm> {
     pub fn new_adt(tag: AdtTag) -> Self {
         Self::Adt {
             info: Default::default(),
-            tag
+            tag,
         }
     }
 

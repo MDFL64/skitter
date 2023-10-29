@@ -10,7 +10,7 @@ use crate::{
     crate_provider::TraitImpl,
     ir::{glue_builder::glue_for_fn_trait, BinaryOp},
     items::{AssocValue, CrateId, IRFlag, Item, ItemPath},
-    types::{Sub, SubList, Type, TypeKind, IntSign},
+    types::{IntSign, Sub, SubList, Type, TypeKind},
     vm::{
         instr::{Instr, Slot},
         VM,
@@ -664,10 +664,14 @@ pub fn compile_rust_intrinsic<'vm>(
                 let usize_ty = vm.common_types().usize;
                 let size_slot = stack.alloc(usize_ty);
 
-                let (mul_op,_) = bytecode_select::binary(BinaryOp::Mul, usize_ty);
+                let (mul_op, _) = bytecode_select::binary(BinaryOp::Mul, usize_ty);
 
-                out_bc.push(bytecode_select::literal(arg_size as _, usize_ty.layout().assert_size(), size_slot));
-                out_bc.push(mul_op(size_slot,size_slot,arg_slots[2]));
+                out_bc.push(bytecode_select::literal(
+                    arg_size as _,
+                    usize_ty.layout().assert_size(),
+                    size_slot,
+                ));
+                out_bc.push(mul_op(size_slot, size_slot, arg_slots[2]));
                 out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], size_slot));
                 //panic!("non-trivial copy {}", arg_size);
             }
@@ -762,13 +766,16 @@ pub fn compile_rust_intrinsic<'vm>(
             let arg1 = arg_slots[0];
             let arg2 = arg_slots[1];
 
-            match (arg_ty.layout().assert_size(),arg_ty.sign()) {
-                (8,IntSign::Unsigned) => out_bc.push(Instr::I64_U_SatAdd(out_slot, arg1, arg2)),
+            match (arg_ty.layout().assert_size(), arg_ty.sign()) {
+                (8, IntSign::Unsigned) => out_bc.push(Instr::I64_U_SatAdd(out_slot, arg1, arg2)),
                 _ => panic!("can't saturating_add {}", arg_ty),
             }
         }
         "abort" => {
             out_bc.push(Instr::Error(Box::new("abort".to_owned())));
+        }
+        "unreachable" => {
+            out_bc.push(Instr::Error(Box::new("unreachable".to_owned())));
         }
         "caller_location" => {
             out_bc.push(Instr::Error(Box::new(

@@ -954,26 +954,45 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 }
             }
             hir::PatKind::Path(path) => {
-                if let TypeKind::Adt(adt) = ty.kind() {
-                    let adt_info = adt.item.adt_info();
+                let res = self.types.qpath_res(&path, pat.hir_id);
 
-                    if adt_info.is_enum() {
-                        let res = self.types.qpath_res(&path, pat.hir_id);
-                        let def = res.def_id();
-                        let ctor_item = self.ctx.vm.types.def_from_rustc(def, &[], &self.ctx).item;
+                use rustc_hir::def::CtorKind;
+                use rustc_hir::def::DefKind;
+                use rustc_hir::def::Res;
 
-                        let (_, variant_index) = ctor_item.ctor_info().unwrap();
+                match res {
+                    Res::Def(DefKind::Ctor(_, CtorKind::Const), def_id) => {
+                        let TypeKind::Adt(adt) = ty.kind() else {
+                            panic!("ctor for non-adt?");
+                        };
 
-                        PatternKind::Enum {
-                            fields: vec![],
-                            variant_index,
+                        let adt_info = adt.item.adt_info();
+
+                        if adt_info.is_enum() {
+                            let ctor_item = self
+                                .ctx
+                                .vm
+                                .types
+                                .def_from_rustc(def_id, &[], &self.ctx)
+                                .item;
+
+                            let (_, variant_index) = ctor_item.ctor_info().unwrap();
+
+                            PatternKind::Enum {
+                                fields: vec![],
+                                variant_index,
+                            }
+                        } else {
+                            // nothing to test
+                            PatternKind::Hole
                         }
-                    } else {
-                        // nothing to test
-                        PatternKind::Hole
                     }
-                } else {
-                    PatternKind::Error(format!("WARNING path pattern = {:?}", path))
+                    Res::Def(DefKind::Const, def_id) => {
+                        let const_item = self.ctx.vm.types.def_from_rustc(def_id, &[], &self.ctx);
+
+                        PatternKind::NamedConst(const_item)
+                    }
+                    _ => panic!("path pattern = {:?}", res),
                 }
             }
             hir::PatKind::Ref(sub_pattern, _) => {

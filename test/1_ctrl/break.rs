@@ -1,10 +1,15 @@
 mod _builtin;
 
+fn max() -> i128 {
+    _builtin::print_int(123);
+    1000
+}
+
 pub fn main() {
     let mut i = 0;
-    while i < 1000 {
+    while i < max() {
         i += 1;
-        if i > 100 {
+        if i > 10 {
             break;
         }
         continue;

@@ -7,7 +7,7 @@ use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, MatchGuard,
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
-use crate::items::{FunctionAbi, AdtTag};
+use crate::items::{AdtTag, FunctionAbi};
 use crate::types::{ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -99,7 +99,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
 
         for (pat, slot) in ir.params.iter().zip(param_slots) {
-            compiler.match_pattern(*pat, slot, None);
+            compiler.match_pattern_place(*pat, Place::Local(slot), None);
         }
 
         compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
@@ -205,11 +205,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ..
             } => {
                 assert!(else_block.is_none());
-                let dst_slot = self.alloc_pattern(*pattern);
-                if let Some(init) = init {
-                    self.lower_expr(*init, Some(dst_slot));
-                }
-                self.match_pattern(*pattern, dst_slot, None);
+                let source = if let Some(init) = init {
+                    self.expr_to_place(*init)
+                } else {
+                    let dst_slot = self.alloc_pattern(*pattern);
+                    Place::Local(dst_slot)
+                };
+                self.match_pattern_place(*pattern, source, None);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -599,7 +601,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     .unwrap()
                     .start_index;
 
-                let offset = self.get_jump_offset(loop_start) + 1;
+                let offset = self.get_jump_offset(loop_start); // + 1;
                 self.out_bc.push(Instr::Jump(offset));
 
                 // the destination is (), just return a dummy value
@@ -724,18 +726,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         fn get_ref_ty<'vm>(ty: Type<'vm>) -> Type<'vm> {
                             match ty.kind() {
-                                TypeKind::Ptr(ref_ty, _) |
-                                TypeKind::Ref(ref_ty, _) => *ref_ty,
-                                TypeKind::Adt(adt_item) => {
-                                    match adt_item.item.adt_tag() {
-                                        AdtTag::Box => {
-                                            adt_item.subs.list[0].assert_ty()
-                                        }
-                                        AdtTag::None => {
-                                            panic!("get ref: {}", ty);
-                                        }
+                                TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
+                                TypeKind::Adt(adt_item) => match adt_item.item.adt_tag() {
+                                    AdtTag::Box => adt_item.subs.list[0].assert_ty(),
+                                    AdtTag::None => {
+                                        panic!("get ref: {}", ty);
                                     }
-                                }
+                                },
                                 _ => panic!("get ref: {}", ty),
                             }
                         }
@@ -978,11 +975,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 // the bool result
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                // allocate space for our value, to avoid aliasing other variables
-                let value_slot = self.stack.alloc(self.expr_ty(*init));
-                self.lower_expr(*init, Some(value_slot));
+                let source = self.expr_to_place(*init);
 
-                self.match_pattern(*pattern, value_slot, Some(dst_slot));
+                self.match_pattern_place(*pattern, source, Some(dst_slot));
 
                 dst_slot
             }
@@ -990,18 +985,16 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 // the result value
                 let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                // allocate space for our value, to avoid aliasing other variables
-                let arg_slot = self.stack.alloc(self.expr_ty(*arg));
-                self.lower_expr(*arg, Some(arg_slot));
-
                 // the bool pattern match result slot
                 let bool_ty = self.vm.common_types().bool;
                 let match_result_slot = self.stack.alloc(bool_ty);
 
+                let source = self.expr_to_place(*arg);
+
                 let mut jump_gaps = Vec::new();
 
                 for arm in arms {
-                    self.match_pattern(arm.pattern, arg_slot, Some(match_result_slot));
+                    self.match_pattern_place(arm.pattern, source, Some(match_result_slot));
                     let check_end_index = self.skip_instr();
 
                     // guard clause
@@ -1239,15 +1232,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             ExprKind::Block { .. }
             | ExprKind::Tuple { .. }
             | ExprKind::Binary { .. }
+            | ExprKind::Unary { .. }
             | ExprKind::Ref { .. }
-            | ExprKind::LiteralVoid
             | ExprKind::Array(_)
             | ExprKind::Cast(_)
+            | ExprKind::PointerCast(..)
             | ExprKind::Adt { .. }
             | ExprKind::Call { .. }
             | ExprKind::ArrayRepeat(..)
+            | ExprKind::If { .. }
+            | ExprKind::Match { .. }
+            | ExprKind::Loop(..)
+            | ExprKind::Break { .. }
+            | ExprKind::Return(..)
+            | ExprKind::LiteralBytes(..)
+            | ExprKind::LiteralVoid
             | ExprKind::LiteralValue { .. } => {
-                // WARNING: be wary of expressions that could alias locals!
+                // WARNING: be wary of expressions that could alias locals! (???)
                 let res = self.lower_expr(id, None);
                 Place::Local(res)
             }
@@ -1328,6 +1329,26 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         let refutable =
             self.match_pattern_internal(pat, Place::Local(source), false, match_result_slot);
+
+        if let Some(match_result_slot) = match_result_slot {
+            if !refutable {
+                self.out_bc.push(Instr::I8_Const(match_result_slot, 1));
+            }
+        }
+    }
+
+    fn match_pattern_place(
+        &mut self,
+        pat_id: PatternId,
+        source: Place,
+        match_result_slot: Option<Slot>,
+    ) {
+        let pat = self.in_func.pattern(pat_id);
+
+        // TODO: it was probably a mistake to even make this an option
+        let must_copy = true;
+
+        let refutable = self.match_pattern_internal(pat, source, must_copy, match_result_slot);
 
         if let Some(match_result_slot) = match_result_slot {
             if !refutable {
@@ -1599,6 +1620,49 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let (cmp_ctor, _) = bytecode_select::binary(BinaryOp::Eq, pat.ty);
                 self.out_bc
                     .push(cmp_ctor(match_result_slot, val_slot, lit_slot));
+                true
+            }
+            PatternKind::NamedConst(const_with_subs) => {
+                // refutable pattern, should have a result
+                let match_result_slot = match_result_slot.unwrap();
+
+                let val_slot = match source {
+                    Place::Local(slot) => slot,
+                    Place::Ptr(ref_slot, ref_offset) => {
+                        let ty = self.apply_subs(pat.ty);
+                        let slot = self.stack.alloc(ty);
+                        if let Some(instr) =
+                            bytecode_select::copy_from_ptr(slot, ref_slot, ty, ref_offset)
+                        {
+                            self.out_bc.push(instr);
+                        }
+                        slot
+                    }
+                };
+
+                // this is pretty gross, and probably not even sufficient for some cases:
+                // 1. load pointer to the constant
+                // 2. load constant to stack slot
+                // 3. compare
+
+                // fail early if there's no valid comparison (for a larger struct, most likely)
+                let (cmp_ctor, _) = bytecode_select::binary(BinaryOp::Eq, pat.ty);
+
+                let const_ptr = const_with_subs.item.const_value(&const_with_subs.subs);
+                let ptr_ty = self.vm.common_types().usize;
+                let ptr_slot = self.stack.alloc(ptr_ty);
+                self.out_bc.push(bytecode_select::literal(
+                    const_ptr.as_ptr() as usize as _,
+                    ptr_ty.layout().assert_size(),
+                    ptr_slot,
+                ));
+
+                let cmp_slot = self.stack.alloc(pat.ty);
+                self.out_bc
+                    .push(bytecode_select::copy_from_ptr(cmp_slot, ptr_slot, pat.ty, 0).unwrap());
+
+                self.out_bc
+                    .push(cmp_ctor(match_result_slot, cmp_slot, val_slot));
                 true
             }
             PatternKind::LiteralBytes(bytes) => {

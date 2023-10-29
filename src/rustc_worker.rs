@@ -19,8 +19,9 @@ use crate::{
     impls::{ImplBounds, ImplTable, ImplTableSimple},
     ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
-        ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
-        EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind, ItemPath, AdtTag,
+        ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AdtTag, AssocValue, BoundKind,
+        CrateId, EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind,
+        ItemPath,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -330,8 +331,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
                         let mut tag = AdtTag::None;
-                        
-                        if worker_config.crate_path.is_alloc() && item_path.as_string() == "::boxed::Box" {
+
+                        if worker_config.crate_path.is_alloc()
+                            && item_path.as_string() == "::boxed::Box"
+                        {
                             found_box = true;
                             tag = AdtTag::Box;
                         }
@@ -352,8 +355,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 HirItemKind::Enum(enum_def, _) => {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-
-                        let mut tag = AdtTag::None;
 
                         let kind = ItemKind::new_adt(AdtTag::None);
 

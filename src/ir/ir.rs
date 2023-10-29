@@ -306,6 +306,8 @@ pub enum PatternKind<'vm> {
         end: Vec<PatternId>,
     },
 
+    NamedConst(ItemWithSubs<'vm>),
+
     Hole,
 
     /// Error, for unsupported patterns
