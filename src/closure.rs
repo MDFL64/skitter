@@ -136,6 +136,10 @@ impl<'vm> Closure<'vm> {
         self.abstract_sig.set(sig).ok();
     }
 
+    pub fn env(&self, subs: &SubList<'vm>) -> Type<'vm> {
+        self.abstract_sig().env_ty.sub(subs)
+    }
+
     pub fn ir_for_trait(&self, kind: FnTrait, self_ty: Type<'vm>) -> Arc<IRFunction<'vm>> {
         match kind {
             FnTrait::Fn => self

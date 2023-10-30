@@ -121,9 +121,11 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
-            TypeKind::Closure(_, sig, _) => {
-                assert!(sig.env_ty.is_concrete());
-                sig.env_ty.layout().clone()
+            TypeKind::Closure(closure,subs) => {
+                let env_ty = closure.env(subs);
+
+                assert!(env_ty.is_concrete());
+                env_ty.layout().clone()
             }
             _ => panic!("can't layout: {:?}", kind),
         }

@@ -181,9 +181,9 @@ impl<'vm> TypeContext<'vm> {
 
                 let subs = self.subs_from_rustc(subs, ctx);
 
-                let (sig, subs) = ClosureSig::from_rustc_sub_repr(&subs);
+                let (_, subs) = ClosureSig::from_rustc_sub_repr(&subs);
 
-                TypeKind::Closure(closure, sig, subs)
+                TypeKind::Closure(closure, subs)
             }
 
             TyKind::Param(param) => TypeKind::Param(param.index),
@@ -341,6 +341,23 @@ impl<'vm> TypeContext<'vm> {
         let parent_item = self.def_from_rustc(parent_did, &[], ctx);
 
         parent_item.item.child_closure(full_path.as_string())
+    }
+
+    pub fn closure_sig_from_rustc<'tcx>(
+        &'vm self,
+        ty: Ty<'tcx>,
+        ctx: &RustCContext<'vm, 'tcx>,
+    ) -> ClosureSig<'vm> {
+        let kind = ty.kind();
+        match kind {
+            TyKind::Closure(_, subs) => {
+                let subs = self.subs_from_rustc(subs, ctx);
+
+                let (sig, _) = ClosureSig::from_rustc_sub_repr(&subs);
+                sig
+            }
+            _ => panic!("attempt to get closure sig for non-closure")
+        }
     }
 
     /// This is similar to closure_from_rustc. Sadly we still need multiple path indices, since

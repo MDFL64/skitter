@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    closure::{Closure, ClosureSig},
+    closure::Closure,
     items::{AdtInfo, CrateId, FunctionSig, Item, ItemId},
     vm::VM,
 };
@@ -41,7 +41,7 @@ pub enum TypeKind<'vm> {
 
     Opaque(ItemWithSubs<'vm>, &'vm str),
     FunctionPointer(FunctionSig<'vm>),
-    Closure(&'vm Closure<'vm>, ClosureSig<'vm>, SubList<'vm>),
+    Closure(&'vm Closure<'vm>, SubList<'vm>),
 
     // not properly implemented yet
     Dynamic {
@@ -232,17 +232,11 @@ impl<'vm> Type<'vm> {
 
                 assoc_ty.item.resolve_associated_ty(&new_subs)
             }
-            TypeKind::Closure(closure, closure_sig, closure_subs) => {
+            TypeKind::Closure(closure, closure_subs) => {
                 let new_subs = closure_subs.sub(subs);
 
-                let new_sig = ClosureSig {
-                    kind: closure_sig.kind,
-                    fn_ptr_ty: closure_sig.fn_ptr_ty.sub(subs),
-                    env_ty: closure_sig.env_ty.sub(subs),
-                };
-
                 vm.types
-                    .intern(TypeKind::Closure(closure, new_sig, new_subs), vm)
+                    .intern(TypeKind::Closure(closure, new_subs), vm)
             }
             TypeKind::FunctionPointer(sig) => {
                 let new_sig = sig.sub(subs);
@@ -311,8 +305,8 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
-            TypeKind::Closure(_, sig, subs) => {
-                sig.fn_ptr_ty.is_concrete() && sig.env_ty.is_concrete() && subs.is_concrete()
+            TypeKind::Closure(_, subs) => {
+                subs.is_concrete()
             }
             TypeKind::Dynamic { primary_trait, .. } => {
                 if let Some(primary_trait) = primary_trait {
@@ -347,8 +341,8 @@ impl<'vm> Type<'vm> {
             | TypeKind::FunctionDef(_)
             | TypeKind::FunctionPointer(_) => false,
             TypeKind::Tuple(children) => children.iter().any(|child| child.is_interior_mut()),
-            TypeKind::Closure(_, sig, _) => {
-                let env = sig.env_ty;
+            TypeKind::Closure(closure, subs) => {
+                let env = closure.env(subs);
                 assert!(env.is_concrete());
                 env.is_interior_mut()
             }

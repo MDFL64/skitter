@@ -145,21 +145,13 @@ impl<'vm> Persist<'vm> for TypeKind<'vm> {
                 writer.write_byte(33);
                 sig.persist_write(writer);
             }
-            TypeKind::Closure(closure, sig, subs) => {
+            TypeKind::Closure(closure, subs) => {
                 writer.write_byte(34);
 
-                // TODO: a lot of this is likely redundant, and could be pulled from the closure def and subs
-                // for now we just write everything
-
-                // write closure ref
+                // TODO wrap in a ClosureRef that can be serialized safely using this code:
                 closure.def_crate.persist_write(writer);
                 closure.def_item.persist_write(writer);
                 writer.write_str(closure.def_full_path);
-
-                // write sig
-                sig.kind.persist_write(writer);
-                sig.fn_ptr_ty.persist_write(writer);
-                sig.env_ty.persist_write(writer);
 
                 // write subs
                 subs.persist_write(writer);

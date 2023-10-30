@@ -279,7 +279,7 @@ impl BuiltinTrait {
                             _ => panic!(),
                         }
                     }
-                    TypeKind::Closure(closure, _, closure_subs) => {
+                    TypeKind::Closure(closure, closure_subs) => {
                         let fn_trait = match self {
                             BuiltinTrait::FnOnce => FnTrait::FnOnce,
                             BuiltinTrait::FnMut => FnTrait::FnMut,

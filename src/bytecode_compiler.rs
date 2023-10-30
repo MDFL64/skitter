@@ -854,7 +854,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         // similar to the above
                         PointerCast::ClosureFnPointer => {
                             let src_ty = self.expr_ty(*source);
-                            if let TypeKind::Closure(closure, _, subs) = src_ty.kind() {
+                            if let TypeKind::Closure(closure, subs) = src_ty.kind() {
                                 let dst_slot =
                                     dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
