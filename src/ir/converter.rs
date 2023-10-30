@@ -987,7 +987,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             PatternKind::Hole
                         }
                     }
-                    Res::Def(DefKind::Const, def_id) => {
+                    Res::Def(DefKind::Const | DefKind::AssocConst, def_id) => {
                         let const_item = self.ctx.vm.types.def_from_rustc(def_id, &[], &self.ctx);
 
                         PatternKind::NamedConst(const_item)

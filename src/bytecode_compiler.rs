@@ -98,8 +98,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             })
         }
 
-        for (pat, slot) in ir.params.iter().zip(param_slots) {
-            compiler.match_pattern_place(*pat, Place::Local(slot), None);
+        for (pat_id, slot) in ir.params.iter().zip(param_slots) {
+            let pat = compiler.in_func.pattern(*pat_id);
+            compiler.match_pattern_internal(pat, Place::Local(slot), true, None);
         }
 
         compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
@@ -205,13 +206,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ..
             } => {
                 assert!(else_block.is_none());
-                let source = if let Some(init) = init {
-                    self.expr_to_place(*init)
-                } else {
-                    let dst_slot = self.alloc_pattern(*pattern);
-                    Place::Local(dst_slot)
-                };
-                self.match_pattern_place(*pattern, source, None);
+
+                self.match_pattern_expr(*pattern, *init, None);
             }
             Stmt::Expr(expr) => {
                 self.lower_expr(*expr, None);
@@ -993,9 +989,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     // the bool result
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    let source = self.expr_to_place(*init);
-
-                    self.match_pattern_place(*pattern, source, Some(dst_slot));
+                    self.match_pattern_expr(*pattern, Some(*init), Some(dst_slot));
 
                     dst_slot
                 }
@@ -1370,20 +1364,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         slot
     }
 
-    /// Use to both setup variable bindings AND generate pattern matching code.
-    fn match_pattern(&mut self, pat_id: PatternId, source: Slot, match_result_slot: Option<Slot>) {
-        let pat = self.in_func.pattern(pat_id);
-
-        let refutable =
-            self.match_pattern_internal(pat, Place::Local(source), false, match_result_slot);
-
-        if let Some(match_result_slot) = match_result_slot {
-            if !refutable {
-                self.out_bc.push(Instr::I8_Const(match_result_slot, 1));
-            }
-        }
-    }
-
     fn match_pattern_place(
         &mut self,
         pat_id: PatternId,
@@ -1392,10 +1372,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     ) {
         let pat = self.in_func.pattern(pat_id);
 
-        // TODO: it was probably a mistake to even make this an option
-        let must_copy = true;
+        let can_alias = false;
 
-        let refutable = self.match_pattern_internal(pat, source, must_copy, match_result_slot);
+        let refutable = self.match_pattern_internal(pat, source, can_alias, match_result_slot);
 
         if let Some(match_result_slot) = match_result_slot {
             if !refutable {
@@ -1404,14 +1383,40 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    /// If must_copy is true, we must copy values from the source. Otherwise we are free to re-use locals.
+    /// WARNING: This lowers the expression -- do NOT use it repeatedly for match cases
+    fn match_pattern_expr(
+        &mut self,
+        pat_id: PatternId,
+        init_id: Option<ExprId>,
+        match_result_slot: Option<Slot>,
+    ) {
+        let (source, can_alias) = if let Some(init_id) = init_id {
+            let is_place = self.expr_is_place(init_id);
+            (self.expr_to_place(init_id), !is_place)
+        } else {
+            let slot = self.alloc_pattern(pat_id);
+            (Place::Local(slot), true)
+        };
+
+        let pat = self.in_func.pattern(pat_id);
+
+        let refutable = self.match_pattern_internal(pat, source, can_alias, match_result_slot);
+
+        if let Some(match_result_slot) = match_result_slot {
+            if !refutable {
+                self.out_bc.push(Instr::I8_Const(match_result_slot, 1));
+            }
+        }
+    }
+
+    /// If can_alias is false, we must copy values from the source. Otherwise we are free to re-use locals.
     /// The returned value indicates whether the pattern is refutable.
     /// If not, match_result_slot will NOT be written to, and the caller must assume the match was successful
     fn match_pattern_internal(
         &mut self,
         pat: &Pattern<'vm>,
         source: Place,
-        must_copy: bool,
+        can_alias: bool,
         match_result_slot: Option<Slot>,
     ) -> bool {
         match &pat.kind {
@@ -1423,7 +1428,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 match (mode, source) {
                     (BindingMode::Value, Place::Local(source_slot)) => {
                         // copy values if there are possible aliases
-                        if must_copy || sub_pattern.is_some() {
+                        if !can_alias || sub_pattern.is_some() {
                             let ty = self.apply_subs(pat.ty);
                             let var_slot = self.find_or_alloc_local(*local_id, ty);
                             if let Some(instr) = bytecode_select::copy(var_slot, source_slot, ty) {
@@ -1463,7 +1468,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 if let Some(sub_pattern) = sub_pattern {
                     // copy values if there are possible aliases
                     let sub_pattern = self.in_func.pattern(*sub_pattern);
-                    self.match_pattern_internal(sub_pattern, source, true, match_result_slot)
+                    self.match_pattern_internal(sub_pattern, source, false, match_result_slot)
                 } else {
                     false
                 }
@@ -1481,7 +1486,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let refutable = self.match_pattern_internal(
                         field_pattern,
                         source.offset_by(offset as i32),
-                        must_copy,
+                        can_alias,
                         match_result_slot,
                     );
                     result |= refutable;
@@ -1532,7 +1537,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     self.match_pattern_internal(
                         &fake_pattern,
                         source,
-                        must_copy,
+                        can_alias,
                         match_result_slot,
                     );
                     jump_gaps.push(self.skip_instr());
@@ -1547,7 +1552,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let refutable = self.match_pattern_internal(
                         field_pattern,
                         source.offset_by(offset as i32),
-                        must_copy,
+                        can_alias,
                         match_result_slot,
                     );
 
@@ -1585,7 +1590,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     // always copy values since a local may appear multiple times
                     let refutable =
-                        self.match_pattern_internal(option, source, true, match_result_slot);
+                        self.match_pattern_internal(option, source, false, match_result_slot);
                     if !refutable {
                         // irrefutable pattern, no point in testing anything else
                         result = false;
@@ -1617,11 +1622,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             PatternKind::DeRef { sub_pattern } => {
                 let sub_pattern = self.in_func.pattern(*sub_pattern);
                 match source {
-                    // must_copy is probably irrelevant at this stage
+                    // aliasing is probably irrelevant at this stage
                     Place::Local(source_slot) => self.match_pattern_internal(
                         sub_pattern,
                         Place::Ptr(source_slot, 0),
-                        true,
+                        false,
                         match_result_slot,
                     ),
                     Place::Ptr(ptr_slot, ptr_offset) => {
@@ -1635,7 +1640,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.match_pattern_internal(
                             sub_pattern,
                             Place::Ptr(new_slot, 0),
-                            true,
+                            false,
                             match_result_slot,
                         )
                     }
@@ -1843,7 +1848,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
-                                must_copy,
+                                can_alias,
                                 match_result_slot,
                             );
                             result |= refutable;
@@ -1873,7 +1878,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
-                                must_copy,
+                                can_alias,
                                 match_result_slot,
                             );
                             result |= refutable;
@@ -1893,7 +1898,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
-                                must_copy,
+                                can_alias,
                                 match_result_slot,
                             );
                             result |= refutable;
@@ -1975,7 +1980,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let refutable = self.match_pattern_internal(
                                 sub_pat,
                                 source.offset_by(offset),
-                                must_copy,
+                                can_alias,
                                 match_result_slot,
                             );
 
@@ -2042,7 +2047,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 let refutable = self.match_pattern_internal(
                                     sub_pat,
                                     Place::Ptr(end_slot, offset),
-                                    must_copy,
+                                    can_alias,
                                     match_result_slot,
                                 );
 
