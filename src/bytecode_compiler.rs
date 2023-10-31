@@ -712,21 +712,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
                 }
-                /*ExprKind::DeRef(arg) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
-
-                    let ptr = self.lower_expr(*arg, None);
-
-                    if let Some(instr) = bytecode_select::copy_from_ptr(dst_slot, ptr, expr_ty, 0) {
-                        self.out_bc.push(instr);
-                    }
-
-                    dst_slot
-                }*/
                 ExprKind::PointerCast(source, cast) => {
                     match cast {
                         PointerCast::UnSize => {
-                            println!("? {}", expr_ty);
                             assert_eq!(expr_ty.layout().assert_size(), POINTER_SIZE.bytes() * 2);
 
                             let mut src_ty = self
