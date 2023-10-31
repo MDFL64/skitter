@@ -121,7 +121,7 @@ impl Layout {
             }
             TypeKind::FunctionDef(_) => Layout::simple(0),
             TypeKind::Never => Layout::simple(0),
-            TypeKind::Closure(closure,subs) => {
+            TypeKind::Closure(closure, subs) => {
                 let env_ty = closure.env(subs);
 
                 assert!(env_ty.is_concrete());
@@ -146,6 +146,8 @@ impl Layout {
             0
         };
 
+        let mut is_unsized = false;
+
         let field_offsets = variants
             .map(|fields| {
                 let mut size = base_size;
@@ -157,8 +159,11 @@ impl Layout {
 
                         let offset = size;
 
-                        // todo unsized structs
-                        size += layout.assert_size();
+                        if let Some(field_size) = layout.maybe_size {
+                            size += field_size;
+                        } else {
+                            is_unsized = true;
+                        }
                         align = align.max(layout.align);
 
                         offset
@@ -169,10 +174,14 @@ impl Layout {
             })
             .collect();
 
-        full_size = crate::abi::align(full_size, align);
+        let maybe_size = if is_unsized {
+            None
+        } else {
+            Some(crate::abi::align(full_size, align))
+        };
 
         Layout {
-            maybe_size: Some(full_size),
+            maybe_size,
             align,
             field_offsets,
         }

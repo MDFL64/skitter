@@ -726,23 +726,42 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ExprKind::PointerCast(source, cast) => {
                     match cast {
                         PointerCast::UnSize => {
+                            println!("? {}", expr_ty);
                             assert_eq!(expr_ty.layout().assert_size(), POINTER_SIZE.bytes() * 2);
 
-                            fn get_ref_ty<'vm>(ty: Type<'vm>) -> Type<'vm> {
-                                match ty.kind() {
-                                    TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => *ref_ty,
-                                    TypeKind::Adt(adt_item) => match adt_item.item.adt_tag() {
-                                        AdtTag::Box => adt_item.subs.list[0].assert_ty(),
-                                        AdtTag::None => {
-                                            panic!("get ref: {}", ty);
+                            let mut src_ty = self
+                                .expr_ty(*source)
+                                .try_get_ref_ty()
+                                .expect("pointer cast: no src ref");
+
+                            let mut dst_ty = expr_ty
+                                .try_get_ref_ty()
+                                .expect("pointer cast: no dst ref");
+
+                            // handle structs by finding the changed element in their sub list
+                            // this is NOT super robust, but should be good enough for our purposes
+                            {
+                                match (src_ty.kind(),dst_ty.kind()) {
+                                    (TypeKind::Adt(src_item),TypeKind::Adt(dst_item)) => {
+                                        assert!(src_item.item == dst_item.item);
+
+                                        let mut changed_index = None;
+
+                                        for (i,(a,b)) in src_item.subs.list.iter().zip(&dst_item.subs.list).enumerate() {
+                                            if a != b {
+                                                assert!(changed_index.is_none());
+                                                changed_index = Some(i);
+                                            }
                                         }
-                                    },
-                                    _ => panic!("get ref: {}", ty),
+
+                                        let changed_index = changed_index.expect("no single changed index");
+
+                                        src_ty = src_item.subs.list[changed_index].assert_ty();
+                                        dst_ty = dst_item.subs.list[changed_index].assert_ty();
+                                    }
+                                    _ => ()
                                 }
                             }
-
-                            let src_ty = get_ref_ty(self.expr_ty(*source));
-                            let dst_ty = get_ref_ty(expr_ty);
 
                             let meta = match (src_ty.kind(), dst_ty.kind()) {
                                 (TypeKind::Array(_, elem_count), TypeKind::Slice(_)) => {

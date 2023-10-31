@@ -504,6 +504,13 @@ impl<'vm> AdtInfo<'vm> {
         }
     }
 
+    pub fn is_struct(&self) -> bool {
+        match self.kind {
+            AdtKind::Struct => true,
+            _ => false,
+        }
+    }
+
     pub fn is_union(&self) -> bool {
         match self.kind {
             AdtKind::Union => true,

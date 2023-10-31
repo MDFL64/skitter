@@ -131,6 +131,18 @@ impl<'vm> Type<'vm> {
                 assert!(!is_dyn_star);
                 false
             }
+            // unsized structs:
+            TypeKind::Adt(item) => {
+                let adt_info = item.item.adt_info();
+                if adt_info.is_struct() {
+                    let fields = &adt_info.variant_fields[0];
+                    if let Some(field) = fields.last() {
+                        let end_ty = field.sub(&item.subs);
+                        return end_ty.is_sized();
+                    }
+                }
+                true
+            }
             _ => true,
         }
     }
@@ -235,8 +247,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Closure(closure, closure_subs) => {
                 let new_subs = closure_subs.sub(subs);
 
-                vm.types
-                    .intern(TypeKind::Closure(closure, new_subs), vm)
+                vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
             }
             TypeKind::FunctionPointer(sig) => {
                 let new_sig = sig.sub(subs);
@@ -305,9 +316,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Tuple(children) => children.iter().all(|child| child.is_concrete()),
             TypeKind::Adt(adt) => adt.subs.is_concrete(),
             TypeKind::FunctionDef(fun) => fun.subs.is_concrete(),
-            TypeKind::Closure(_, subs) => {
-                subs.is_concrete()
-            }
+            TypeKind::Closure(_, subs) => subs.is_concrete(),
             TypeKind::Dynamic { primary_trait, .. } => {
                 if let Some(primary_trait) = primary_trait {
                     primary_trait.subs.is_concrete()
@@ -411,6 +420,26 @@ impl<'vm> Type<'vm> {
     pub fn func_item(&self) -> Option<ItemWithSubs<'vm>> {
         match self.kind() {
             TypeKind::FunctionDef(item) => Some(item.clone()),
+            _ => None,
+        }
+    }
+
+    /// Attempts to re-interpret this type as a reference or pointer, and get the referenced type.
+    ///
+    /// DO NOT USE if you just want to get the referenced type from a reference or pointer.
+    pub fn try_get_ref_ty(&self) -> Option<Type<'vm>> {
+        match self.kind() {
+            TypeKind::Ptr(ref_ty, _) | TypeKind::Ref(ref_ty, _) => Some(*ref_ty),
+            TypeKind::Adt(adt_item) => {
+                let adt_info = adt_item.item.adt_info();
+                if adt_info.is_struct() {
+                    if let Some(field) = adt_info.variant_fields[0].first() {
+                        let field_ty = field.sub(&adt_item.subs);
+                        return field_ty.try_get_ref_ty();
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }

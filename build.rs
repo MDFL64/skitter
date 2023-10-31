@@ -400,6 +400,7 @@ fn write_exec_match() {
     write_bulk_move_ps("MovPS1N", "u8", &mut source);
     write_bulk_move_ps("MovPS4N", "u32", &mut source);
     write_bulk_move_ps("MovPS8N", "u64", &mut source);
+    write_bulk_move_ps("MovPS16N", "u128", &mut source);
 
     source.push_str(
         r#"

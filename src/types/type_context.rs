@@ -356,7 +356,7 @@ impl<'vm> TypeContext<'vm> {
                 let (sig, _) = ClosureSig::from_rustc_sub_repr(&subs);
                 sig
             }
-            _ => panic!("attempt to get closure sig for non-closure")
+            _ => panic!("attempt to get closure sig for non-closure"),
         }
     }
 

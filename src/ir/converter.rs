@@ -512,11 +512,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     IRFunctionConverter::run(self.ctx, self.func_id, body, types, IRKind::Function);
                 replace_captures(&mut ir, &captures);
 
-                let abstract_sig = self
-                    .ctx
-                    .vm
-                    .types
-                    .closure_sig_from_rustc(rs_ty, self.ctx);
+                let abstract_sig = self.ctx.vm.types.closure_sig_from_rustc(rs_ty, self.ctx);
 
                 let TypeKind::Closure(_, abstract_subs) = ty.kind() else {
                     panic!("closure type is incorrect");
