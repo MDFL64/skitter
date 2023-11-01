@@ -14,6 +14,7 @@ pub fn main() {
     }
     {
         let rc_slice: Rc<[u64]> = Rc::new([1,2,3,4]);
-        let x: u64 = rc_slice.iter().sum();
+        let sum: u64 = rc_slice.iter().sum();
+        _builtin::print_int(sum as _);
     }
 }

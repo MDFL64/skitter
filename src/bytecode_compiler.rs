@@ -7,7 +7,7 @@ use crate::ir::{
     BinaryOp, BindingMode, Block, ExprId, ExprKind, IRFunction, LogicOp, LoopId, MatchGuard,
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
-use crate::items::{AdtTag, FunctionAbi};
+use crate::items::FunctionAbi;
 use crate::types::{ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
@@ -159,14 +159,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 let ptr = vm.alloc_constant(data).as_ptr() as usize;
                 (ptr, None)
             }
-            Place::Ptr(slot, offset) => {
+            Place::Ptr(slot, offset, ptr_kind) => {
                 assert!(offset == 0);
 
                 let ptr = const_thread.copy_ptr(slot);
-                let meta = if compiler.expr_ty(root_expr).is_sized() {
-                    None
-                } else {
+                let meta = if ptr_kind.is_fat() {
                     Some(const_thread.copy_ptr(slot.offset_by(POINTER_SIZE.bytes() as i32)))
+                } else {
+                    None
                 };
 
                 (ptr, meta)
@@ -232,7 +232,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         local_slot
                     }
                 }
-                Place::Ptr(ptr_slot, offset) => {
+                Place::Ptr(ptr_slot, offset, _) => {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     if let Some(instr) =
@@ -338,7 +338,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 self.out_bc.push(instr);
                             }
                         }
-                        Place::Ptr(ptr_slot, offset) => {
+                        Place::Ptr(ptr_slot, offset, _) => {
                             if let Some(instr) =
                                 bytecode_select::copy_to_ptr(ptr_slot, rhs_slot, assign_ty, offset)
                             {
@@ -362,7 +362,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         Place::Local(lhs_slot) => {
                             self.out_bc.push(ctor(lhs_slot, lhs_slot, rhs_slot));
                         }
-                        Place::Ptr(ptr_slot, offset) => {
+                        Place::Ptr(ptr_slot, offset, _) => {
                             let assign_ty = self.expr_ty(*lhs);
 
                             let tmp_slot = self.stack.alloc(assign_ty);
@@ -656,9 +656,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                             self.out_bc.push(Instr::SlotAddr(dst_slot, src_slot));
+                            // unsized types not a problem (can't appear on stack)
                             dst_slot
                         }
-                        Place::Ptr(src_slot, offset) => {
+                        Place::Ptr(src_slot, offset, ptr_kind) => {
+                            let dst_size = expr_ty.layout().assert_size();
+                            let is_dst_fat = dst_size == POINTER_SIZE.bytes() * 2;
+
                             let is_mut =
                                 *ref_mutability == Mutability::Mut || arg_ty.is_interior_mut();
                             let copy_alloc = is_mut && self.in_func.is_const_alloc(*arg);
@@ -668,6 +672,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                                 // allocation copying and const promotion should be mutually exclusive
                                 assert!(!const_promote);
+
+                                // todo?!?
+                                assert!(!is_dst_fat);
 
                                 let copy_slot = self.stack.alloc(arg_ty);
 
@@ -684,17 +691,29 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                                 dst_slot
                             } else {
-                                let ref_size = expr_ty.layout().assert_size();
-
                                 if offset != 0 {
-                                    // todo fat pointers
-                                    assert!(ref_size == POINTER_SIZE.bytes());
-
                                     let dst_slot =
                                         dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                     self.out_bc
                                         .push(Instr::PointerOffset2(dst_slot, src_slot, offset));
+
+                                    if is_dst_fat {
+                                        assert!(ptr_kind.is_fat());
+                                        let ptr_size = POINTER_SIZE.bytes();
+                                        let usize_ty = self.vm.common_types().usize;
+
+                                        assert!(expr_ty.layout().assert_size() == ptr_size * 2);
+                                        self.out_bc.push(
+                                            bytecode_select::copy(
+                                                dst_slot.offset_by(ptr_size as i32),
+                                                src_slot.offset_by(ptr_size as i32),
+                                                usize_ty,
+                                            )
+                                            .unwrap(),
+                                        );
+                                    }
+
                                     dst_slot
                                 } else {
                                     if let Some(dst_slot) = dst_slot {
@@ -702,6 +721,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                             bytecode_select::copy(dst_slot, src_slot, expr_ty)
                                                 .unwrap(),
                                         );
+                                        if is_dst_fat {
+                                            assert!(ptr_kind.is_fat());
+                                        }
 
                                         dst_slot
                                     } else {
@@ -722,32 +744,38 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 .try_get_ref_ty()
                                 .expect("pointer cast: no src ref");
 
-                            let mut dst_ty = expr_ty
-                                .try_get_ref_ty()
-                                .expect("pointer cast: no dst ref");
+                            let mut dst_ty =
+                                expr_ty.try_get_ref_ty().expect("pointer cast: no dst ref");
 
                             // handle structs by finding the changed element in their sub list
                             // this is NOT super robust, but should be good enough for our purposes
                             {
-                                match (src_ty.kind(),dst_ty.kind()) {
-                                    (TypeKind::Adt(src_item),TypeKind::Adt(dst_item)) => {
+                                match (src_ty.kind(), dst_ty.kind()) {
+                                    (TypeKind::Adt(src_item), TypeKind::Adt(dst_item)) => {
                                         assert!(src_item.item == dst_item.item);
 
                                         let mut changed_index = None;
 
-                                        for (i,(a,b)) in src_item.subs.list.iter().zip(&dst_item.subs.list).enumerate() {
+                                        for (i, (a, b)) in src_item
+                                            .subs
+                                            .list
+                                            .iter()
+                                            .zip(&dst_item.subs.list)
+                                            .enumerate()
+                                        {
                                             if a != b {
                                                 assert!(changed_index.is_none());
                                                 changed_index = Some(i);
                                             }
                                         }
 
-                                        let changed_index = changed_index.expect("no single changed index");
+                                        let changed_index =
+                                            changed_index.expect("no single changed index");
 
                                         src_ty = src_item.subs.list[changed_index].assert_ty();
                                         dst_ty = dst_item.subs.list[changed_index].assert_ty();
                                     }
-                                    _ => ()
+                                    _ => (),
                                 }
                             }
 
@@ -1121,8 +1149,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             match &expr.kind {
                 ExprKind::Dummy(value) => self.expr_to_place(*value),
                 ExprKind::DeRef(arg) => {
+                    let arg_ty = self.expr_ty(id);
+                    let ptr_kind = if arg_ty.is_sized() {
+                        PointerKind::Thin
+                    } else {
+                        PointerKind::Fat
+                    };
                     let addr_slot = self.lower_expr(*arg, None);
-                    Place::Ptr(addr_slot, 0)
+                    Place::Ptr(addr_slot, 0, ptr_kind)
                 }
                 ExprKind::VarRef(local_id) => {
                     let local_slot = self.find_local(*local_id);
@@ -1139,6 +1173,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         FnTrait::Fn | FnTrait::FnMut => {
                             let ref_ty = expr.ty.ref_to(Mutability::Const);
 
+                            // assert thin pointer is correct
+                            assert!(ref_ty.layout().assert_size() == POINTER_SIZE.bytes());
+
                             if upvar.is_ref {
                                 let upvar_ref = self.stack.alloc(ref_ty);
 
@@ -1151,16 +1188,17 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                     )
                                     .unwrap(),
                                 );
-                                Place::Ptr(upvar_ref, 0)
+                                Place::Ptr(upvar_ref, 0, PointerKind::Thin)
                             } else {
-                                Place::Ptr(closure.self_slot, field_offset)
+                                Place::Ptr(closure.self_slot, field_offset, PointerKind::Thin)
                             }
                         }
                         // self is a tuple-like env (not a ref)
                         FnTrait::FnOnce => {
                             let field_slot = closure.self_slot.offset_by(field_offset);
                             if upvar.is_ref {
-                                Place::Ptr(field_slot, 0)
+                                // stored inline, must be a thin pointer
+                                Place::Ptr(field_slot, 0, PointerKind::Thin)
                             } else {
                                 Place::Local(field_slot)
                             }
@@ -1208,7 +1246,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                         offset: index_slot,
                                     });
                                 }
-                                Place::Ptr(ptr_slot, offset) => {
+                                Place::Ptr(ptr_slot, offset, _) => {
                                     self.out_bc
                                         .push(Instr::PointerOffset3(index_slot, ptr_slot, offset));
                                 }
@@ -1218,7 +1256,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let elem_size = elem_ty.layout().assert_size();
 
                             let lhs_place = self.expr_to_place(*lhs);
-                            if let Place::Ptr(ptr_slot, offset) = lhs_place {
+                            if let Place::Ptr(ptr_slot, offset, ptr_kind) = lhs_place {
+                                assert!(ptr_kind.is_fat());
                                 assert_eq!(offset, 0);
                                 let elem_count = ptr_slot.offset_by(POINTER_SIZE.bytes() as i32);
                                 self.out_bc.push(Instr::IndexCalcDyn {
@@ -1234,7 +1273,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                         _ => panic!("cannot index {} with {}", lhs_ty, index_ty),
                     }
-                    Place::Ptr(index_slot, 0)
+                    // must be a thin pointer, stored inline in array
+                    Place::Ptr(index_slot, 0, PointerKind::Thin)
                 }
                 ExprKind::ConstBlock(const_ir) => {
                     let bc = BytecodeCompiler::compile(
@@ -1262,7 +1302,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         ptr_slot,
                     ));
 
-                    Place::Ptr(ptr_slot, 0)
+                    // TODO unsized?
+                    assert!(ptr_size == POINTER_SIZE.bytes());
+                    Place::Ptr(ptr_slot, 0, PointerKind::Thin)
                 }
                 ExprKind::NamedConst(const_ref) => {
                     let ty = self.expr_ty(id);
@@ -1280,7 +1322,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         ptr_slot,
                     ));
 
-                    Place::Ptr(ptr_slot, 0)
+                    // TODO unsized?
+                    assert!(ptr_size == POINTER_SIZE.bytes());
+                    Place::Ptr(ptr_slot, 0, PointerKind::Thin)
                 }
                 ExprKind::Static(static_ref) => {
                     let ty = self.expr_ty(id);
@@ -1293,7 +1337,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     self.out_bc
                         .push(bytecode_select::literal(static_ptr, ptr_size, ptr_slot));
 
-                    Place::Ptr(ptr_slot, 0)
+                    // TODO unsized?
+                    assert!(ptr_size == POINTER_SIZE.bytes());
+                    Place::Ptr(ptr_slot, 0, PointerKind::Thin)
                 }
                 _ => panic!("expr_to_place {:?}", expr.kind),
             }
@@ -1446,7 +1492,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             self.locals.push((*local_id, source_slot));
                         }
                     }
-                    (BindingMode::Value, Place::Ptr(ref_slot, ref_offset)) => {
+                    (BindingMode::Value, Place::Ptr(ref_slot, ref_offset, ptr_kind)) => {
+                        assert!(ptr_kind.is_thin());
                         // copy value from pointer
                         let ty = self.apply_subs(pat.ty);
                         let var_slot = self.find_or_alloc_local(*local_id, ty);
@@ -1463,13 +1510,36 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         self.out_bc.push(Instr::SlotAddr(var_slot, source_slot));
                     }
-                    (BindingMode::Ref, Place::Ptr(ref_slot, ref_offset)) => {
+                    (BindingMode::Ref, Place::Ptr(ref_slot, ref_offset, ptr_kind)) => {
                         // offset pointer
                         let ref_ty = self.apply_subs(pat.ty);
                         let var_slot = self.find_or_alloc_local(*local_id, ref_ty);
 
                         self.out_bc
                             .push(Instr::PointerOffset2(var_slot, ref_slot, ref_offset));
+
+                        let ref_size = ref_ty.layout().assert_size();
+                        let ptr_size = POINTER_SIZE.bytes();
+
+                        // assert the RESULT POINTER is thin
+                        if ref_size != ptr_size {
+                            assert!(ptr_kind.is_fat());
+                            panic!(".");
+                        }
+                        /*if ptr_kind.is_fat() {
+                            println!("??? {}",ref_ty);
+                            let usize_ty = self.vm.common_types().usize;
+
+                            assert!(ref_ty.layout().assert_size() == ptr_size * 2);
+                            self.out_bc.push(
+                                bytecode_select::copy(
+                                    var_slot.offset_by(ptr_size as i32),
+                                    ref_slot.offset_by(ptr_size as i32),
+                                    usize_ty,
+                                )
+                                .unwrap(),
+                            );
+                        }*/
                     }
                 }
                 if let Some(sub_pattern) = sub_pattern {
@@ -1627,26 +1697,34 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 result
             }
             PatternKind::DeRef { sub_pattern } => {
+                let pat_ty = self.apply_subs(pat.ty);
+                let sub_ty = self.apply_subs(self.in_func.pattern(*sub_pattern).ty);
+                let ptr_kind = if sub_ty.is_sized() {
+                    PointerKind::Thin
+                } else {
+                    PointerKind::Fat
+                };
+
                 let sub_pattern = self.in_func.pattern(*sub_pattern);
                 match source {
                     // aliasing is probably irrelevant at this stage
                     Place::Local(source_slot) => self.match_pattern_internal(
                         sub_pattern,
-                        Place::Ptr(source_slot, 0),
+                        Place::Ptr(source_slot, 0, ptr_kind),
                         false,
                         match_result_slot,
                     ),
-                    Place::Ptr(ptr_slot, ptr_offset) => {
-                        let new_slot = self.stack.alloc(pat.ty);
+                    Place::Ptr(ptr_slot, ptr_offset, _) => {
+                        let new_slot = self.stack.alloc(pat_ty);
                         if let Some(copy) =
-                            bytecode_select::copy_from_ptr(new_slot, ptr_slot, pat.ty, ptr_offset)
+                            bytecode_select::copy_from_ptr(new_slot, ptr_slot, pat_ty, ptr_offset)
                         {
                             self.out_bc.push(copy);
                         }
 
                         self.match_pattern_internal(
                             sub_pattern,
-                            Place::Ptr(new_slot, 0),
+                            Place::Ptr(new_slot, 0, ptr_kind),
                             false,
                             match_result_slot,
                         )
@@ -1659,7 +1737,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let val_slot = match source {
                     Place::Local(slot) => slot,
-                    Place::Ptr(ref_slot, ref_offset) => {
+                    Place::Ptr(ref_slot, ref_offset, _) => {
                         let ty = self.apply_subs(pat.ty);
                         let slot = self.stack.alloc(ty);
                         if let Some(instr) =
@@ -1687,7 +1765,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let val_slot = match source {
                     Place::Local(slot) => slot,
-                    Place::Ptr(ref_slot, ref_offset) => {
+                    Place::Ptr(ref_slot, ref_offset, _) => {
                         let ty = self.apply_subs(pat.ty);
                         let slot = self.stack.alloc(ty);
                         if let Some(instr) =
@@ -1730,7 +1808,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let val_slot = match source {
                     Place::Local(slot) => slot,
-                    Place::Ptr(ref_slot, ref_offset) => {
+                    Place::Ptr(ref_slot, ref_offset, _) => {
                         let ty = self.apply_subs(pat.ty);
                         let slot = self.stack.alloc(ty);
                         if let Some(instr) =
@@ -1782,7 +1860,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 let val_slot = match source {
                     Place::Local(slot) => slot,
-                    Place::Ptr(ref_slot, ref_offset) => {
+                    Place::Ptr(ref_slot, ref_offset, _) => {
                         let ty = self.apply_subs(pat.ty);
                         let slot = self.stack.alloc(ty);
                         if let Some(instr) =
@@ -1937,10 +2015,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         let len_req = start.len() + end.len();
                         let len_req_is_exact = mid.is_none();
 
-                        let Place::Ptr(ref_slot, ref_offset) = source else {
+                        let Place::Ptr(ref_slot, ref_offset,ptr_kind) = source else {
                             panic!("attempt to match value slice");
                         };
                         assert!(ref_offset == 0);
+                        assert!(ptr_kind.is_fat());
 
                         let len_slot = ref_slot.offset_by(POINTER_SIZE.bytes() as i32);
                         let elem_size = elem_ty.layout().assert_size();
@@ -2053,7 +2132,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 let offset = i as i32 * elem_size as i32;
                                 let refutable = self.match_pattern_internal(
                                     sub_pat,
-                                    Place::Ptr(end_slot, offset),
+                                    Place::Ptr(end_slot, offset, PointerKind::Thin),
                                     can_alias,
                                     match_result_slot,
                                 );
@@ -2133,15 +2212,34 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 enum Place {
     Local(Slot),
     /// Pointer with offset
-    Ptr(Slot, i32),
+    Ptr(Slot, i32, PointerKind),
 }
 
 impl Place {
     pub fn offset_by(&self, n: i32) -> Self {
         match self {
             Place::Local(slot) => Place::Local(slot.offset_by(n)),
-            Place::Ptr(slot, offset) => Place::Ptr(*slot, offset + n),
+            Place::Ptr(slot, offset, kind) => Place::Ptr(*slot, offset + n, *kind),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PointerKind {
+    Thin,
+    Fat,
+}
+
+impl PointerKind {
+    fn is_fat(&self) -> bool {
+        match self {
+            PointerKind::Thin => false,
+            PointerKind::Fat => true,
+        }
+    }
+
+    fn is_thin(&self) -> bool {
+        !self.is_fat()
     }
 }
 
