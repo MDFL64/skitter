@@ -4,7 +4,7 @@ use ahash::AHashMap;
 
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
-    items::{CrateId, Item, ItemId},
+    items::{CrateId, ItemId},
     persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
@@ -130,8 +130,8 @@ impl<'vm> Closure<'vm> {
         self.ir_base.get().expect("no ir for closure").clone()
     }
 
-    pub fn set_ir_base(&self, ir: IRFunction<'vm>) {
-        self.ir_base.set(Arc::new(ir)).ok();
+    pub fn set_ir_base(&self, ir: Arc<IRFunction<'vm>>) {
+        self.ir_base.set(ir).ok();
     }
 
     pub fn abstract_sig(&self) -> ClosureSig<'vm> {
@@ -257,7 +257,7 @@ impl<'vm> Persist<'vm> for Closure<'vm> {
         self.def_full_path.persist_write(writer);
 
         self.abstract_sig.get().unwrap().persist_write(writer);
-        //self.ir_base.get().unwrap().persist_write(writer);
+        self.ir_base.get().unwrap().persist_write(writer);
     }
 
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
@@ -267,7 +267,7 @@ impl<'vm> Persist<'vm> for Closure<'vm> {
 
         let result = Self::new(def_item_id, def_crate_id, def_full_path, reader.context.vm);
         result.set_abstract_sig(Persist::persist_read(reader));
-        //result.set_ir_base(Persist::persist_read(reader));
+        result.set_ir_base(Persist::persist_read(reader));
         result
     }
 }

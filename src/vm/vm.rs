@@ -13,7 +13,6 @@ use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
-use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -27,8 +26,8 @@ use crate::value_debug::print_value;
 use crate::vm::instr::Slot;
 
 use std::{
-    borrow::Cow, sync::atomic::AtomicPtr, sync::atomic::AtomicU32, sync::atomic::Ordering,
-    sync::Arc, sync::Mutex, sync::OnceLock, sync::RwLock,
+    borrow::Cow, sync::atomic::AtomicPtr, sync::atomic::Ordering, sync::Arc, sync::Mutex,
+    sync::OnceLock, sync::RwLock,
 };
 
 use super::externs::get_extern_fn;

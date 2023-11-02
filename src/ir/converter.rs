@@ -534,7 +534,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 }
 
                 closure.set_abstract_sig(abstract_sig);
-                closure.set_ir_base(ir);
+                closure.set_ir_base(Arc::new(ir));
 
                 ExprKind::Tuple(capture_exprs)
             }

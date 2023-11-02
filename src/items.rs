@@ -181,34 +181,47 @@ impl<'vm> LazyKey<'vm> for &'vm Item<'vm> {
     }
 }
 
-fn write_closures<'vm>(
+// write both the IR *and* closures to the same lazy-parsed block
+fn write_item_ir<'vm>(
+    ir: &Mutex<Option<Arc<IRFunction<'vm>>>>,
     closures: &Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     writer: &mut PersistWriter<'vm>,
-) {
+) -> Vec<u8> {
+    let ir = ir.lock().unwrap();
     let closures = closures.lock().unwrap();
 
-    closures.len().persist_write(writer);
+    let mut writer = writer.new_child_writer();
+    ir.persist_write(&mut writer);
+
+    closures.len().persist_write(&mut writer);
     for (key, val) in closures.iter() {
         assert!(*key == val.def_full_path);
         let closure: &Closure = &val;
-        closure.persist_write(writer);
+        closure.persist_write(&mut writer);
     }
+
+    writer.flip()
 }
 
-fn read_closures<'vm>(
+pub fn read_item_ir<'vm>(
     reader: &mut PersistReader<'vm>,
-) -> Mutex<AHashMap<&'vm str, ClosureRef<'vm>>> {
-    let count = usize::persist_read(reader);
-    let mut res = AHashMap::with_capacity(count);
+    item: &'vm Item<'vm>,
+) -> Option<Arc<IRFunction<'vm>>> {
+    let ir = Option::<IRFunction>::persist_read(reader).map(|ir| Arc::new(ir));
 
-    for _ in 0..count {
-        let closure = Closure::persist_read(reader);
-        let val = reader.context.vm.alloc_closure(closure);
-        let key = val.def_full_path;
-        res.insert(key, val);
+    // YUCKY HACK: we write closures into the item here
+    let closure_count = usize::persist_read(reader);
+
+    for _ in 0..closure_count {
+        let src_closure = Closure::persist_read(reader);
+        let key = src_closure.def_full_path;
+
+        let dst_closure = item.child_closure(key);
+        dst_closure.set_abstract_sig(src_closure.abstract_sig());
+        dst_closure.set_ir_base(src_closure.ir_base());
     }
 
-    Mutex::new(res)
+    ir
 }
 
 impl<'vm> Persist<'vm> for Item<'vm> {
@@ -228,19 +241,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
-                write_closures(&closures, writer);
                 extern_name.persist_write(writer);
 
-                let ir_block = ir
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|ir| {
-                        let mut writer = writer.new_child_writer();
-                        ir.persist_write(&mut writer);
-                        writer.flip()
-                    })
-                    .unwrap_or_else(|| Vec::new());
+                let ir_block = write_item_ir(ir, closures, writer);
 
                 writer.write_byte_slice(&ir_block);
             }
@@ -255,18 +258,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
-                write_closures(&closures, writer);
-
-                let ir_block = ir
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|ir| {
-                        let mut writer = writer.new_child_writer();
-                        ir.persist_write(&mut writer);
-                        writer.flip()
-                    })
-                    .unwrap_or_else(|| Vec::new());
+                let ir_block = write_item_ir(ir, closures, writer);
 
                 writer.write_byte_slice(&ir_block);
             }
@@ -278,19 +270,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             } => {
                 writer.write_byte('s' as u8);
 
-                write_closures(&closures, writer);
                 extern_name.persist_write(writer);
 
-                let ir_block = ir
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|ir| {
-                        let mut writer = writer.new_child_writer();
-                        ir.persist_write(&mut writer);
-                        writer.flip()
-                    })
-                    .unwrap_or_else(|| Vec::new());
+                let ir_block = write_item_ir(ir, closures, writer);
 
                 writer.write_byte_slice(&ir_block);
             }
@@ -335,7 +317,6 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
                     Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
-                let closures = read_closures(reader);
                 let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
 
                 let kind = ItemKind::Function {
@@ -344,7 +325,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     virtual_info,
                     extern_name,
                     ctor_for,
-                    closures,
+                    closures: Default::default(),
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -353,14 +334,13 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
                     Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
-                let closures = read_closures(reader);
 
                 let kind = ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
                     virtual_info,
                     ctor_for,
-                    closures,
+                    closures: Default::default(),
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -379,7 +359,6 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 }
             }
             's' => {
-                let closures = read_closures(reader);
                 let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
 
                 ir = reader.read_byte_slice();
@@ -387,7 +366,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     ir: Default::default(),
                     value_ptr: Default::default(),
                     extern_name,
-                    closures,
+                    closures: Default::default(),
                 }
             }
             't' => {

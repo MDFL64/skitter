@@ -7,7 +7,7 @@ use crate::{
     crate_provider::{CrateProvider, TraitImpl},
     impls::{ImplTable, ImplTableLazy},
     ir::IRFunction,
-    items::{AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
+    items::{read_item_ir, AdtInfo, AssocValue, CrateId, Item, ItemId, ItemPath},
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
@@ -85,12 +85,14 @@ impl<'vm> CrateProvider<'vm> for CacheProvider<'vm> {
         let items = self.read_context.items.get().unwrap();
         let item = items.array.get(id.index());
 
-        if let Some(saved_data) = item.saved_data {
-            let mut reader = PersistReader::new(saved_data, self.read_context.clone());
-            let ir = IRFunction::persist_read(&mut reader);
-            Arc::new(ir)
+        let saved_data = item.saved_data.expect("item is missing ir block");
+        let mut reader = PersistReader::new(saved_data, self.read_context.clone());
+        let ir = read_item_ir(&mut reader, item);
+
+        if let Some(ir) = ir {
+            ir
         } else {
-            panic!("no ir available for {:?}", id);
+            panic!("no ir available for {:?}", item);
         }
     }
 
