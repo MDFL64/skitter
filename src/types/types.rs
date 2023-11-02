@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    closure::Closure,
+    closure::ClosureRef,
     items::{AdtInfo, CrateId, FunctionSig, Item, ItemId},
     vm::VM,
 };
@@ -14,7 +14,7 @@ use super::{
 
 use skitter_macro::Persist;
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Persist)]
 pub enum TypeKind<'vm> {
     Int(IntWidth, IntSign),
     Float(FloatWidth),
@@ -41,7 +41,7 @@ pub enum TypeKind<'vm> {
 
     Opaque(ItemWithSubs<'vm>, &'vm str),
     FunctionPointer(FunctionSig<'vm>),
-    Closure(&'vm Closure<'vm>, SubList<'vm>),
+    Closure(ClosureRef<'vm>, SubList<'vm>),
 
     // not properly implemented yet
     Dynamic {
@@ -53,14 +53,14 @@ pub enum TypeKind<'vm> {
     Param(u32),
     Unknown, //Error
 }
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Persist)]
 
 pub enum IntSign {
     Signed,
     Unsigned,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Persist)]
 pub enum IntWidth {
     I8,
     I16,
@@ -70,7 +70,7 @@ pub enum IntWidth {
     ISize,
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Persist)]
 pub enum FloatWidth {
     F32,
     F64,
@@ -247,7 +247,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Closure(closure, closure_subs) => {
                 let new_subs = closure_subs.sub(subs);
 
-                vm.types.intern(TypeKind::Closure(closure, new_subs), vm)
+                vm.types.intern(TypeKind::Closure(*closure, new_subs), vm)
             }
             TypeKind::FunctionPointer(sig) => {
                 let new_sig = sig.sub(subs);

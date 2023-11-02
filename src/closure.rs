@@ -4,7 +4,8 @@ use ahash::AHashMap;
 
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
-    items::{CrateId, ItemId},
+    items::Item,
+    persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
@@ -79,8 +80,7 @@ pub struct Closure<'vm> {
     // the following fields are used to locate closures in foreign crates
     // they should NOT be used when interning closures, since multiple closures
     // may exist for the same (crate,item,indices) key
-    pub def_crate: CrateId,
-    pub def_item: ItemId,
+    pub def_item: &'vm Item<'vm>,
     pub def_full_path: &'vm str,
 
     abstract_sig: OnceLock<ClosureSig<'vm>>,
@@ -96,8 +96,7 @@ pub struct Closure<'vm> {
 impl<'vm> Closure<'vm> {
     pub fn new(
         unique_id: u32,
-        def_crate: CrateId,
-        def_item: ItemId,
+        def_item: &'vm Item<'vm>,
         def_full_path: &'vm str,
         vm: &'vm VM<'vm>,
     ) -> Self {
@@ -105,7 +104,6 @@ impl<'vm> Closure<'vm> {
             vm,
             unique_id,
 
-            def_crate,
             def_item,
             def_full_path,
 
@@ -242,4 +240,35 @@ fn build_ir_for_trait<'vm>(
     new_ir.params = vec![self_pattern, args_pattern];
 
     new_ir
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ClosureRef<'vm>(&'vm Closure<'vm>);
+
+impl<'vm> ClosureRef<'vm> {
+    pub fn new(closure: &'vm Closure<'vm>) -> Self {
+        Self(closure)
+    }
+}
+
+impl<'vm> Persist<'vm> for ClosureRef<'vm> {
+    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
+        let closure = self.0;
+        writer.write_item_ref(closure.def_item);
+        writer.write_str(closure.def_full_path);
+    }
+
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let item = reader.read_item_ref();
+        let full_def_path = reader.read_str();
+
+        item.child_closure(full_def_path)
+    }
+}
+
+impl<'vm> std::ops::Deref for ClosureRef<'vm> {
+    type Target = Closure<'vm>;
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
 }

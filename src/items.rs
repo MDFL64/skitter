@@ -7,7 +7,7 @@ use std::{
 use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
-    closure::Closure,
+    closure::ClosureRef,
     crate_provider::TraitImplResult,
     impls::find_trait_impl_crate,
     ir::{glue_builder::glue_for_ctor, IRFunction, IRKind},
@@ -410,7 +410,7 @@ pub enum ItemKind<'vm> {
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
         extern_name: Option<(FunctionAbi, String)>,
-        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
+        closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -419,7 +419,7 @@ pub enum ItemKind<'vm> {
         mono_values: Mutex<AHashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, u32)>,
-        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
+        closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     /// Statics operate similarly to constants, but don't need monomorphized,
     /// and don't need weird logic to determine if they need copied.
@@ -427,7 +427,7 @@ pub enum ItemKind<'vm> {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         value_ptr: OnceLock<usize>,
         extern_name: Option<(FunctionAbi, String)>,
-        closures: Mutex<AHashMap<&'vm str, &'vm Closure<'vm>>>,
+        closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     AssociatedType {
         virtual_info: VirtualInfo,
@@ -903,7 +903,7 @@ impl<'vm> Item<'vm> {
         }
     }
 
-    pub fn child_closure(&self, full_path: &'vm str) -> &'vm Closure<'vm> {
+    pub fn child_closure(&'vm self, full_path: &'vm str) -> ClosureRef<'vm> {
         // TODO just place the closures map on all items?
         // fns and consts will probably account for a majority of items anyway
         match &self.kind {
@@ -912,10 +912,9 @@ impl<'vm> Item<'vm> {
             | ItemKind::Constant { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
 
-                closures.entry(full_path).or_insert_with(|| {
-                    self.vm
-                        .alloc_closure(self.crate_id, self.item_id, full_path)
-                })
+                *closures
+                    .entry(full_path)
+                    .or_insert_with(|| self.vm.alloc_closure(self, full_path))
             }
             _ => {
                 panic!("attempt to get child closure on {:?}", self)

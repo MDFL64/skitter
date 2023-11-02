@@ -6,13 +6,13 @@ use crate::bytecode_compiler::BytecodeCompiler;
 use crate::cache_provider::CacheProvider;
 use crate::cli::CliArgs;
 use crate::closure::Closure;
+use crate::closure::ClosureRef;
 use crate::crate_provider::CrateProvider;
 use crate::crate_provider::TraitImplResult;
 use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
-use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -317,14 +317,16 @@ impl<'vm> VM<'vm> {
 
     pub fn alloc_closure(
         &'vm self,
-        def_crate: CrateId,
-        def_item: ItemId,
+        def_item: &'vm Item<'vm>,
         def_full_path: &'vm str,
-    ) -> &'vm Closure<'vm> {
+    ) -> ClosureRef<'vm> {
         let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
 
-        self.arena_closures
-            .alloc(Closure::new(n, def_crate, def_item, def_full_path, self))
+        let closure = self
+            .arena_closures
+            .alloc(Closure::new(n, def_item, def_full_path, self));
+
+        ClosureRef::new(closure)
     }
 
     pub fn alloc_path(&'vm self, path: &str) -> &'vm str {

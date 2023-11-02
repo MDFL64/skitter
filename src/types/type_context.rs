@@ -7,7 +7,7 @@ use rustc_middle::ty::{
 };
 
 use crate::{
-    closure::{Closure, ClosureSig},
+    closure::{ClosureRef, ClosureSig},
     impls::find_inherent_impl_crate,
     items::{parent_def_from_rustc, path_from_rustc, AssocValue, FunctionSig},
     rustc_worker::RustCContext,
@@ -332,7 +332,7 @@ impl<'vm> TypeContext<'vm> {
         &'vm self,
         did: DefId,
         ctx: &RustCContext<'vm, 'tcx>,
-    ) -> &'vm Closure<'vm> {
+    ) -> ClosureRef<'vm> {
         let def_path = ctx.tcx.def_path(did);
 
         let full_path = path_from_rustc(&def_path, ctx.vm);
