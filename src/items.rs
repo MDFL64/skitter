@@ -7,7 +7,7 @@ use std::{
 use crate::{
     builtins::BuiltinTrait,
     bytecode_compiler::BytecodeCompiler,
-    closure::ClosureRef,
+    closure::{Closure, ClosureRef},
     crate_provider::TraitImplResult,
     impls::find_trait_impl_crate,
     ir::{glue_builder::glue_for_ctor, IRFunction, IRKind},
@@ -181,6 +181,36 @@ impl<'vm> LazyKey<'vm> for &'vm Item<'vm> {
     }
 }
 
+fn write_closures<'vm>(
+    closures: &Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
+    writer: &mut PersistWriter<'vm>,
+) {
+    let closures = closures.lock().unwrap();
+
+    closures.len().persist_write(writer);
+    for (key, val) in closures.iter() {
+        assert!(*key == val.def_full_path);
+        let closure: &Closure = &val;
+        closure.persist_write(writer);
+    }
+}
+
+fn read_closures<'vm>(
+    reader: &mut PersistReader<'vm>,
+) -> Mutex<AHashMap<&'vm str, ClosureRef<'vm>>> {
+    let count = usize::persist_read(reader);
+    let mut res = AHashMap::with_capacity(count);
+
+    for _ in 0..count {
+        let closure = Closure::persist_read(reader);
+        let val = reader.context.vm.alloc_closure(closure);
+        let key = val.def_full_path;
+        res.insert(key, val);
+    }
+
+    Mutex::new(res)
+}
+
 impl<'vm> Persist<'vm> for Item<'vm> {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
         self.item_id.0.persist_write(writer);
@@ -191,11 +221,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 extern_name,
                 ctor_for,
                 ir,
+                closures,
                 ..
             } => {
                 writer.write_byte('f' as u8);
+
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
+                write_closures(&closures, writer);
                 extern_name.persist_write(writer);
 
                 let ir_block = ir
@@ -215,11 +248,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 virtual_info,
                 ctor_for,
                 ir,
+                closures,
                 ..
             } => {
                 writer.write_byte('c' as u8);
+
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
+                write_closures(&closures, writer);
 
                 let ir_block = ir
                     .lock()
@@ -234,8 +270,16 @@ impl<'vm> Persist<'vm> for Item<'vm> {
 
                 writer.write_byte_slice(&ir_block);
             }
-            ItemKind::Static { ir, .. } => {
+            ItemKind::Static {
+                ir,
+                closures,
+                extern_name,
+                ..
+            } => {
                 writer.write_byte('s' as u8);
+
+                write_closures(&closures, writer);
+                extern_name.persist_write(writer);
 
                 let ir_block = ir
                     .lock()
@@ -291,14 +335,16 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
                     Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
+                let closures = read_closures(reader);
                 let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
+
                 let kind = ItemKind::Function {
                     ir: Default::default(),
                     mono_instances: Default::default(),
                     virtual_info,
                     extern_name,
                     ctor_for,
-                    closures: Default::default(),
+                    closures,
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -307,12 +353,14 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for =
                     Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
+                let closures = read_closures(reader);
+
                 let kind = ItemKind::Constant {
                     ir: Default::default(),
                     mono_values: Default::default(),
                     virtual_info,
                     ctor_for,
-                    closures: Default::default(),
+                    closures,
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -331,8 +379,16 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 }
             }
             's' => {
+                let closures = read_closures(reader);
+                let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
+
                 ir = reader.read_byte_slice();
-                ItemKind::new_static()
+                ItemKind::Static {
+                    ir: Default::default(),
+                    value_ptr: Default::default(),
+                    extern_name,
+                    closures,
+                }
             }
             't' => {
                 let builtin = Option::<BuiltinTrait>::persist_read(reader);
@@ -912,9 +968,10 @@ impl<'vm> Item<'vm> {
             | ItemKind::Constant { closures, .. } => {
                 let mut closures = closures.lock().unwrap();
 
-                *closures
-                    .entry(full_path)
-                    .or_insert_with(|| self.vm.alloc_closure(self, full_path))
+                *closures.entry(full_path).or_insert_with(|| {
+                    let closure = Closure::new(self.item_id, self.crate_id, full_path, self.vm);
+                    self.vm.alloc_closure(closure)
+                })
             }
             _ => {
                 panic!("attempt to get child closure on {:?}", self)

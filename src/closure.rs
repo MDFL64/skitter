@@ -1,16 +1,18 @@
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{atomic::AtomicU32, atomic::Ordering, Arc, Mutex, OnceLock};
 
 use ahash::AHashMap;
 
 use crate::{
     ir::{FieldPattern, IRFunction, PatternKind},
-    items::Item,
+    items::{CrateId, Item, ItemId},
     persist::Persist,
     types::{IntSign, IntWidth, Mutability, SubList, Type, TypeKind},
     vm::{Function, FunctionSource, VM},
 };
 
 use skitter_macro::Persist;
+
+static NEXT_CLOSURE_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Persist)]
 #[repr(u8)]
@@ -20,7 +22,7 @@ pub enum FnTrait {
     FnOnce,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Persist)]
 pub struct ClosureSig<'vm> {
     /// What is the most general trait we can implement?
     pub kind: FnTrait,
@@ -75,12 +77,15 @@ impl<'vm> ClosureSig<'vm> {
 /// Closures will NOT support hot loading. Functions will create new closures on being hot loaded.
 pub struct Closure<'vm> {
     pub vm: &'vm VM<'vm>,
+
+    // used to hash and test equality
     unique_id: u32,
 
     // the following fields are used to locate closures in foreign crates
-    // they should NOT be used when interning closures, since multiple closures
+    // they should NOT be used for equality checks, since multiple closures
     // may exist for the same (crate,item,indices) key
-    pub def_item: &'vm Item<'vm>,
+    pub def_item_id: ItemId,
+    pub def_crate_id: CrateId,
     pub def_full_path: &'vm str,
 
     abstract_sig: OnceLock<ClosureSig<'vm>>,
@@ -95,16 +100,19 @@ pub struct Closure<'vm> {
 
 impl<'vm> Closure<'vm> {
     pub fn new(
-        unique_id: u32,
-        def_item: &'vm Item<'vm>,
+        def_item_id: ItemId,
+        def_crate_id: CrateId,
         def_full_path: &'vm str,
         vm: &'vm VM<'vm>,
     ) -> Self {
+        let unique_id = NEXT_CLOSURE_ID.fetch_add(1, Ordering::AcqRel);
+
         Self {
             vm,
             unique_id,
 
-            def_item,
+            def_item_id,
+            def_crate_id,
             def_full_path,
 
             abstract_sig: Default::default(),
@@ -242,6 +250,28 @@ fn build_ir_for_trait<'vm>(
     new_ir
 }
 
+impl<'vm> Persist<'vm> for Closure<'vm> {
+    fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
+        self.def_crate_id.persist_write(writer);
+        self.def_item_id.persist_write(writer);
+        self.def_full_path.persist_write(writer);
+
+        self.abstract_sig.get().unwrap().persist_write(writer);
+        //self.ir_base.get().unwrap().persist_write(writer);
+    }
+
+    fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
+        let def_crate_id = Persist::persist_read(reader);
+        let def_item_id = Persist::persist_read(reader);
+        let def_full_path = Persist::persist_read(reader);
+
+        let result = Self::new(def_item_id, def_crate_id, def_full_path, reader.context.vm);
+        result.set_abstract_sig(Persist::persist_read(reader));
+        //result.set_ir_base(Persist::persist_read(reader));
+        result
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ClosureRef<'vm>(&'vm Closure<'vm>);
 
@@ -254,13 +284,17 @@ impl<'vm> ClosureRef<'vm> {
 impl<'vm> Persist<'vm> for ClosureRef<'vm> {
     fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
         let closure = self.0;
-        writer.write_item_ref(closure.def_item);
+        closure.def_item_id.persist_write(writer);
+        closure.def_crate_id.persist_write(writer);
         writer.write_str(closure.def_full_path);
     }
 
     fn persist_read(reader: &mut crate::persist::PersistReader<'vm>) -> Self {
-        let item = reader.read_item_ref();
+        let item_id = ItemId::persist_read(reader);
+        let crate_id = CrateId::persist_read(reader);
         let full_def_path = reader.read_str();
+
+        let item = reader.get_item_ref(item_id, crate_id);
 
         item.child_closure(full_def_path)
     }

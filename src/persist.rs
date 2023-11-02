@@ -160,6 +160,10 @@ impl<'vm> PersistReader<'vm> {
         let crate_id = CrateId::persist_read(self);
         let item_id = ItemId::persist_read(self);
 
+        self.get_item_ref(item_id, crate_id)
+    }
+
+    pub fn get_item_ref(&self, item_id: ItemId, crate_id: CrateId) -> &'vm Item<'vm> {
         // TODO: keep doing this for local items,
         // otherwise request the item from another crate
         assert!(crate_id == self.context.this_crate);

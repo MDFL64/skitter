@@ -13,6 +13,7 @@ use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
+use crate::items::ItemId;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -60,8 +61,6 @@ pub struct VM<'vm> {
 
     map_paths: Mutex<AHashSet<&'vm str>>,
     map_vtables: Mutex<AHashMap<(&'vm Item<'vm>, SubList<'vm>), &'vm VTable<'vm>>>,
-
-    next_closure_id: AtomicU32,
 }
 
 static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
@@ -198,8 +197,6 @@ impl<'vm> VM<'vm> {
 
             map_paths: Default::default(),
             map_vtables: Default::default(),
-
-            next_closure_id: AtomicU32::new(0),
         }
     }
 
@@ -315,16 +312,8 @@ impl<'vm> VM<'vm> {
         self.arena_constants.alloc(str).as_mut_ptr()
     }
 
-    pub fn alloc_closure(
-        &'vm self,
-        def_item: &'vm Item<'vm>,
-        def_full_path: &'vm str,
-    ) -> ClosureRef<'vm> {
-        let n = self.next_closure_id.fetch_add(1, Ordering::AcqRel);
-
-        let closure = self
-            .arena_closures
-            .alloc(Closure::new(n, def_item, def_full_path, self));
+    pub fn alloc_closure(&'vm self, closure: Closure<'vm>) -> ClosureRef<'vm> {
+        let closure = self.arena_closures.alloc(closure);
 
         ClosureRef::new(closure)
     }
