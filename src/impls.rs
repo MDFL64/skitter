@@ -32,8 +32,10 @@ pub fn find_trait_impl_crate(for_tys: &SubList, trait_crate: CrateId) -> Vec<Cra
                     ImplLocation::Internal => {
                         let cid_list = get_internal_crates(ty.vm());
                         for cid in cid_list {
-                            if !res.contains(&cid) {
-                                res.push(cid);
+                            if let Some(cid) = cid {
+                                if !res.contains(&cid) {
+                                    res.push(cid);
+                                }
                             }
                         }
                     }
@@ -54,15 +56,18 @@ pub fn find_inherent_impl_crate(ty: Type) -> Vec<CrateId> {
         ImplLocation::Crate(cid) => {
             vec![cid]
         }
-        ImplLocation::Internal => get_internal_crates(ty.vm()).into(),
+        ImplLocation::Internal => get_internal_crates(ty.vm())
+            .iter()
+            .filter_map(|x| *x)
+            .collect(),
     }
 }
 
-fn get_internal_crates(vm: &VM) -> [CrateId; 2] {
+fn get_internal_crates(vm: &VM) -> [Option<CrateId>; 3] {
     [
-        *vm.core_crate.get().unwrap(),
-        *vm.alloc_crate.get().unwrap(),
-        // TODO STD
+        vm.core_crate.get().copied(),
+        vm.alloc_crate.get().copied(),
+        None, // TODO STD
     ]
 }
 
@@ -75,6 +80,11 @@ fn find_source_crate(ty: Type) -> ImplLocation {
     match ty.kind() {
         TypeKind::Adt(item) |
         TypeKind::FunctionDef(item) => ImplLocation::Crate(item.item.crate_id),
+
+        TypeKind::Dynamic { primary_trait, .. } => {
+            let primary_trait = primary_trait.as_ref().expect("no primary trait, fallback to core?");
+            ImplLocation::Crate(primary_trait.item.crate_id)
+        }
 
         TypeKind::Ref(child, _) => find_source_crate(*child),
 
@@ -533,6 +543,34 @@ impl<'vm> ImplBounds<'vm> {
                 let ty_usize = lhs.vm().common_types().usize;
                 Self::match_types(*lhs_child, *rhs_child, res_map)
                     && Self::match_const(lhs_size, rhs_size, res_map, ty_usize)
+            }
+            (
+                TypeKind::Dynamic {
+                    primary_trait: lhs_trait,
+                    auto_traits: lhs_auto,
+                    is_dyn_star: lhs_star,
+                },
+                TypeKind::Dynamic {
+                    primary_trait: rhs_trait,
+                    auto_traits: rhs_auto,
+                    is_dyn_star: rhs_star,
+                },
+            ) => {
+                if lhs_auto != rhs_auto {
+                    return false;
+                }
+                if lhs_star != rhs_star {
+                    return false;
+                }
+                if lhs_trait.is_some() != rhs_trait.is_some() {
+                    return false;
+                }
+                if let (Some(lhs), Some(rhs)) = (lhs_trait, rhs_trait) {
+                    (lhs.item == rhs.item) && Self::match_subs(&lhs.subs, &rhs.subs, res_map)
+                } else {
+                    // None, None
+                    true
+                }
             }
 
             /*(TypeKind::Param(lhs_param), TypeKind::Param(rhs_param)) => {

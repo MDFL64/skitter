@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use ahash::AHashMap;
+
 use crate::{
     crate_provider::{CrateProvider, TraitImpl},
     impls::{ImplTable, ImplTableLazy},
@@ -11,9 +13,9 @@ use crate::{
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistReadContext, PersistReader},
     persist_header::{persist_header_read, PersistCrateHeader},
+    rustc_worker::RustCWorkerConfig,
     types::{SubList, Type},
     vm::VM,
-    CratePath,
 };
 
 pub struct CacheProvider<'vm> {
@@ -23,11 +25,11 @@ pub struct CacheProvider<'vm> {
 
 impl<'vm> CacheProvider<'vm> {
     pub fn new(
-        crate_path: &CratePath,
+        config: &RustCWorkerConfig,
         vm: &'vm VM<'vm>,
         this_crate: CrateId,
     ) -> Result<Self, Box<dyn Error>> {
-        let bytes = std::fs::read(crate_path.cache_path())?;
+        let bytes = std::fs::read(config.crate_path.cache_path())?;
         let bytes = vm.alloc_constant(bytes);
 
         let read_context = Arc::new(PersistReadContext {
@@ -35,6 +37,7 @@ impl<'vm> CacheProvider<'vm> {
             vm,
             types: OnceLock::new(),
             items: OnceLock::new(),
+            crate_id_map: OnceLock::new(),
         });
 
         let mut reader = PersistReader::new(bytes, read_context.clone());
@@ -44,10 +47,29 @@ impl<'vm> CacheProvider<'vm> {
         crate_header.validate()?;
 
         if let Some(root_file) = crate_header.files.get(0) {
-            if root_file.path != crate_path.source_path() {
+            if root_file.path != config.crate_path.source_path() {
                 return Err("cache file refers to incorrect source file".into());
             }
         }
+
+        // crate id mapping
+        let mut crate_id_map = AHashMap::new();
+        {
+            let this_crate_src = u32::persist_read(&mut reader);
+            crate_id_map.insert(this_crate_src, this_crate);
+            let dep_crates = Vec::<(&str, u32)>::persist_read(&mut reader);
+            for (name, src_id) in dep_crates {
+                if let Some(dst_id) = config.find_extern(name) {
+                    crate_id_map.insert(src_id, dst_id);
+                } else {
+                    panic!("crate '{}' was not found.", name);
+                }
+            }
+        }
+        read_context
+            .crate_id_map
+            .set(crate_id_map)
+            .map_err(|_| "double-assign to crate ids")?;
 
         let items = LazyTable::read(&mut reader);
         read_context

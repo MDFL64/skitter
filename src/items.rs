@@ -22,6 +22,7 @@ use skitter_macro::Persist;
 
 use ahash::AHashMap;
 
+#[derive(Persist)]
 pub struct ExternCrate {
     pub name: String,
     pub id: CrateId,
@@ -80,10 +81,13 @@ impl CrateId {
 // do not use derive: needs remapping
 impl<'vm> Persist<'vm> for CrateId {
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        // TODO remap crate id!
-        let crate_id = Self::new(Persist::persist_read(reader));
-        assert!(crate_id == reader.context.this_crate);
-        crate_id
+        let source_id: u32 = Persist::persist_read(reader);
+
+        let id_map = reader.context.crate_id_map.get().expect("no crate id map");
+
+        let crate_id = id_map.get(&source_id).expect("failed to remap crate id");
+
+        *crate_id
     }
 
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {

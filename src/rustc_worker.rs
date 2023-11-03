@@ -89,6 +89,15 @@ pub struct RustCWorkerConfig {
     pub save_file: bool,
 }
 
+impl RustCWorkerConfig {
+    pub fn find_extern(&self, name: &str) -> Option<CrateId> {
+        self.extern_crates
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.id)
+    }
+}
+
 impl<'vm> RustCWorker<'vm> {
     pub fn new(worker_config: RustCWorkerConfig, vm: &'vm VM<'vm>, this_crate: CrateId) -> Self
     where
@@ -808,6 +817,10 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             let mut writer = PersistWriter::new(write_context);
             persist_header_write(&mut writer);
             crate_header.persist_write(&mut writer);
+
+            // dependency crate ids
+            this_crate.persist_write(&mut writer);
+            ctx.extern_crates.persist_write(&mut writer);
 
             let items = ctx.items.items.iter().map(|item| item.item);
             LazyTable::<&Item>::write(&mut writer, items);

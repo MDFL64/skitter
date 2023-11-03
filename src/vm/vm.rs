@@ -224,7 +224,7 @@ impl<'vm> VM<'vm> {
 
         // attempt to load cached IR -- but not if we want to save
         if !worker_config.save_file {
-            match CacheProvider::new(&worker_config.crate_path, self, crate_id) {
+            match CacheProvider::new(&worker_config, self, crate_id) {
                 Ok(provider) => {
                     let worker_ref = self.arena_crates.alloc(Box::new(provider));
                     crates.push(worker_ref);

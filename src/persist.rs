@@ -76,9 +76,6 @@ impl<'vm> PersistWriter<'vm> {
 
     pub fn write_item_ref(&mut self, item: &Item<'vm>) {
         // Just write our crate and item IDs. The deserializer will remap these IDs.
-        if item.crate_id != self.context.this_crate {
-            panic!("can't write foreign item");
-        }
         item.crate_id.index().persist_write(self);
         item.item_id.index().persist_write(self);
     }
@@ -97,6 +94,7 @@ pub struct PersistReadContext<'vm> {
     pub vm: &'vm VM<'vm>,
     pub types: OnceLock<LazyArray<'vm, Type<'vm>>>,
     pub items: OnceLock<LazyTable<'vm, &'vm Item<'vm>>>,
+    pub crate_id_map: OnceLock<AHashMap<u32, CrateId>>,
 }
 
 pub struct PersistReader<'vm> {
@@ -164,13 +162,14 @@ impl<'vm> PersistReader<'vm> {
     }
 
     pub fn get_item_ref(&self, item_id: ItemId, crate_id: CrateId) -> &'vm Item<'vm> {
-        // TODO: keep doing this for local items,
-        // otherwise request the item from another crate
-        assert!(crate_id == self.context.this_crate);
-
-        let items = self.context.items.get().unwrap();
-
-        *items.array.get(item_id.index())
+        // either look up the item in our local table, or request it from another crate
+        if crate_id == self.context.this_crate {
+            let items = self.context.items.get().unwrap();
+            *items.array.get(item_id.index())
+        } else {
+            let provider = self.context.vm.crate_provider(crate_id);
+            provider.item_by_id(item_id)
+        }
     }
 
     pub fn reset(&mut self, data: &'vm [u8]) {
