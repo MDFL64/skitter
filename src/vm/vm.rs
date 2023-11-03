@@ -232,7 +232,7 @@ impl<'vm> VM<'vm> {
                     return crate_id;
                 }
                 Err(_) => {
-                    /*if worker_config.crate_path.is_internal() {
+                    if worker_config.crate_path.is_internal() {
                         let this_exe = std::env::current_exe().unwrap();
                         let this_exe = this_exe.file_name().unwrap().to_str().unwrap();
                         eprintln!(
@@ -244,7 +244,7 @@ impl<'vm> VM<'vm> {
                             "| To cache the crate, run: {} @{} --save",
                             this_exe, worker_config.crate_path.name
                         );
-                    }*/
+                    }
                 }
             }
         }
