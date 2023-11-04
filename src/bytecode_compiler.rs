@@ -68,8 +68,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         let out_ty = compiler.apply_subs(ir.sig.output);
 
-        let ret_slot = compiler.stack.alloc(out_ty);
+        let ret_slot = compiler.stack.alloc_no_drop(out_ty);
         assert_eq!(ret_slot.index(), 0);
+
+        let body_scope = compiler.stack.push_scope("body");
+
         let param_slots: Vec<Slot> = ir
             .params
             .iter()
@@ -104,6 +107,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
 
         compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
+
+        compiler.stack.pop_scope(body_scope);
         compiler.out_bc.push(Instr::Return);
 
         if vm.cli_args.verbose {
@@ -126,6 +131,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         if vm.cli_args.verbose {
             println!("compiling promoted const");
         }
+        // NOTE: Currently we don't create an outer scope, so we possibly miss calling destructors for const values.
+        // Unsure whether this will be a problem.
 
         let mut compiler = BytecodeCompiler {
             in_func_subs: subs,
@@ -172,7 +179,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 (ptr, meta)
             }
         }
-        //println!("=> {:?}",res);
     }
 
     fn debug<S: Into<String>>(&mut self, f: impl Fn() -> S) {
@@ -183,18 +189,30 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     }
 
     fn lower_block(&mut self, block: &Block, dst_slot: Option<Slot>) -> Slot {
+        // allocate result before entering scope
+        let dst_slot = dst_slot.unwrap_or_else(|| {
+            if let Some(expr) = block.result {
+                self.stack.alloc(self.expr_ty(expr))
+            } else {
+                Slot::DUMMY
+            }
+        });
+
+        let scope = self.stack.push_scope("block");
+
         for stmt in block.stmts.iter() {
             self.lower_stmt(stmt);
         }
         if let Some(expr) = block.result {
             // ALWAYS have a slot allocated for the final expression
             // prevents wrongly aliasing locals - TODO we may want to allocate this up-front for saner stack layout
-            let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(self.expr_ty(expr)));
 
-            self.lower_expr(expr, Some(dst_slot))
-        } else {
-            dst_slot.unwrap_or(Slot::DUMMY)
+            self.lower_expr(expr, Some(dst_slot));
         }
+
+        self.stack.pop_scope(scope);
+
+        dst_slot
     }
 
     fn lower_stmt(&mut self, stmt: &Stmt) {
@@ -210,7 +228,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 self.match_pattern_expr(*pattern, *init, None);
             }
             Stmt::Expr(expr) => {
+                let stmt_scope = self.stack.push_scope("stmt");
                 self.lower_expr(*expr, None);
+                self.stack.pop_scope(stmt_scope);
             }
         }
     }
@@ -2247,12 +2267,27 @@ impl PointerKind {
 pub struct CompilerStack {
     entries: Vec<StackEntry>,
     top: u32,
+    next_scope_id: u32,
+}
+
+struct StackScope {
+    old_entries: usize,
+    old_top: u32,
+    name: &'static str,
+}
+
+impl Drop for StackScope {
+    fn drop(&mut self) {
+        panic!("stack scope was not returned to the stack!");
+    }
 }
 
 impl CompilerStack {
     pub fn alloc(&mut self, ty: Type) -> Slot {
-        //println!("alloc {}",ty);
+        self.alloc_no_drop(ty)
+    }
 
+    pub fn alloc_no_drop(&mut self, ty: Type) -> Slot {
         let layout = ty.layout();
 
         self.align(layout.align);
@@ -2265,13 +2300,29 @@ impl CompilerStack {
         Slot::new(base)
     }
 
-    fn align(&mut self, align: u32) {
+    pub fn align(&mut self, align: u32) {
         self.top = crate::abi::align(self.top, align);
     }
 
     pub fn align_for_call(&mut self) -> Slot {
         self.align(16);
         Slot::new(self.top)
+    }
+
+    fn push_scope(&mut self, name: &'static str) -> StackScope {
+        eprintln!("- enter {}", name);
+        StackScope {
+            old_entries: self.entries.len(),
+            old_top: self.top,
+            name,
+        }
+    }
+
+    fn pop_scope(&mut self, scope: StackScope) {
+        eprintln!("- exit {}", scope.name);
+        self.entries.truncate(scope.old_entries);
+        self.top = scope.old_top;
+        std::mem::forget(scope);
     }
 }
 
