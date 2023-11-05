@@ -399,6 +399,7 @@ impl<'vm> Type<'vm> {
             // TODO impls on refs may be common enough to special-case
             TypeKind::Ref(..) => Some("@ref"),
             TypeKind::Dynamic { .. } => Some("@dyn"),
+            TypeKind::FunctionPointer(..) => Some("@fn-ptr"),
 
             TypeKind::Adt(item) => Some(item.item.path.as_string()),
 

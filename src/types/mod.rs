@@ -1,4 +1,5 @@
 mod common_types;
+mod drop;
 mod layout;
 mod subs;
 mod type_context;
@@ -21,5 +22,6 @@ pub struct Type<'vm>(&'vm InternedType<'vm>, &'vm VM<'vm>);
 struct InternedType<'vm> {
     kind: TypeKind<'vm>,
     layout: OnceLock<layout::Layout>,
+    drop_info: OnceLock<drop::DropInfo<'vm>>,
     persist_id: OnceLock<u32>,
 }

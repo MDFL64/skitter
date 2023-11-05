@@ -387,6 +387,7 @@ impl<'vm> TypeContext<'vm> {
                 let intern_ref = self.arena.alloc(InternedType {
                     kind,
                     layout: Default::default(),
+                    drop_info: Default::default(),
                     persist_id: Default::default(),
                 });
                 Type(intern_ref, vm)

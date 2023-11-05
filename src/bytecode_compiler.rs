@@ -2284,6 +2284,9 @@ impl Drop for StackScope {
 
 impl CompilerStack {
     pub fn alloc(&mut self, ty: Type) -> Slot {
+        let drop_info = ty.drop_info();
+        assert!(drop_info.is_none());
+
         self.alloc_no_drop(ty)
     }
 

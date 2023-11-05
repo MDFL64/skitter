@@ -92,6 +92,7 @@ fn find_source_crate(ty: Type) -> ImplLocation {
         | TypeKind::Char
         | TypeKind::Ptr(..) // TODO is this correct?
         | TypeKind::Closure(..) // TODO is this correct?
+        | TypeKind::FunctionPointer(..)
         | TypeKind::Float(_)
         | TypeKind::Int(..)
         | TypeKind::Tuple(_)
