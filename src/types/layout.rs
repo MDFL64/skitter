@@ -1,6 +1,7 @@
 use crate::{
     abi::POINTER_SIZE,
     types::{IntWidth, Type, TypeKind},
+    variants::{Discriminant, Variants},
 };
 
 use super::{FloatWidth, ItemWithSubs};
@@ -9,7 +10,7 @@ use super::{FloatWidth, ItemWithSubs};
 pub struct Layout {
     pub maybe_size: Option<u32>,
     pub align: u32,
-    pub field_offsets: Vec<Vec<u32>>,
+    pub field_offsets: Variants<Vec<u32>>,
 }
 
 impl Layout {
@@ -35,9 +36,10 @@ impl Layout {
             TypeKind::Float(FloatWidth::F64) => Layout::simple(8),
             TypeKind::Bool => Layout::simple(1),
             TypeKind::Char => Layout::simple(4),
-            TypeKind::Tuple(fields) => {
-                Layout::compound(std::iter::once(fields.iter().copied()), None)
-            }
+            TypeKind::Tuple(fields) => Layout::compound(
+                std::iter::once((Discriminant::NONE, fields.iter().copied())),
+                None,
+            ),
             TypeKind::Array(elem_ty, count) => {
                 let elem_layout = elem_ty.layout();
                 let elem_size = elem_layout.assert_size();
@@ -47,7 +49,7 @@ impl Layout {
                 Layout {
                     maybe_size: Some(elem_size * count),
                     align: elem_layout.align,
-                    field_offsets: Vec::new(),
+                    field_offsets: Variants::empty(),
                 }
             }
             TypeKind::Slice(elem_ty) => {
@@ -56,13 +58,13 @@ impl Layout {
                 Layout {
                     maybe_size: None,
                     align: elem_layout.align,
-                    field_offsets: Vec::new(),
+                    field_offsets: Variants::empty(),
                 }
             }
             TypeKind::StringSlice => Layout {
                 maybe_size: None,
                 align: 1,
-                field_offsets: Vec::new(),
+                field_offsets: Variants::empty(),
             },
 
             TypeKind::Ref(ref_ty, _) | TypeKind::Ptr(ref_ty, _) => {
@@ -74,7 +76,7 @@ impl Layout {
                     Self {
                         maybe_size: Some(ptr_size * 2),
                         align: ptr_size,
-                        field_offsets: Vec::new(),
+                        field_offsets: Variants::empty(),
                     }
                 }
             }
@@ -87,12 +89,10 @@ impl Layout {
                 let info = item.adt_info();
 
                 if info.is_union() {
-                    assert!(info.variant_fields.len() == 1);
-
                     let mut align = 1;
                     let mut size = 0;
 
-                    for ty in info.variant_fields[0].iter() {
+                    for ty in info.variant_fields.assert_single().iter() {
                         let layout = ty.sub(subs).layout();
 
                         align = align.max(layout.align);
@@ -101,18 +101,22 @@ impl Layout {
 
                     size = crate::abi::align(size, align);
 
-                    let field_count = info.variant_fields[0].len();
+                    let field_count = info.variant_fields.assert_single().len();
+
+                    let field_offsets = Variants::from_iter(std::iter::once((
+                        Discriminant::NONE,
+                        vec![0; field_count],
+                    )));
 
                     Layout {
                         maybe_size: Some(size),
                         align,
-                        field_offsets: vec![vec![0; field_count]],
+                        field_offsets,
                     }
                 } else {
-                    let fixed_fields = info
-                        .variant_fields
-                        .iter()
-                        .map(|fields| fields.iter().map(|field| field.sub(subs)));
+                    let fixed_fields = info.variant_fields.iter().map(|(_, disc, fields)| {
+                        (disc, fields.iter().map(|field| field.sub(subs)))
+                    });
 
                     let discriminant_ty = info.enum_info().map(|e| e.discriminant_internal);
 
@@ -132,7 +136,7 @@ impl Layout {
     }
 
     fn compound<'vm>(
-        variants: impl Iterator<Item = impl Iterator<Item = Type<'vm>>>,
+        variants: impl Iterator<Item = (Discriminant, impl Iterator<Item = Type<'vm>>)>,
         discriminant_ty: Option<Type<'vm>>,
     ) -> Self {
         let mut full_size = 0;
@@ -148,31 +152,31 @@ impl Layout {
 
         let mut is_unsized = false;
 
-        let field_offsets = variants
-            .map(|fields| {
-                let mut size = base_size;
-                let res = fields
-                    .map(|ty| {
-                        let layout = ty.layout();
+        let field_offsets = variants.map(|(disc, fields)| {
+            let mut size = base_size;
+            let res = fields
+                .map(|ty| {
+                    let layout = ty.layout();
 
-                        size = crate::abi::align(size, layout.align);
+                    size = crate::abi::align(size, layout.align);
 
-                        let offset = size;
+                    let offset = size;
 
-                        if let Some(field_size) = layout.maybe_size {
-                            size += field_size;
-                        } else {
-                            is_unsized = true;
-                        }
-                        align = align.max(layout.align);
+                    if let Some(field_size) = layout.maybe_size {
+                        size += field_size;
+                    } else {
+                        is_unsized = true;
+                    }
+                    align = align.max(layout.align);
 
-                        offset
-                    })
-                    .collect();
-                full_size = full_size.max(size);
-                res
-            })
-            .collect();
+                    offset
+                })
+                .collect();
+            full_size = full_size.max(size);
+            (disc, res)
+        });
+
+        let field_offsets = Variants::from_iter(field_offsets);
 
         let maybe_size = if is_unsized {
             None
@@ -191,7 +195,7 @@ impl Layout {
         Self {
             maybe_size: Some(size),
             align: size.max(1),
-            field_offsets: Vec::new(),
+            field_offsets: Variants::empty(),
         }
     }
 }

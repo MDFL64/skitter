@@ -8,6 +8,7 @@ use crate::{
     ir::{MatchGuard, OpaqueTypeMapping},
     rustc_worker::RustCContext,
     types::{FloatWidth, Mutability, Type, TypeKind},
+    variants::VariantIndex,
 };
 
 use super::{
@@ -411,7 +412,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let lhs = self.expr(lhs);
                 ExprKind::Field {
                     lhs,
-                    variant: 0,
+                    variant: VariantIndex::new(0),
                     field: index.as_u32(),
                 }
             }
@@ -729,7 +730,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             let new_expr = match proj.kind {
                 ProjectionKind::Field(field, variant) => ExprKind::Field {
                     lhs: base,
-                    variant: variant.as_u32(),
+                    variant: VariantIndex::new(variant.as_u32()),
                     field: field.as_u32(),
                 },
                 ProjectionKind::Deref => ExprKind::DeRef(base),
@@ -889,7 +890,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 let (_, variant_index) = ctor_item.ctor_info().unwrap();
 
-                let tup_size = adt_info.variant_fields[variant_index as usize].len();
+                let tup_size = adt_info.variant_fields.get(variant_index).len();
 
                 let gap_pos = gap_pos.as_opt_usize();
 
@@ -1048,17 +1049,17 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         res_pat
     }
 
-    fn def_variant(res: &hir::def::Res, rs_ty: rustc_middle::ty::Ty) -> u32 {
+    fn def_variant(res: &hir::def::Res, rs_ty: rustc_middle::ty::Ty) -> VariantIndex {
         use hir::def::{DefKind, Res};
         match res {
             // never refer to a variant
-            Res::Def(DefKind::TyAlias, _) | Res::SelfTyAlias { .. } => 0,
+            Res::Def(DefKind::TyAlias, _) | Res::SelfTyAlias { .. } => VariantIndex::new(0),
 
             Res::Def(_, def_id) => {
                 let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
                     panic!("attempt to convert struct without adt");
                 };
-                adt_def.variant_index_with_id(*def_id).as_u32()
+                VariantIndex::new(adt_def.variant_index_with_id(*def_id).as_u32())
             }
             _ => {
                 panic!("struct from {:?}", res)
@@ -1108,7 +1109,7 @@ fn match_capture(
                     field,
                 } = expr
                 {
-                    if *variant == cap_variant.as_u32() && *field == cap_field.as_u32() {
+                    if variant.index() == cap_variant.as_u32() && *field == cap_field.as_u32() {
                         match_capture(ir, *lhs, capture, capture_index, proj_index + 1)
                     } else {
                         None

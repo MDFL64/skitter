@@ -125,7 +125,7 @@ impl<'vm> IRFunction<'vm> {
                 field,
             } => {
                 self.print_expr(lhs, indent);
-                print!(".v{}.f{}", variant, field);
+                print!(".{:?}.f{}", variant, field);
             }
             ExprKind::Call { func, ref args } => {
                 self.print_expr(func, indent);
@@ -200,7 +200,7 @@ impl<'vm> IRFunction<'vm> {
                 ref fields,
                 rest,
             } => {
-                print!("{}.{}{{ ", variant, expr.ty);
+                print!("{}.{:?}{{ ", expr.ty, variant);
                 for (i, (field_index, field_expr)) in fields.iter().enumerate() {
                     if i > 0 {
                         print!(", ");

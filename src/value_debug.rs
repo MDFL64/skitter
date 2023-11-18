@@ -2,6 +2,7 @@ use crate::{
     abi::POINTER_SIZE,
     items::AdtKind,
     types::{FloatWidth, IntSign, IntWidth, Type, TypeKind},
+    variants::Discriminant,
 };
 
 /// A debug utility for printing values at runtime.
@@ -32,10 +33,10 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
             let adt_info = item_ref.item.adt_info();
             let adt_layout = ty.layout();
 
-            let variant_n = match &adt_info.kind {
+            let discriminant = match &adt_info.kind {
                 AdtKind::Struct => {
                     print!("struct{{ ");
-                    Some(0)
+                    Some(Discriminant::NONE)
                 }
                 AdtKind::Enum(e) => {
                     let disc = e.discriminant_internal;
@@ -47,7 +48,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
                     match e.discriminant_internal.kind() {
                         TypeKind::Int(IntWidth::I32, IntSign::Unsigned) => {
                             let n: u32 = std::ptr::read(ptr as _);
-                            Some(n as usize)
+                            Some(Discriminant::new(n as _))
                         }
                         _ => {
                             print!("?");
@@ -61,10 +62,14 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
                 }
             };
 
-            if let Some(variant_n) = variant_n {
-                for (i, (ty, offset)) in adt_info.variant_fields[variant_n]
+            if let Some(discriminant) = discriminant {
+                let variant = adt_info.variant_fields.index_for_discriminant(discriminant);
+
+                for (i, (ty, offset)) in adt_info
+                    .variant_fields
+                    .get(variant)
                     .iter()
-                    .zip(&adt_layout.field_offsets[variant_n])
+                    .zip(adt_layout.field_offsets.get(variant))
                     .enumerate()
                 {
                     let field_ty = ty.sub(&item_ref.subs);
@@ -87,7 +92,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
 
                 for (i, (ty, offset)) in children
                     .iter()
-                    .zip(&tup_layout.field_offsets[0])
+                    .zip(tup_layout.field_offsets.assert_single())
                     .enumerate()
                 {
                     if i != 0 {

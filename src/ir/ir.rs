@@ -6,6 +6,7 @@ use crate::{
     closure::FnTrait,
     items::FunctionSig,
     types::{ConstGeneric, ItemWithSubs, Mutability, Type},
+    variants::VariantIndex,
 };
 
 #[derive(Default)]
@@ -230,7 +231,7 @@ pub enum ExprKind<'vm> {
     },
     Tuple(Vec<ExprId>),
     Adt {
-        variant: u32,
+        variant: VariantIndex,
         fields: Vec<(u32, ExprId)>,
         rest: Option<ExprId>,
     },
@@ -248,7 +249,7 @@ pub enum ExprKind<'vm> {
 
     Field {
         lhs: ExprId,
-        variant: u32,
+        variant: VariantIndex,
         field: u32,
     },
     Index {
@@ -283,7 +284,7 @@ pub enum PatternKind<'vm> {
     },
     Enum {
         fields: Vec<FieldPattern>,
-        variant_index: u32,
+        variant_index: VariantIndex,
     },
     Or {
         options: Vec<PatternId>,

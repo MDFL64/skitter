@@ -609,7 +609,10 @@ pub fn compile_rust_intrinsic<'vm>(
 
             stack.align_for_call();
             let call_slot = stack.alloc(res_ty);
-            for (arg_ty, arg_offset) in arg_tys.iter().zip(&args_ty.layout().field_offsets[0]) {
+            for (arg_ty, arg_offset) in arg_tys
+                .iter()
+                .zip(args_ty.layout().field_offsets.assert_single())
+            {
                 let arg_slot = stack.alloc(*arg_ty);
 
                 if let Some(copy) = bytecode_select::copy(

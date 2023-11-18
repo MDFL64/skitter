@@ -933,8 +933,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ExprKind::Tuple(fields) => {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    for (field, offset) in
-                        fields.iter().zip(expr_ty.layout().field_offsets[0].iter())
+                    for (field, offset) in fields
+                        .iter()
+                        .zip(expr_ty.layout().field_offsets.assert_single().iter())
                     {
                         let field_slot = dst_slot.offset_by(*offset as i32);
                         self.lower_expr(*field, Some(field_slot));
@@ -984,20 +985,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 } => {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    if let Some(enum_info) = expr_ty.adt_info().enum_info() {
-                        let dl = enum_info.discriminant_internal.layout();
-                        self.out_bc.push(bytecode_select::literal(
-                            *variant as i128,
-                            dl.assert_size(),
-                            dst_slot,
-                        ));
-                    }
-
                     let expr_layout = expr_ty.layout();
 
+                    if let Some(enum_info) = expr_ty.adt_info().enum_info() {
+                        let disc = expr_layout.field_offsets.get_discriminant(*variant);
+
+                        if let Some(disc_val) = disc.value() {
+                            let dl = enum_info.discriminant_internal.layout();
+                            self.out_bc.push(bytecode_select::literal(
+                                disc_val,
+                                dl.assert_size(),
+                                dst_slot,
+                            ));
+                        }
+                    }
+
                     for (field_index, expr) in fields.iter() {
-                        let offset =
-                            expr_layout.field_offsets[*variant as usize][*field_index as usize];
+                        let offset = expr_layout.field_offsets.get(*variant)[*field_index as usize];
                         let field_slot = dst_slot.offset_by(offset as i32);
                         self.lower_expr(*expr, Some(field_slot));
                     }
@@ -1017,8 +1021,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         let adt_info = item.adt_info();
                         let adt_subs = adt_subs.sub(self.in_func_subs);
 
-                        let all_offsets = &expr_layout.field_offsets[*variant as usize];
-                        let all_fields = &adt_info.variant_fields[*variant as usize];
+                        let all_offsets = expr_layout.field_offsets.get(*variant);
+                        let all_fields = adt_info.variant_fields.get(*variant);
 
                         for (field_n, (field_ty, field_offset)) in
                             all_fields.iter().zip(all_offsets).enumerate()
@@ -1185,8 +1189,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ExprKind::UpVar(upvar) => {
                     let closure = self.closure.as_ref().expect("upvar in non-closure");
 
-                    let field_offset =
-                        closure.self_ty.layout().field_offsets[0][upvar.index as usize] as i32;
+                    let field_offset = closure.self_ty.layout().field_offsets.assert_single()
+                        [upvar.index as usize] as i32;
 
                     match closure.kind {
                         // self is a ref to a tuple-like env
@@ -1230,10 +1234,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     variant,
                     field,
                 } => {
-                    assert!(*variant == 0);
+                    // can we ever use a field with an enum?
+                    assert!(variant.index() == 0);
 
                     let layout = self.expr_ty(*lhs).layout();
-                    let field_offset = layout.field_offsets[*variant as usize][*field as usize];
+                    let field_offset = layout.field_offsets.get(*variant)[*field as usize];
 
                     self.expr_to_place(*lhs).offset_by(field_offset as i32)
                 }
@@ -1579,7 +1584,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
 
-                    let offset = layout.field_offsets[0][field.field as usize];
+                    let offset = layout.field_offsets.assert_single()[field.field as usize];
                     let refutable = self.match_pattern_internal(
                         field_pattern,
                         source.offset_by(offset as i32),
@@ -1627,8 +1632,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         .expect("not an enum?")
                         .discriminant_internal;
 
+                    let discriminant = layout.field_offsets.get_discriminant(*variant_index);
+
+                    let Some(disc_val) = discriminant.value() else {
+                        panic!("no discriminant!");
+                    };
+
                     let fake_pattern = Pattern {
-                        kind: PatternKind::LiteralValue(*variant_index as i128),
+                        kind: PatternKind::LiteralValue(disc_val),
                         ty: discriminant_ty,
                     };
                     self.match_pattern_internal(
@@ -1643,8 +1654,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
 
-                    let offset =
-                        layout.field_offsets[*variant_index as usize][field.field as usize];
+                    let offset = layout.field_offsets.get(*variant_index)[field.field as usize];
 
                     let refutable = self.match_pattern_internal(
                         field_pattern,

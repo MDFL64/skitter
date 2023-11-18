@@ -1,6 +1,6 @@
 use crate::{
     crate_provider::TraitImplResult,
-    items::{ItemPath, AssocValue, Item},
+    items::{AssocValue, Item, ItemPath},
     types::{Sub, SubList, Type},
 };
 
@@ -22,7 +22,7 @@ pub struct DropInfo<'vm> {
     is_special_leaf: bool,
 
     drop_impl: Option<i32>,
-    fields: Vec<DropField<Type<'vm>>>
+    fields: Vec<DropField<Type<'vm>>>,
 }
 
 pub struct DropField<T> {
@@ -36,7 +36,7 @@ impl<'vm> DropInfo<'vm> {
         Self {
             is_special_leaf: false,
             drop_impl: None,
-            fields: vec!()
+            fields: vec![],
         }
     }
 
@@ -44,7 +44,7 @@ impl<'vm> DropInfo<'vm> {
         Self {
             is_special_leaf: true,
             drop_impl: None,
-            fields: vec!()
+            fields: vec![],
         }
     }
 
@@ -96,7 +96,9 @@ impl<'vm> Type<'vm> {
                 | TypeKind::Float(_)
                 | TypeKind::Ref(..)
                 | TypeKind::Ptr(..)
-                | TypeKind::FunctionPointer(..) => return DropInfo::empty(),
+                | TypeKind::FunctionPointer(..)
+                | TypeKind::FunctionDef(..)
+                | TypeKind::Never => return DropInfo::empty(),
 
                 TypeKind::Array(child, _) => {
                     return if !child.drop_info().is_none() {
@@ -111,11 +113,16 @@ impl<'vm> Type<'vm> {
                     // todo check fields
                     DropInfo::empty()
                 }
+                TypeKind::Closure(closure, subs) => {
+                    // todo use captures
+                    DropInfo::empty()
+                }
                 TypeKind::Adt(..) => {
                     get_drop_impl(*self);
-                    panic!("check fields");
+                    // todo check fields
+                    DropInfo::empty()
                 }
-                _ => panic!("drop info: {}", self),
+                _ => panic!("drop info: {:?}", self),
             }
         })
     }

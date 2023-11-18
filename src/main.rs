@@ -41,6 +41,7 @@ mod rustc_worker;
 mod test;
 mod types;
 mod value_debug;
+mod variants;
 
 use std::{
     cell::LazyCell,

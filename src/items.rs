@@ -15,6 +15,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, SubList, Type, TypeKind},
+    variants::{VariantIndex, Variants},
     vm::{Function, FunctionSource, VM},
 };
 
@@ -319,8 +320,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
         let kind = match kind_c {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
-                let ctor_for =
-                    Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
+                let ctor_for = Persist::persist_read(reader);
                 let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
 
                 let kind = ItemKind::Function {
@@ -336,8 +336,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             }
             'c' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
-                let ctor_for =
-                    Option::<(u32, u32)>::persist_read(reader).map(|(a, b)| (ItemId(a), b));
+                let ctor_for = Persist::persist_read(reader);
 
                 let kind = ItemKind::Constant {
                     ir: Default::default(),
@@ -447,7 +446,7 @@ pub enum ItemKind<'vm> {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_instances: Mutex<AHashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
-        ctor_for: Option<(ItemId, u32)>,
+        ctor_for: Option<(ItemId, VariantIndex)>,
         extern_name: Option<(FunctionAbi, String)>,
         closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
@@ -457,7 +456,7 @@ pub enum ItemKind<'vm> {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         mono_values: Mutex<AHashMap<SubList<'vm>, &'vm [u8]>>,
         virtual_info: Option<VirtualInfo>,
-        ctor_for: Option<(ItemId, u32)>,
+        ctor_for: Option<(ItemId, VariantIndex)>,
         closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     /// Statics operate similarly to constants, but don't need monomorphized,
@@ -531,7 +530,7 @@ pub struct EnumInfo<'vm> {
 
 #[derive(Persist)]
 pub struct AdtInfo<'vm> {
-    pub variant_fields: Vec<Vec<Type<'vm>>>,
+    pub variant_fields: Variants<Vec<Type<'vm>>>,
     pub kind: AdtKind<'vm>,
 }
 
@@ -647,7 +646,7 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_function_ctor(adt_id: ItemId, variant: u32) -> Self {
+    pub fn new_function_ctor(adt_id: ItemId, variant: VariantIndex) -> Self {
         Self::Function {
             ir: Default::default(),
             mono_instances: Default::default(),
@@ -681,7 +680,7 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_const_ctor(adt_id: ItemId, variant: u32) -> Self {
+    pub fn new_const_ctor(adt_id: ItemId, variant: VariantIndex) -> Self {
         Self::Constant {
             ir: Default::default(),
             mono_values: Default::default(),
@@ -934,7 +933,7 @@ impl<'vm> Item<'vm> {
         *result_val as _
     }
 
-    pub fn ctor_info(&self) -> Option<(ItemId, u32)> {
+    pub fn ctor_info(&self) -> Option<(ItemId, VariantIndex)> {
         match &self.kind {
             ItemKind::Function { ctor_for, .. } => ctor_for.clone(),
             ItemKind::Constant { ctor_for, .. } => ctor_for.clone(),

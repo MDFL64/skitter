@@ -27,6 +27,7 @@ use crate::{
     persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
     types::{Sub, SubList, Type},
+    variants::{Discriminant, VariantIndex, Variants},
     vm::VM,
     CratePath,
 };
@@ -356,7 +357,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                     // add ctor
                     if let Some((kind, item_path, local_id)) =
-                        Self::ctor_params(&variant, adt_id, 0, vm, &hir)
+                        Self::ctor_params(&variant, adt_id, VariantIndex::new(0), vm, &hir)
                     {
                         items.index_item(kind, item_path, local_id, vm);
                     }
@@ -373,9 +374,13 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
                     // add ctors
                     for (index, variant) in enum_def.variants.iter().enumerate() {
-                        if let Some((kind, item_path, local_id)) =
-                            Self::ctor_params(&variant.data, adt_id, index as u32, vm, &hir)
-                        {
+                        if let Some((kind, item_path, local_id)) = Self::ctor_params(
+                            &variant.data,
+                            adt_id,
+                            VariantIndex::new(index as u32),
+                            vm,
+                            &hir,
+                        ) {
                             items.index_item(kind, item_path, local_id, vm);
                         }
                     }
@@ -545,20 +550,26 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             let adt_def = tcx.adt_def(item_info.did);
 
-            let variant_fields = adt_def
-                .variants()
-                .iter()
-                .map(|variant| {
-                    variant
+            let variant_fields =
+                Variants::from_iter(adt_def.variants().iter().enumerate().map(|(i, variant)| {
+                    let fields = variant
                         .fields
                         .iter()
                         .map(|field| {
                             let ty = tcx.type_of(field.did).skip_binder();
                             vm.types.type_from_rustc(ty, &ctx)
                         })
-                        .collect()
-                })
-                .collect();
+                        .collect();
+
+                    // TODO proper user-defined discriminant
+                    let disc = if adt_def.is_enum() {
+                        Discriminant::new(i as i128)
+                    } else {
+                        Discriminant::NONE
+                    };
+
+                    (disc, fields)
+                }));
 
             let kind = if adt_def.is_enum() {
                 let enum_info = if let Some(int) = adt_def.repr().int {
@@ -848,7 +859,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
     fn ctor_params(
         variant_data: &VariantData,
         adt_id: ItemId,
-        variant_id: u32,
+        variant: VariantIndex,
         vm: &'vm VM<'vm>,
         hir: &HirMap,
     ) -> Option<(ItemKind<'vm>, ItemPath<'vm>, LocalDefId)> {
@@ -856,13 +867,13 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             VariantData::Struct(..) => None,
             VariantData::Tuple(_, _, local_id) => {
                 let path = path_from_rustc(&hir.def_path(*local_id), vm);
-                let kind = ItemKind::new_function_ctor(adt_id, variant_id);
+                let kind = ItemKind::new_function_ctor(adt_id, variant);
 
                 Some((kind, path, *local_id))
             }
             VariantData::Unit(_, local_id) => {
                 let path = path_from_rustc(&hir.def_path(*local_id), vm);
-                let kind = ItemKind::new_const_ctor(adt_id, variant_id);
+                let kind = ItemKind::new_const_ctor(adt_id, variant);
 
                 Some((kind, path, *local_id))
             }

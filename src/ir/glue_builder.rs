@@ -2,6 +2,7 @@ use crate::{
     closure::FnTrait,
     ir::{BindingMode, Expr, ExprKind, IRFunctionBuilder, Pattern, PatternKind},
     types::{Mutability, Type, TypeKind},
+    variants::VariantIndex,
 };
 
 use super::{IRFunction, IRKind};
@@ -69,7 +70,7 @@ pub fn glue_for_fn_trait<'vm>(
         call_args.push(builder.add_expr(Expr {
             kind: ExprKind::Field {
                 lhs: tuple_expr,
-                variant: 0,
+                variant: VariantIndex::new(0),
                 field: i as u32,
             },
             ty: *arg_ty,
@@ -87,7 +88,11 @@ pub fn glue_for_fn_trait<'vm>(
     builder.finish(root_expr, IRKind::Function, params, vec![])
 }
 
-pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, ir_kind: IRKind) -> IRFunction<'vm> {
+pub fn glue_for_ctor<'vm>(
+    adt_ty: Type<'vm>,
+    variant: VariantIndex,
+    ir_kind: IRKind,
+) -> IRFunction<'vm> {
     let TypeKind::Adt(item_with_subs) = adt_ty.kind() else {
         panic!("attempt to get ctor for non-adt");
     };
@@ -96,7 +101,9 @@ pub fn glue_for_ctor<'vm>(adt_ty: Type<'vm>, variant: u32, ir_kind: IRKind) -> I
 
     let mut builder = IRFunctionBuilder::default();
 
-    let params: Vec<_> = adt_info.variant_fields[variant as usize]
+    let params: Vec<_> = adt_info
+        .variant_fields
+        .get(variant)
         .iter()
         .enumerate()
         .map(|(i, ty)| {

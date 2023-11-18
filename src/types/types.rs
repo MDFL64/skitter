@@ -135,7 +135,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Adt(item) => {
                 let adt_info = item.item.adt_info();
                 if adt_info.is_struct() {
-                    let fields = &adt_info.variant_fields[0];
+                    let fields = adt_info.variant_fields.assert_single();
                     if let Some(field) = fields.last() {
                         let end_ty = field.sub(&item.subs);
                         return end_ty.is_sized();
@@ -361,8 +361,8 @@ impl<'vm> Type<'vm> {
                 //let new_subs = adt.subs.sub(subs);
                 let adt_info = adt.item.adt_info();
 
-                for variant in &adt_info.variant_fields {
-                    for ty in variant {
+                for (_, _, fields) in adt_info.variant_fields.iter() {
+                    for ty in fields {
                         if ty.sub(&adt.subs).is_interior_mut() {
                             return true;
                         }
@@ -434,7 +434,7 @@ impl<'vm> Type<'vm> {
             TypeKind::Adt(adt_item) => {
                 let adt_info = adt_item.item.adt_info();
                 if adt_info.is_struct() {
-                    if let Some(field) = adt_info.variant_fields[0].first() {
+                    if let Some(field) = adt_info.variant_fields.assert_single().first() {
                         let field_ty = field.sub(&adt_item.subs);
                         return field_ty.try_get_ref_ty();
                     }
