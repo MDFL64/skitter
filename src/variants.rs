@@ -32,7 +32,7 @@ impl Discriminant {
 
 #[derive(Clone, Debug)]
 pub struct Variants<T> {
-    list: Vec<(Discriminant, T)>,
+    list: Vec<T>,
 }
 
 impl<'vm, T> Persist<'vm> for Variants<T>
@@ -51,49 +51,33 @@ where
 }
 
 impl<T> Variants<T> {
-    pub fn len(&self) -> usize {
-        self.list.len()
+    pub fn new(list: Vec<T>) -> Self {
+        Self { list }
     }
 
     pub fn empty() -> Self {
         Self { list: vec![] }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (VariantIndex, Discriminant, &T)> {
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (VariantIndex, &T)> {
         self.list
             .iter()
             .enumerate()
-            .map(|(index, (disc, val))| (VariantIndex(index as u32), *disc, val))
-    }
-
-    pub fn from_iter(iter: impl Iterator<Item = (Discriminant, T)>) -> Self {
-        Self {
-            list: iter.collect(),
-        }
+            .map(|(i, x)| (VariantIndex(i as u32), x))
     }
 
     pub fn assert_single(&self) -> &T {
         if self.list.len() == 1 {
-            if let (Discriminant(None), ref val) = self.list[0] {
-                return val;
-            }
+            return &self.list[0];
         }
         panic!("Variants::assert_single() failed - {}", self.list.len());
     }
 
     pub fn get(&self, key: VariantIndex) -> &T {
-        &self.list[key.0 as usize].1
-    }
-
-    pub fn get_discriminant(&self, key: VariantIndex) -> Discriminant {
-        self.list[key.0 as usize].0
-    }
-
-    pub fn for_discriminant(&self, key: Discriminant) -> &T {
-        panic!("todo for discriminant");
-    }
-
-    pub fn index_for_discriminant(&self, key: Discriminant) -> VariantIndex {
-        panic!("todo index for discriminant");
+        &self.list[key.0 as usize]
     }
 }

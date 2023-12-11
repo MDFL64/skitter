@@ -986,9 +986,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     let expr_layout = expr_ty.layout();
+                    let adt_info = expr_ty.adt_info();
 
-                    if let Some(enum_info) = expr_ty.adt_info().enum_info() {
-                        let disc = expr_layout.field_offsets.get_discriminant(*variant);
+                    if let Some(enum_info) = adt_info.enum_info() {
+                        let disc = adt_info.variant_discrims.get(*variant);
 
                         if let Some(disc_val) = disc.value() {
                             let dl = enum_info.discriminant_internal.layout();
@@ -1625,14 +1626,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // test the discriminator by building a fake literal pattern
                 {
-                    let discriminant_ty = pat
-                        .ty
-                        .adt_info()
+                    let adt_info = pat.ty.adt_info();
+
+                    let discriminant_ty = adt_info
                         .enum_info()
                         .expect("not an enum?")
                         .discriminant_internal;
 
-                    let discriminant = layout.field_offsets.get_discriminant(*variant_index);
+                    let discriminant = adt_info.variant_discrims.get(*variant_index);
 
                     let Some(disc_val) = discriminant.value() else {
                         panic!("no discriminant!");

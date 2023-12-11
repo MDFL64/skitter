@@ -15,7 +15,7 @@ use crate::{
     persist::{Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, SubList, Type, TypeKind},
-    variants::{VariantIndex, Variants},
+    variants::{Discriminant, VariantIndex, Variants},
     vm::{Function, FunctionSource, VM},
 };
 
@@ -531,6 +531,7 @@ pub struct EnumInfo<'vm> {
 #[derive(Persist)]
 pub struct AdtInfo<'vm> {
     pub variant_fields: Variants<Vec<Type<'vm>>>,
+    pub variant_discrims: Variants<Discriminant>,
     pub kind: AdtKind<'vm>,
 }
 
@@ -561,6 +562,13 @@ impl<'vm> AdtInfo<'vm> {
             AdtKind::Enum(info) => Some(info),
             _ => None,
         }
+    }
+
+    pub fn index_for_discriminant(&self, disc: Discriminant) -> Option<VariantIndex> {
+        self.variant_discrims
+            .iter()
+            .find(|(_, d)| disc == **d)
+            .map(|(i, d)| i)
     }
 }
 

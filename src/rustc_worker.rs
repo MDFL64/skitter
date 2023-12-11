@@ -550,26 +550,29 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             let adt_def = tcx.adt_def(item_info.did);
 
-            let variant_fields =
-                Variants::from_iter(adt_def.variants().iter().enumerate().map(|(i, variant)| {
-                    let fields = variant
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            let ty = tcx.type_of(field.did).skip_binder();
-                            vm.types.type_from_rustc(ty, &ctx)
-                        })
-                        .collect();
+            let variant_iter = adt_def.variants().iter().enumerate().map(|(i, variant)| {
+                let fields = variant
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let ty = tcx.type_of(field.did).skip_binder();
+                        vm.types.type_from_rustc(ty, &ctx)
+                    })
+                    .collect();
 
-                    // TODO proper user-defined discriminant
-                    let disc = if adt_def.is_enum() {
-                        Discriminant::new(i as i128)
-                    } else {
-                        Discriminant::NONE
-                    };
+                // TODO proper user-defined discriminant
+                let disc = if adt_def.is_enum() {
+                    Discriminant::new(i as i128)
+                } else {
+                    Discriminant::NONE
+                };
 
-                    (disc, fields)
-                }));
+                (disc, fields)
+            });
+
+            let (variant_discrims, variant_fields) = variant_iter.unzip();
+            let variant_discrims = Variants::new(variant_discrims);
+            let variant_fields = Variants::new(variant_fields);
 
             let kind = if adt_def.is_enum() {
                 let enum_info = if let Some(int) = adt_def.repr().int {
@@ -613,6 +616,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
 
             item_info.item.set_adt_info(AdtInfo {
                 variant_fields,
+                variant_discrims,
                 kind,
             });
         }

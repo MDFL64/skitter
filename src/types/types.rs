@@ -361,7 +361,7 @@ impl<'vm> Type<'vm> {
                 //let new_subs = adt.subs.sub(subs);
                 let adt_info = adt.item.adt_info();
 
-                for (_, _, fields) in adt_info.variant_fields.iter() {
+                for (_, fields) in adt_info.variant_fields.iter() {
                     for ty in fields {
                         if ty.sub(&adt.subs).is_interior_mut() {
                             return true;
