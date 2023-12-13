@@ -20,8 +20,8 @@ use crate::{
     ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
         ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AdtTag, AssocValue, BoundKind,
-        CrateId, EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId, ItemKind,
-        ItemPath,
+        CrateId, DiscriminantSource, EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item,
+        ItemId, ItemKind, ItemPath,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -560,18 +560,34 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     })
                     .collect();
 
-                // TODO proper user-defined discriminant
+                // discriminant handling is very ugly
                 let disc = if adt_def.is_enum() {
-                    Discriminant::new(i as i128)
+                    use rustc_middle::ty::VariantDiscr;
+
+                    match variant.discr {
+                        VariantDiscr::Explicit(did) => {
+                            let did = if did.krate == rustc_hir::def_id::LOCAL_CRATE {
+                                rustc_hir::def_id::LocalDefId {
+                                    local_def_index: did.index,
+                                }
+                            } else {
+                                panic!("variant has non-local did");
+                            };
+
+                            let ir = build_ir(&ctx, did, IRKind::Constant).expect("missing discriminant");
+                            DiscriminantSource::Explicit(ir)
+                        }
+                        VariantDiscr::Relative(_) => DiscriminantSource::Next,
+                    }
                 } else {
-                    Discriminant::NONE
+                    DiscriminantSource::None
                 };
 
                 (disc, fields)
             });
 
-            let (variant_discrims, variant_fields) = variant_iter.unzip();
-            let variant_discrims = Variants::new(variant_discrims);
+            let (variant_discriminant_sources, variant_fields) = variant_iter.unzip();
+            let variant_discriminant_sources = Variants::new(variant_discriminant_sources);
             let variant_fields = Variants::new(variant_fields);
 
             let kind = if adt_def.is_enum() {
@@ -614,11 +630,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 AdtKind::Struct
             };
 
-            item_info.item.set_adt_info(AdtInfo {
-                variant_fields,
-                variant_discrims,
-                kind,
-            });
+            item_info.item.set_adt_info(AdtInfo::new(kind, variant_fields, variant_discriminant_sources));
         }
 
         let mut impls = ImplTableSimple::new(this_crate);

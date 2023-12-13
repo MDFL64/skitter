@@ -1,6 +1,6 @@
 use skitter_macro::Persist;
 
-use crate::persist::Persist;
+use crate::{persist::Persist, types::{Type, TypeKind, IntWidth, IntSign}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Persist, Debug)]
 pub struct VariantIndex(u32);
@@ -20,13 +20,33 @@ pub struct Discriminant(Option<i128>);
 
 impl Discriminant {
     pub const NONE: Self = Discriminant(None);
+    pub const ZERO: Self = Discriminant(Some(0));
 
     pub fn new(val: i128) -> Self {
         Self(Some(val))
     }
 
+    pub fn from_bytes(bytes: &[u8], ty: Type) -> Self {
+        let val = match ty.kind() {
+            TypeKind::Int(IntWidth::I8,IntSign::Signed) => {
+                i8::from_le_bytes(bytes.try_into().unwrap()) as i128
+            }
+            _ => panic!("discriminant from bytes {:?} {} -> ???",bytes,ty)
+        };
+
+        //eprintln!("discriminant from bytes {:?} {} -> {}",bytes,ty,val);
+        Self(Some(val))
+    }
+
     pub fn value(&self) -> Option<i128> {
         self.0
+    }
+
+    pub fn next(&self) -> Self {
+        match self.0 {
+            None => panic!("attempt to get next for no discriminant"),
+            Some(x) => Self(Some(x + 1))
+        }
     }
 }
 

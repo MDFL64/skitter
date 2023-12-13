@@ -64,7 +64,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
 
             if let Some(discriminant) = discriminant {
                 let variant = adt_info
-                    .index_for_discriminant(discriminant)
+                    .index_for_discriminant(ty.vm(), discriminant)
                     .expect("no variant index found");
 
                 for (i, (ty, offset)) in adt_info

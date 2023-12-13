@@ -989,7 +989,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let adt_info = expr_ty.adt_info();
 
                     if let Some(enum_info) = adt_info.enum_info() {
-                        let disc = adt_info.variant_discrims.get(*variant);
+                        let disc = adt_info.variant_discriminants(self.vm).get(*variant);
 
                         if let Some(disc_val) = disc.value() {
                             let dl = enum_info.discriminant_internal.layout();
@@ -1303,23 +1303,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     Place::Ptr(index_slot, 0, PointerKind::Thin)
                 }
                 ExprKind::ConstBlock(const_ir) => {
-                    let bc = BytecodeCompiler::compile(
-                        self.vm,
-                        &const_ir,
-                        self.in_func_subs,
-                        "<const block>",
-                        self.in_func_subs,
-                    );
 
-                    let eval_thread = self.vm.make_thread();
-                    eval_thread.run_bytecode(&bc, 0);
+                    let (eval_bytes,const_ty) = const_ir.const_eval(self.vm, self.in_func_subs);
 
-                    let ty = const_ir.sig.output; // todo sub?
-                    let ptr_ty = ty.ref_to(Mutability::Const);
-                    let ptr_size = ptr_ty.layout().assert_size();
-
-                    let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
                     let const_ptr = self.vm.alloc_constant(eval_bytes).as_ptr() as usize;
+
+                    let ptr_ty = const_ty.ref_to(Mutability::Const);
+                    let ptr_size = ptr_ty.layout().assert_size();
 
                     let ptr_slot = self.stack.alloc(ptr_ty);
                     self.out_bc.push(bytecode_select::literal(
@@ -1633,7 +1623,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         .expect("not an enum?")
                         .discriminant_internal;
 
-                    let discriminant = adt_info.variant_discrims.get(*variant_index);
+                    let discriminant = adt_info.variant_discriminants(self.vm).get(*variant_index);
 
                     let Some(disc_val) = discriminant.value() else {
                         panic!("no discriminant!");

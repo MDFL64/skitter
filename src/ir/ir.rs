@@ -5,8 +5,8 @@ use skitter_macro::Persist;
 use crate::{
     closure::FnTrait,
     items::FunctionSig,
-    types::{ConstGeneric, ItemWithSubs, Mutability, Type},
-    variants::VariantIndex,
+    types::{ConstGeneric, ItemWithSubs, Mutability, Type, SubList},
+    variants::VariantIndex, vm::VM, bytecode_compiler::BytecodeCompiler,
 };
 
 #[derive(Default)]
@@ -125,6 +125,25 @@ impl<'vm> IRFunction<'vm> {
 
     pub fn expr_mut(&mut self, id: ExprId) -> &mut Expr<'vm> {
         &mut self.exprs[id.0 as usize]
+    }
+
+    pub fn const_eval(&self, vm: &'vm VM<'vm>, subs: &SubList<'vm>) -> (Vec<u8>,Type<'vm>) {
+        let bc = BytecodeCompiler::compile(
+            vm,
+            self,
+            subs,
+            "<const block>",
+            subs,
+        );
+
+        let eval_thread = vm.make_thread();
+        eval_thread.run_bytecode(&bc, 0);
+
+        let ty = self.sig.output; // todo sub?
+
+        let bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
+
+        (bytes,ty)
     }
 }
 
