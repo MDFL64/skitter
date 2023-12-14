@@ -31,6 +31,9 @@ impl Discriminant {
             TypeKind::Int(IntWidth::I8,IntSign::Signed) => {
                 i8::from_le_bytes(bytes.try_into().unwrap()) as i128
             }
+            TypeKind::Int(IntWidth::ISize,IntSign::Signed) => {
+                isize::from_le_bytes(bytes.try_into().unwrap()) as i128
+            }
             _ => panic!("discriminant from bytes {:?} {} -> ???",bytes,ty)
         };
 

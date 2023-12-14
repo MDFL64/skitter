@@ -617,8 +617,9 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 } else {
                     // unless specified, the external discriminant MUST be an isize,
                     // rustc makes some annoying assumptions when generating derive code
+                    // TODO select the smallest valid type (i32 may not even be valid in some cases!)
                     EnumInfo {
-                        discriminant_internal: vm.common_types().u32,
+                        discriminant_internal: vm.common_types().i32,
                         discriminant_external: vm.common_types().isize,
                     }
                 };
