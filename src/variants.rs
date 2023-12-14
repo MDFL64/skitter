@@ -16,14 +16,17 @@ impl VariantIndex {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Persist, Debug)]
-pub struct Discriminant(Option<i128>);
+pub enum Discriminant {
+    None,
+    Value(i128),
+    NonZero
+}
 
 impl Discriminant {
-    pub const NONE: Self = Discriminant(None);
-    pub const ZERO: Self = Discriminant(Some(0));
+    pub const ZERO: Self = Discriminant::Value(0);
 
     pub fn new(val: i128) -> Self {
-        Self(Some(val))
+        Self::Value(val)
     }
 
     pub fn from_bytes(bytes: &[u8], ty: Type) -> Self {
@@ -38,17 +41,21 @@ impl Discriminant {
         };
 
         //eprintln!("discriminant from bytes {:?} {} -> {}",bytes,ty,val);
-        Self(Some(val))
+        Self::Value(val)
     }
 
     pub fn value(&self) -> Option<i128> {
-        self.0
+        match self {
+            Self::Value(x) => Some(*x),
+            _ => None
+        }
     }
 
     pub fn next(&self) -> Self {
-        match self.0 {
-            None => panic!("attempt to get next for no discriminant"),
-            Some(x) => Self(Some(x + 1))
+        match self {
+            Self::None => panic!("attempt to get next for no discriminant"),
+            Self::NonZero => panic!("attempt to get next for non-zero"),
+            Self::Value(x) => Self::Value(*x + 1)
         }
     }
 }
@@ -69,7 +76,7 @@ where
     }
 
     fn persist_write(&self, writer: &mut crate::persist::PersistWriter<'vm>) {
-        self.persist_write(writer);
+        self.list.persist_write(writer);
     }
 }
 

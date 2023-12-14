@@ -36,7 +36,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
             let discriminant = match &adt_info.kind {
                 AdtKind::Struct => {
                     print!("struct{{ ");
-                    Some(Discriminant::NONE)
+                    Some(Discriminant::None)
                 }
                 AdtKind::Enum(e) => {
                     let disc = e.discriminant_internal;
