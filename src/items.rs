@@ -553,28 +553,32 @@ impl<'vm> AdtInfo<'vm> {
             kind,
             variant_fields,
             variant_discriminants: OnceLock::new(),
-            variant_discriminant_sources
+            variant_discriminant_sources,
         }
     }
 
     pub fn variant_discriminants(&self, vm: &'vm VM<'vm>) -> &Variants<Discriminant> {
         self.variant_discriminants.get_or_init(|| {
             let mut next = Discriminant::ZERO;
-            let discs = self.variant_discriminant_sources.iter().map(|(_,source)| {
-                let disc = match source {
-                    DiscriminantSource::Explicit(e) => {
-                        let (bytes,ty) = e.const_eval(vm, &SubList{list: vec!()});
+            let discs = self
+                .variant_discriminant_sources
+                .iter()
+                .map(|(_, source)| {
+                    let disc = match source {
+                        DiscriminantSource::Explicit(e) => {
+                            let (bytes, ty) = e.const_eval(vm, &SubList { list: vec![] });
 
-                        Discriminant::from_bytes(&bytes,ty)
-                    }
-                    DiscriminantSource::Next => next,
-                    DiscriminantSource::None => panic!("no discriminant")
-                };
+                            Discriminant::from_bytes(&bytes, ty)
+                        }
+                        DiscriminantSource::Next => next,
+                        DiscriminantSource::None => panic!("no discriminant"),
+                    };
 
-                next = disc.next();
+                    next = disc.next();
 
-                disc
-            }).collect();
+                    disc
+                })
+                .collect();
 
             Variants::new(discs)
         })
@@ -608,7 +612,11 @@ impl<'vm> AdtInfo<'vm> {
         }
     }
 
-    pub fn index_for_discriminant(&self, vm: &'vm VM<'vm>, disc: Discriminant) -> Option<VariantIndex> {
+    pub fn index_for_discriminant(
+        &self,
+        vm: &'vm VM<'vm>,
+        disc: Discriminant,
+    ) -> Option<VariantIndex> {
         self.variant_discriminants(vm)
             .iter()
             .find(|(_, d)| disc == **d)

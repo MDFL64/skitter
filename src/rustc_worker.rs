@@ -574,7 +574,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                 panic!("variant has non-local did");
                             };
 
-                            let ir = build_ir(&ctx, did, IRKind::Constant).expect("missing discriminant");
+                            let ir = build_ir(&ctx, did, IRKind::Constant)
+                                .expect("missing discriminant");
                             DiscriminantSource::Explicit(ir)
                         }
                         VariantDiscr::Relative(_) => DiscriminantSource::Next,
@@ -631,7 +632,11 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 AdtKind::Struct
             };
 
-            item_info.item.set_adt_info(AdtInfo::new(kind, variant_fields, variant_discriminant_sources));
+            item_info.item.set_adt_info(AdtInfo::new(
+                kind,
+                variant_fields,
+                variant_discriminant_sources,
+            ));
         }
 
         let mut impls = ImplTableSimple::new(this_crate);

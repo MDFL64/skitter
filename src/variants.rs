@@ -1,6 +1,9 @@
 use skitter_macro::Persist;
 
-use crate::{persist::Persist, types::{Type, TypeKind, IntWidth, IntSign}};
+use crate::{
+    persist::Persist,
+    types::{IntSign, IntWidth, Type, TypeKind},
+};
 
 #[derive(Copy, Clone, Eq, PartialEq, Persist, Debug)]
 pub struct VariantIndex(u32);
@@ -19,7 +22,7 @@ impl VariantIndex {
 pub enum Discriminant {
     None,
     Value(i128),
-    NonZero
+    NonZero,
 }
 
 impl Discriminant {
@@ -31,13 +34,13 @@ impl Discriminant {
 
     pub fn from_bytes(bytes: &[u8], ty: Type) -> Self {
         let val = match ty.kind() {
-            TypeKind::Int(IntWidth::I8,IntSign::Signed) => {
+            TypeKind::Int(IntWidth::I8, IntSign::Signed) => {
                 i8::from_le_bytes(bytes.try_into().unwrap()) as i128
             }
-            TypeKind::Int(IntWidth::ISize,IntSign::Signed) => {
+            TypeKind::Int(IntWidth::ISize, IntSign::Signed) => {
                 isize::from_le_bytes(bytes.try_into().unwrap()) as i128
             }
-            _ => panic!("discriminant from bytes {:?} {} -> ???",bytes,ty)
+            _ => panic!("discriminant from bytes {:?} {} -> ???", bytes, ty),
         };
 
         //eprintln!("discriminant from bytes {:?} {} -> {}",bytes,ty,val);
@@ -47,7 +50,7 @@ impl Discriminant {
     pub fn value(&self) -> Option<i128> {
         match self {
             Self::Value(x) => Some(*x),
-            _ => None
+            _ => None,
         }
     }
 
@@ -55,7 +58,7 @@ impl Discriminant {
         match self {
             Self::None => panic!("attempt to get next for no discriminant"),
             Self::NonZero => panic!("attempt to get next for non-zero"),
-            Self::Value(x) => Self::Value(*x + 1)
+            Self::Value(x) => Self::Value(*x + 1),
         }
     }
 }

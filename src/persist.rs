@@ -368,9 +368,7 @@ impl<'vm, T> Persist<'vm> for OnceLock<T>
 where
     T: Persist<'vm>,
 {
-    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-
-    }
+    fn persist_write(&self, writer: &mut PersistWriter<'vm>) {}
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
         Self::new()

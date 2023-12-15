@@ -1303,8 +1303,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     Place::Ptr(index_slot, 0, PointerKind::Thin)
                 }
                 ExprKind::ConstBlock(const_ir) => {
-
-                    let (eval_bytes,const_ty) = const_ir.const_eval(self.vm, self.in_func_subs);
+                    let (eval_bytes, const_ty) = const_ir.const_eval(self.vm, self.in_func_subs);
 
                     let const_ptr = self.vm.alloc_constant(eval_bytes).as_ptr() as usize;
 

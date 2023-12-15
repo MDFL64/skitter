@@ -1,10 +1,15 @@
 use crate::{
     crate_provider::TraitImplResult,
     items::{AssocValue, Item, ItemPath},
-    types::{Sub, SubList, Type},
+    types::{Sub, SubList, Type}, variants::VariantIndex,
 };
 
 use super::TypeKind;
+
+// TODO, this is just a function. This function:
+// 1. Calls drop, if applicable.
+// 2. Drops all fields, if applicable.
+struct DropGlue;
 
 // Jargon:
 // Drop "glue" refers to all the code required to drop a type, which may include a Drop impl and code to drop fields.
@@ -15,23 +20,53 @@ use super::TypeKind;
 
 /// Contains some metadata about drops, which is used both to compile functions, and to
 /// generate drop "glue". Glue is stored separately in the type.
-pub struct DropInfo<'vm> {
-    /// Marks this type as a drop "leaf" even if it lacks an impl or fields.
-    /// Used for:
-    /// - Arrays
-    is_special_leaf: bool,
-
-    drop_impl: Option<i32>,
-    fields: Vec<DropField<Type<'vm>>>,
+#[derive(Clone)]
+pub enum DropInfo<'vm> {
+    None,
+    Leaf(DropGlue),
+    Branch {
+        glue: DropGlue,
+        fields: Vec<DropField>
+    }
 }
 
-pub struct DropField<T> {
-    variant: u32,
+#[derive(Clone)]
+pub struct DropField<'vm> {
+    variant: VariantIndex,
     field: u32,
-    ty: T,
+    ty: Type<'vm>,
 }
 
 impl<'vm> DropInfo<'vm> {
+    fn new(drop_impl: Option<&'vm Item<'vm>>, fields: Vec<DropField<'vm>>) -> Self {
+        Self {
+            is_special_leaf: false,
+            drop_impl,
+            fields,
+        }
+    }
+
+    fn for_tuple(fields: &[Type<'vm>]) -> Self {
+        let fields = fields
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(i, ty)| {
+                if ty.drop_info().is_drop() {
+                    Some(DropField {
+                        variant: 0,
+                        field: i as u32,
+                        ty,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        DropInfo::new(None, fields)
+    }
+
     fn empty() -> Self {
         Self {
             is_special_leaf: false,
@@ -48,9 +83,9 @@ impl<'vm> DropInfo<'vm> {
         }
     }
 
-    // kill me
-    pub fn is_none(&self) -> bool {
-        true
+    /// Returns true if ANY drop-related actions are required.
+    pub fn is_drop(&self) -> bool {
+        self.is_special_leaf || self.drop_impl.is_some() || self.fields.len() > 0
     }
 }
 
@@ -98,24 +133,21 @@ impl<'vm> Type<'vm> {
                 | TypeKind::Ptr(..)
                 | TypeKind::FunctionPointer(..)
                 | TypeKind::FunctionDef(..)
-                | TypeKind::Never => return DropInfo::empty(),
+                | TypeKind::Never => DropInfo::empty(),
 
                 TypeKind::Array(child, _) => {
-                    return if !child.drop_info().is_none() {
+                    if child.drop_info().is_drop() {
                         // drop array of T
                         DropInfo::special_leaf()
                     } else {
                         DropInfo::empty()
-                    };
+                    }
                 }
 
-                TypeKind::Tuple(..) => {
-                    // todo check fields
-                    DropInfo::empty()
-                }
+                TypeKind::Tuple(fields) => DropInfo::for_tuple(fields),
                 TypeKind::Closure(closure, subs) => {
-                    // todo use captures
-                    DropInfo::empty()
+                    let env = closure.env(subs);
+                    env.drop_info().clone()
                 }
                 TypeKind::Adt(..) => {
                     get_drop_impl(*self);
