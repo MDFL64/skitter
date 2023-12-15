@@ -13,6 +13,7 @@ use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
+use crate::items::ItemPath;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
@@ -60,6 +61,8 @@ pub struct VM<'vm> {
 
     map_paths: Mutex<AHashSet<&'vm str>>,
     map_vtables: Mutex<AHashMap<(&'vm Item<'vm>, SubList<'vm>), &'vm VTable<'vm>>>,
+
+    drop_trait: OnceLock<&'vm Item<'vm>>,
 }
 
 static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
@@ -196,6 +199,8 @@ impl<'vm> VM<'vm> {
 
             map_paths: Default::default(),
             map_vtables: Default::default(),
+
+            drop_trait: Default::default(),
         }
     }
 
@@ -380,6 +385,38 @@ impl<'vm> VM<'vm> {
                     methods,
                 })
             })
+    }
+
+    pub fn find_drop(&self, ty: Type<'vm>) -> Option<&'vm Item<'vm>> {
+        let drop_trait = self.drop_trait.get_or_init(|| {
+            let core_id = *self.core_crate.get().expect("no core crate");
+            let core_provider = self.crate_provider(core_id);
+
+            core_provider
+                .item_by_path(&ItemPath::for_type("::ops::drop::Drop"))
+                .expect("no drop trait")
+        });
+
+        let drop_impl = drop_trait.find_trait_impl(&SubList {
+            list: vec![Sub::Type(ty)],
+        });
+
+        match drop_impl {
+            TraitImplResult::Dynamic => {
+                panic!("dyn drop, is this even valid?");
+            }
+            TraitImplResult::Static(drop_impl) => {
+                let val = drop_impl.assoc_values[0].as_ref().unwrap();
+                let AssocValue::Item(item_id) = val else {
+                    panic!("drop impl is not an item");
+                };
+
+                let provider = self.crate_provider(drop_impl.crate_id);
+                let item = provider.item_by_id(*item_id);
+                Some(item)
+            }
+            TraitImplResult::None => None,
+        }
     }
 
     pub fn common_types(&'vm self) -> &CommonTypes<'vm> {

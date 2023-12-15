@@ -103,6 +103,10 @@ impl<T> Variants<T> {
             .map(|(i, x)| (VariantIndex(i as u32), x))
     }
 
+    pub fn as_slice(&self) -> &[T] {
+        &self.list
+    }
+
     pub fn assert_single(&self) -> &T {
         if self.list.len() == 1 {
             return &self.list[0];

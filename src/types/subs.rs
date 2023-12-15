@@ -101,6 +101,10 @@ pub struct SubList<'vm> {
 }
 
 impl<'vm> SubList<'vm> {
+    pub fn empty() -> Self {
+        Self { list: vec![] }
+    }
+
     pub fn from_summary(summary: &GenericCounts, vm: &'vm VM<'vm>) -> Self {
         let total = summary.total();
         let mut list = Vec::with_capacity(total as usize);

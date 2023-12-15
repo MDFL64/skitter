@@ -1,7 +1,9 @@
 use crate::{
     crate_provider::TraitImplResult,
     items::{AssocValue, Item, ItemPath},
-    types::{Sub, SubList, Type}, variants::VariantIndex,
+    types::{Sub, SubList, Type},
+    variants::VariantIndex,
+    vm::Function,
 };
 
 use super::TypeKind;
@@ -9,7 +11,8 @@ use super::TypeKind;
 // TODO, this is just a function. This function:
 // 1. Calls drop, if applicable.
 // 2. Drops all fields, if applicable.
-struct DropGlue;
+#[derive(Clone)]
+struct DropGlue<'vm>(&'vm Function<'vm>);
 
 // Jargon:
 // Drop "glue" refers to all the code required to drop a type, which may include a Drop impl and code to drop fields.
@@ -23,14 +26,14 @@ struct DropGlue;
 #[derive(Clone)]
 pub enum DropInfo<'vm> {
     None,
-    Leaf(DropGlue),
+    Leaf(DropGlue<'vm>),
     Branch {
-        glue: DropGlue,
-        fields: Vec<DropField>
-    }
+        glue: DropGlue<'vm>,
+        fields: Vec<DropField<'vm>>,
+    },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DropField<'vm> {
     variant: VariantIndex,
     field: u32,
@@ -38,85 +41,51 @@ pub struct DropField<'vm> {
 }
 
 impl<'vm> DropInfo<'vm> {
-    fn new(drop_impl: Option<&'vm Item<'vm>>, fields: Vec<DropField<'vm>>) -> Self {
-        Self {
-            is_special_leaf: false,
-            drop_impl,
-            fields,
-        }
-    }
+    fn new(
+        drop_fn: Option<&'vm Item<'vm>>,
+        variant_fields: &[Vec<Type<'vm>>],
+        subs: &SubList<'vm>,
+    ) -> Self {
+        let mut fields = Vec::new();
 
-    fn for_tuple(fields: &[Type<'vm>]) -> Self {
-        let fields = fields
-            .iter()
-            .copied()
-            .enumerate()
-            .filter_map(|(i, ty)| {
+        for (variant, field_tys) in variant_fields.iter().enumerate() {
+            let variant = VariantIndex::new(variant as u32);
+
+            for (field_index, ty) in field_tys.iter().enumerate() {
+                let ty = ty.sub(subs);
                 if ty.drop_info().is_drop() {
-                    Some(DropField {
-                        variant: 0,
-                        field: i as u32,
+                    fields.push(DropField {
+                        variant,
+                        field: field_index as u32,
                         ty,
                     })
-                } else {
-                    None
                 }
-            })
-            .collect();
-
-        DropInfo::new(None, fields)
-    }
-
-    fn empty() -> Self {
-        Self {
-            is_special_leaf: false,
-            drop_impl: None,
-            fields: vec![],
+            }
         }
-    }
 
-    fn special_leaf() -> Self {
-        Self {
-            is_special_leaf: true,
-            drop_impl: None,
-            fields: vec![],
+        if fields.len() > 0 || drop_fn.is_some() {
+            let glue = DropGlue::new(drop_fn, &fields);
+
+            if drop_fn.is_some() {
+                DropInfo::Leaf(glue)
+            } else {
+                DropInfo::Branch { glue, fields }
+            }
+        } else {
+            DropInfo::None
         }
     }
 
     /// Returns true if ANY drop-related actions are required.
     pub fn is_drop(&self) -> bool {
-        self.is_special_leaf || self.drop_impl.is_some() || self.fields.len() > 0
+        !self.is_none()
     }
-}
 
-fn get_drop_impl<'vm>(ty: Type<'vm>) -> Option<&'vm Item<'vm>> {
-    let vm = ty.1;
-
-    let core_id = *vm.core_crate.get().expect("no core crate");
-    let core_provider = vm.crate_provider(core_id);
-    let drop_trait = core_provider
-        .item_by_path(&ItemPath::for_type("::ops::drop::Drop"))
-        .expect("no drop trait");
-
-    let drop_impl = drop_trait.find_trait_impl(&SubList {
-        list: vec![Sub::Type(ty)],
-    });
-
-    match drop_impl {
-        TraitImplResult::Dynamic => {
-            panic!("dyn drop, is this even valid?");
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::None => true,
+            _ => false,
         }
-        TraitImplResult::Static(drop_impl) => {
-            let val = drop_impl.assoc_values[0].as_ref().unwrap();
-            let AssocValue::Item(item_id) = val else {
-                panic!("drop impl is not an item");
-            };
-
-            let provider = vm.crate_provider(drop_impl.crate_id);
-            let item = provider.item_by_id(*item_id);
-            Some(item)
-        }
-        TraitImplResult::None => None,
     }
 }
 
@@ -133,29 +102,38 @@ impl<'vm> Type<'vm> {
                 | TypeKind::Ptr(..)
                 | TypeKind::FunctionPointer(..)
                 | TypeKind::FunctionDef(..)
-                | TypeKind::Never => DropInfo::empty(),
+                | TypeKind::Never => DropInfo::None,
 
                 TypeKind::Array(child, _) => {
                     if child.drop_info().is_drop() {
-                        // drop array of T
-                        DropInfo::special_leaf()
+                        panic!("array drop");
                     } else {
-                        DropInfo::empty()
+                        DropInfo::None
                     }
                 }
 
-                TypeKind::Tuple(fields) => DropInfo::for_tuple(fields),
+                TypeKind::Tuple(fields) => {
+                    DropInfo::new(None, std::slice::from_ref(fields), &SubList::empty())
+                }
                 TypeKind::Closure(closure, subs) => {
                     let env = closure.env(subs);
                     env.drop_info().clone()
                 }
-                TypeKind::Adt(..) => {
-                    get_drop_impl(*self);
-                    // todo check fields
-                    DropInfo::empty()
+                TypeKind::Adt(info) => {
+                    let adt_info = info.item.adt_info();
+                    let drop_fn = self.1.find_drop(*self);
+
+                    DropInfo::new(drop_fn, adt_info.variant_fields.as_slice(), &info.subs)
                 }
                 _ => panic!("drop info: {:?}", self),
             }
         })
+    }
+}
+
+impl<'vm> DropGlue<'vm> {
+    pub fn new(drop_fn: Option<&'vm Item<'vm>>, fields: &[DropField<'vm>]) -> Self {
+        println!("{:?} {:?}", drop_fn, fields);
+        panic!("new drop glue");
     }
 }
