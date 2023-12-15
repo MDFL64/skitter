@@ -464,6 +464,7 @@ impl<'vm> VM<'vm> {
 pub enum FunctionSource<'vm> {
     Item(&'vm Item<'vm>),
     Closure(&'vm Closure<'vm>),
+    RawBytecode(&'vm Vec<Instr<'vm>>),
 }
 
 impl<'vm> FunctionSource<'vm> {
@@ -471,6 +472,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.vm,
             Self::Closure(closure) => closure.vm,
+            Self::RawBytecode(_) => panic!("no source"),
         }
     }
 
@@ -478,6 +480,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.ir(subs),
             Self::Closure(closure) => (closure.ir_base(), Cow::Borrowed(subs)),
+            Self::RawBytecode(_) => panic!("no source"),
         }
     }
 
@@ -485,6 +488,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.path.as_string(),
             Self::Closure(_) => "[closure]",
+            Self::RawBytecode(_) => "[raw bytecode, probably drop glue]",
         }
     }
 }

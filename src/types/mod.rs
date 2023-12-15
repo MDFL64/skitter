@@ -9,6 +9,7 @@ mod types;
 use std::sync::OnceLock;
 
 pub use common_types::CommonTypes;
+pub use drop::{DropGlue, DropInfo};
 pub use subs::*;
 pub use type_context::TypeContext;
 pub use type_persist::WriterTypes;

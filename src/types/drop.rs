@@ -3,7 +3,7 @@ use crate::{
     items::{AssocValue, Item, ItemPath},
     types::{Sub, SubList, Type},
     variants::VariantIndex,
-    vm::Function,
+    vm::{instr::Instr, Function, FunctionSource, VM},
 };
 
 use super::TypeKind;
@@ -12,7 +12,7 @@ use super::TypeKind;
 // 1. Calls drop, if applicable.
 // 2. Drops all fields, if applicable.
 #[derive(Clone)]
-struct DropGlue<'vm>(&'vm Function<'vm>);
+pub struct DropGlue<'vm>(&'vm Function<'vm>);
 
 // Jargon:
 // Drop "glue" refers to all the code required to drop a type, which may include a Drop impl and code to drop fields.
@@ -42,10 +42,13 @@ pub struct DropField<'vm> {
 
 impl<'vm> DropInfo<'vm> {
     fn new(
+        vm: &'vm VM<'vm>,
         drop_fn: Option<&'vm Item<'vm>>,
         variant_fields: &[Vec<Type<'vm>>],
         subs: &SubList<'vm>,
     ) -> Self {
+        let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
+
         let mut fields = Vec::new();
 
         for (variant, field_tys) in variant_fields.iter().enumerate() {
@@ -64,7 +67,7 @@ impl<'vm> DropInfo<'vm> {
         }
 
         if fields.len() > 0 || drop_fn.is_some() {
-            let glue = DropGlue::new(drop_fn, &fields);
+            let glue = DropGlue::new(vm, drop_fn, &fields);
 
             if drop_fn.is_some() {
                 DropInfo::Leaf(glue)
@@ -91,6 +94,8 @@ impl<'vm> DropInfo<'vm> {
 
 impl<'vm> Type<'vm> {
     pub fn drop_info(&self) -> &DropInfo<'vm> {
+        let vm = self.1;
+
         self.0.drop_info.get_or_init(|| {
             // gather fields, bail for types we can't drop
             match self.kind() {
@@ -113,7 +118,7 @@ impl<'vm> Type<'vm> {
                 }
 
                 TypeKind::Tuple(fields) => {
-                    DropInfo::new(None, std::slice::from_ref(fields), &SubList::empty())
+                    DropInfo::new(vm, None, std::slice::from_ref(fields), &SubList::empty())
                 }
                 TypeKind::Closure(closure, subs) => {
                     let env = closure.env(subs);
@@ -123,7 +128,7 @@ impl<'vm> Type<'vm> {
                     let adt_info = info.item.adt_info();
                     let drop_fn = self.1.find_drop(*self);
 
-                    DropInfo::new(drop_fn, adt_info.variant_fields.as_slice(), &info.subs)
+                    DropInfo::new(vm, drop_fn, adt_info.variant_fields.as_slice(), &info.subs)
                 }
                 _ => panic!("drop info: {:?}", self),
             }
@@ -132,8 +137,22 @@ impl<'vm> Type<'vm> {
 }
 
 impl<'vm> DropGlue<'vm> {
-    pub fn new(drop_fn: Option<&'vm Item<'vm>>, fields: &[DropField<'vm>]) -> Self {
-        println!("{:?} {:?}", drop_fn, fields);
-        panic!("new drop glue");
+    pub fn new(
+        vm: &'vm VM<'vm>,
+        drop_fn: Option<&'vm Function<'vm>>,
+        fields: &[DropField<'vm>],
+    ) -> Self {
+        assert!(drop_fn.is_some() || fields.len() > 0);
+
+        // we go straight to bytecode here for several reasons:
+        // 1. the code required may depend on the drop info of generics, trying to generate generic IR would probably not go well
+        // 2. handling drops in functions may involve generating similar bytecode, there may be some opportunity for re-use
+        // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
+
+        let bc = vec![Instr::Error(Box::new("drop glue".to_owned()))];
+
+        let bc = vm.alloc_bytecode(bc);
+
+        Self(vm.alloc_function(FunctionSource::RawBytecode(bc), SubList::empty()))
     }
 }
