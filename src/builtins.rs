@@ -4,7 +4,7 @@ use skitter_macro::Persist;
 
 use crate::{
     abi::POINTER_SIZE,
-    bytecode_compiler::CompilerStack,
+    bytecode_compiler::{CompilerStack, Local},
     bytecode_select,
     closure::FnTrait,
     crate_provider::TraitImpl,
@@ -350,8 +350,8 @@ pub fn compile_rust_intrinsic<'vm>(
     vm: &'vm VM<'vm>,
     out_bc: &mut Vec<Instr<'vm>>,
     stack: &mut CompilerStack,
-    arg_slots: Vec<Slot>,
-    out_slot: Slot,
+    arg_slots: Vec<Local>,
+    out_slot: Local,
 ) {
     match name {
         "transmute" | "transmute_unchecked" => {
