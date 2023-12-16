@@ -353,7 +353,7 @@ pub fn compile_rust_intrinsic<'vm>(
     arg_slots: Vec<Local>,
     out_slot: Local,
 ) {
-    match name {
+    /*match name {
         "transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
             assert!(arg_slots.len() == 1);
@@ -953,5 +953,6 @@ pub fn compile_rust_intrinsic<'vm>(
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);
         }
-    }
+    }*/
+    panic!("intrinsics disabled");
 }

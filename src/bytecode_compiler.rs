@@ -10,6 +10,7 @@ use crate::ir::{
 use crate::items::FunctionAbi;
 use crate::types::{DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::variants::VariantIndex;
+use crate::vm::VM;
 use crate::vm::instr::Instr;
 use crate::vm::{self, instr::Slot};
 
@@ -71,9 +72,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         let ret_slot = compiler.stack.alloc_no_drop(out_ty);
         assert_eq!(ret_slot.index(), 0);
 
+        let local_ret = Local{
+            slot: ret_slot,
+            ty: out_ty,
+            drop_id: None
+        };
+
         let body_scope = compiler.stack.push_scope("body");
 
-        let param_slots: Vec<Slot> = ir
+        let param_slots: Vec<_> = ir
             .params
             .iter()
             .map(|pat| compiler.alloc_pattern(*pat))
@@ -96,8 +103,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
             compiler.closure = Some(ClosureInfo {
                 kind: closure_kind,
-                self_slot: param_slots[0],
-                self_ty,
+                self_local: param_slots[0]
             })
         }
 
@@ -106,7 +112,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             compiler.match_pattern_internal(pat, Place::Local(slot), true, None);
         }
 
-        compiler.lower_expr(ir.root_expr, Some(Slot::new(0)));
+        compiler.lower_expr(ir.root_expr, Some(local_ret));
 
         compiler.stack.pop_scope(body_scope);
         compiler.out_bc.push(Instr::Return);
@@ -160,9 +166,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         const_thread.run_bytecode(&compiler.out_bc, 0);
 
         match place {
-            Place::Local(slot) => {
+            Place::Local(local) => {
                 let size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
-                let data = const_thread.copy_result(slot.index(), size);
+                let data = const_thread.copy_result(local.slot.index(), size);
                 let ptr = vm.alloc_constant(data).as_ptr() as usize;
                 (ptr, None)
             }
@@ -188,13 +194,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn lower_block(&mut self, block: &Block, dst_slot: Option<Slot>) -> Slot {
+    fn lower_block(&mut self, block: &Block, dest: Option<Local>) -> Local {
         // allocate result before entering scope
-        let dst_slot = dst_slot.unwrap_or_else(|| {
+        let dest = dest.unwrap_or_else(|| {
             if let Some(expr) = block.result {
                 self.stack.alloc(self.expr_ty(expr))
             } else {
-                Slot::DUMMY
+                Local::void(self.vm)
             }
         });
 
@@ -241,15 +247,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         if self.expr_is_place(id) {
             match self.expr_to_place(id) {
-                Place::Local(local_slot) => {
-                    if let Some(dst_slot) = dst_slot {
-                        if let Some(instr) = bytecode_select::copy(dst_slot, local_slot, expr_ty) {
+                Place::Local(local_source) => {
+                    if let Some(dest) = dest {
+                        if let Some(instr) = bytecode_select::copy(dest.slot, local_source.slot, expr_ty) {
                             self.out_bc.push(instr);
                         }
 
-                        dst_slot
+                        dest
                     } else {
-                        local_slot
+                        local_source
                     }
                 }
                 Place::Ptr(ptr_slot, offset, _) => {
@@ -278,7 +284,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     ));
                     dst_slot
                 }
-                ExprKind::LiteralVoid => dst_slot.unwrap_or_else(|| Slot::DUMMY),
+                ExprKind::LiteralVoid => dest.unwrap_or_else(|| Local::void(self.vm)),
                 ExprKind::LiteralBytes(bytes) => {
                     let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
@@ -368,7 +374,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
 
                     // the destination is (), just return a dummy value
-                    dst_slot.unwrap_or(Slot::DUMMY)
+                    dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::AssignOp(op, lhs, rhs) => {
                     let rhs_local = self.lower_expr(*rhs, None);
@@ -403,7 +409,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
 
                     // the destination is (), just return a dummy value
-                    dst_slot.unwrap_or(Slot::DUMMY)
+                    dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::Call { func, args } => {
                     let ty = self.expr_ty(*func);
@@ -572,7 +578,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     });
                     let loop_count = self.loops.len();
 
-                    self.lower_block(body, Some(Slot::DUMMY));
+                    self.lower_block(body, Some(Local::void(self.vm)));
 
                     assert_eq!(loop_count, self.loops.len());
                     self.loops.pop();
@@ -613,7 +619,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     });
 
                     // the destination is (), just return a dummy value
-                    dst_slot.unwrap_or(Slot::DUMMY)
+                    dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::Continue { loop_id } => {
                     let loop_start = self
@@ -627,7 +633,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     self.out_bc.push(Instr::Jump(offset));
 
                     // the destination is (), just return a dummy value
-                    dst_slot.unwrap_or(Slot::DUMMY)
+                    dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::Return(value) => {
                     
@@ -647,7 +653,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     self.out_bc.push(Instr::Return);
 
                     // the destination is (), just return a dummy value
-                    dst_slot.unwrap_or(Slot::DUMMY)
+                    dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::Ref(arg, ref_mutability) => {
                     let arg_ty = self.expr_ty(*arg);
@@ -2405,8 +2411,7 @@ struct StackEntry {
     base: u32,
     size: u32,
 }
-
-// A simplified callstack for
+/*
 #[derive(Default)]
 struct CallFrame {
     top: u32,
@@ -2428,7 +2433,7 @@ impl CallFrame {
     fn align(&mut self, align: u32) {
         self.top = crate::abi::align(self.top, align);
     }
-}
+}*/
 
 #[derive(Debug, Clone, Copy)]
 struct DropId(u32);
@@ -2445,6 +2450,15 @@ pub struct Local<'vm> {
 }
 
 impl Local {
+    pub fn void(vm: &'vm VM<'vm>) -> Self {
+        let void = vm.common_types().void;
+        Self {
+            slot: Slot::new(0),
+            ty: void,
+            drop_id: None
+        }
+    }
+
     pub fn get_field(&self, variant: VariantIndex, field: u32) -> Self {
         panic!("local get field");
     }

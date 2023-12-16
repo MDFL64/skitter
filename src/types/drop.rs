@@ -1,7 +1,6 @@
 use crate::{
-    crate_provider::TraitImplResult,
-    items::{AssocValue, Item, ItemPath},
-    types::{Sub, SubList, Type},
+    items::Item,
+    types::{SubList, Type},
     variants::VariantIndex,
     vm::{instr::Instr, Function, FunctionSource, VM},
 };

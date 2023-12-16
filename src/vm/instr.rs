@@ -4,8 +4,6 @@ use super::vm::Function;
 pub struct Slot(u32);
 
 impl Slot {
-    pub const DUMMY: Self = Self(0);
-
     const SUB_OFFSET: u32 = 1_000_000_000;
 
     pub fn new(id: u32) -> Self {

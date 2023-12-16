@@ -27,7 +27,7 @@ use crate::{
     persist::{Persist, PersistWriteContext, PersistWriter},
     persist_header::{persist_header_write, PersistCrateHeader},
     types::{Sub, SubList, Type},
-    variants::{Discriminant, VariantIndex, Variants},
+    variants::{VariantIndex, Variants},
     vm::VM,
     CratePath,
 };
