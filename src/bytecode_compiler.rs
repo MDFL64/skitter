@@ -20,8 +20,8 @@ pub struct BytecodeCompiler<'vm, 'f> {
     out_bc: Vec<Instr<'vm>>,
     vm: &'vm vm::VM<'vm>,
     stack: CompilerStack,
-    locals: Vec<(u32, Local)>,
-    loops: Vec<LoopInfo>,
+    locals: Vec<(u32, Local<'vm>)>,
+    loops: Vec<LoopInfo<'vm>>,
     loop_breaks: Vec<BreakInfo>,
     closure: Option<ClosureInfo<'vm>>,
 }
@@ -31,9 +31,9 @@ struct ClosureInfo<'vm> {
     self_local: Local<'vm>,
 }
 
-struct LoopInfo {
+struct LoopInfo<'vm> {
     loop_id: LoopId,
-    result_local: Local,
+    result_local: Local<'vm>,
     start_index: usize,
 }
 
@@ -194,7 +194,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn lower_block(&mut self, block: &Block, dest: Option<Local>) -> Local {
+    fn lower_block(&mut self, block: &Block, dest: Option<Local<'vm>>) -> Local<'vm> {
         // allocate result before entering scope
         let dest = dest.unwrap_or_else(|| {
             if let Some(expr) = block.result {
@@ -213,12 +213,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             // ALWAYS have a slot allocated for the final expression
             // prevents wrongly aliasing locals - TODO we may want to allocate this up-front for saner stack layout
 
-            self.lower_expr(expr, Some(dst_slot));
+            self.lower_expr(expr, Some(dest));
         }
 
         self.stack.pop_scope(scope);
 
-        dst_slot
+        dest
     }
 
     fn lower_stmt(&mut self, stmt: &Stmt) {
@@ -241,7 +241,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn lower_expr(&mut self, id: ExprId, dest: Option<Local>) -> Local {
+    fn lower_expr(&mut self, id: ExprId, dest: Option<Local<'vm>>) -> Local<'vm> {
         let expr = self.in_func.expr(id);
         let expr_ty = self.expr_ty(id);
 
@@ -259,34 +259,34 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
                 }
                 Place::Ptr(ptr_slot, offset, _) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     if let Some(instr) =
-                        bytecode_select::copy_from_ptr(dst_slot, ptr_slot, expr_ty, offset)
+                        bytecode_select::copy_from_ptr(dest.slot, ptr_slot, expr_ty, offset)
                     {
                         self.out_bc.push(instr);
                     }
 
-                    dst_slot
+                    dest
                 }
             }
         } else {
             match &expr.kind {
-                ExprKind::Dummy(value) => self.lower_expr(*value, dst_slot),
-                ExprKind::Block(block) => self.lower_block(block, dst_slot),
+                ExprKind::Dummy(value) => self.lower_expr(*value, dest),
+                ExprKind::Block(block) => self.lower_block(block, dest),
                 ExprKind::LiteralValue(n) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     self.out_bc.push(bytecode_select::literal(
                         *n,
                         expr_ty.layout().assert_size(),
-                        dst_slot,
+                        dest.slot,
                     ));
-                    dst_slot
+                    dest
                 }
                 ExprKind::LiteralVoid => dest.unwrap_or_else(|| Local::void(self.vm)),
                 ExprKind::LiteralBytes(bytes) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     let ptr = bytes.as_ptr() as usize;
                     let len = bytes.len();
@@ -294,14 +294,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let ptr_size = POINTER_SIZE.bytes();
 
                     self.out_bc
-                        .push(bytecode_select::literal(ptr as i128, ptr_size, dst_slot));
+                        .push(bytecode_select::literal(ptr as i128, ptr_size, dest.slot));
                     self.out_bc.push(bytecode_select::literal(
                         len as i128,
                         ptr_size,
-                        dst_slot.offset_by(ptr_size as i32),
+                        dest.slot.offset_by(ptr_size as i32),
                     ));
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Unary(op, arg) => {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
@@ -519,24 +519,24 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let jump_index_1 = self.skip_instr();
 
                     if let Some(else_expr) = else_opt {
-                        let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                        let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                        self.lower_expr(*then, Some(dst_slot));
+                        self.lower_expr(*then, Some(dest));
 
                         let jump_index_2 = self.skip_instr();
 
                         let jump_offset_1 = -self.get_jump_offset(jump_index_1);
                         self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, cond_local.slot);
 
-                        self.lower_expr(*else_expr, Some(dst_slot));
+                        self.lower_expr(*else_expr, Some(dest));
 
                         let jump_offset_2 = -self.get_jump_offset(jump_index_2);
                         self.out_bc[jump_index_2] = Instr::Jump(jump_offset_2);
 
-                        dst_slot
+                        dest
                     } else {
-                        // note: dst_slot should be void
-                        let res = self.lower_expr(*then, dst_slot);
+                        // note: dest should be void
+                        let res = self.lower_expr(*then, dest);
 
                         let jump_offset_1 = -self.get_jump_offset(jump_index_1);
                         self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, cond_local.slot);
@@ -545,26 +545,26 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
                 }
                 ExprKind::LogicOp(op, lhs, rhs) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    self.lower_expr(*lhs, Some(dst_slot));
+                    self.lower_expr(*lhs, Some(dest));
 
                     let jump_index_1 = self.skip_instr();
 
-                    self.lower_expr(*rhs, Some(dst_slot));
+                    self.lower_expr(*rhs, Some(dest));
 
                     let jump_offset_1 = -self.get_jump_offset(jump_index_1);
 
                     match op {
                         LogicOp::And => {
-                            self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, dst_slot);
+                            self.out_bc[jump_index_1] = Instr::JumpF(jump_offset_1, dest.slot);
                         }
                         LogicOp::Or => {
-                            self.out_bc[jump_index_1] = Instr::JumpT(jump_offset_1, dst_slot);
+                            self.out_bc[jump_index_1] = Instr::JumpT(jump_offset_1, dest.slot);
                         }
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Loop(body, loop_id) => {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
@@ -599,7 +599,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.out_bc[break_index] = Instr::Jump(offset);
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Break { loop_id, value } => {
                     if let Some(value) = value {
@@ -669,22 +669,22 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             *arg,
                         );
 
-                        let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                        let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                         let ptr_size = POINTER_SIZE.bytes();
 
                         self.out_bc
-                            .push(bytecode_select::literal(ptr as _, ptr_size, dst_slot));
+                            .push(bytecode_select::literal(ptr as _, ptr_size, dest.slot));
 
                         if let Some(ptr_meta) = ptr_meta {
                             self.out_bc.push(bytecode_select::literal(
                                 ptr_meta as _,
                                 ptr_size,
-                                dst_slot.offset_by(ptr_size as i32),
+                                dest.slot.offset_by(ptr_size as i32),
                             ));
                         }
 
-                        return dst_slot;
+                        return dest;
                     } else {
                         self.expr_to_place(*arg)
                     };
@@ -752,7 +752,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                         );
                                     }
 
-                                    dst_slot
+                                    dest
                                 } else {
                                     if let Some(dest) = dest {
                                         self.out_bc.push(
@@ -896,7 +896,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 dest.slot.offset_by(ptr_size as i32),
                             ));
 
-                            dst_slot
+                            dest
                         }
                         PointerCast::MutToConstPointer => {
                             // a simple copy
@@ -907,23 +907,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             self.out_bc
                                 .push(bytecode_select::copy(dest.slot, source.slot, expr_ty).unwrap());
 
-                            dst_slot
+                            dest
                         }
                         PointerCast::ReifyFnPointer => {
                             let src_ty = self.expr_ty(*source);
 
                             if let Some(func_ref) = src_ty.func_item() {
-                                let dst_slot =
-                                    dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                let dest =
+                                    dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                 let func_ptr = func_ref.item.func_mono(&func_ref.subs) as *const _;
 
                                 self.out_bc.push(bytecode_select::literal(
                                     func_ptr as i128,
                                     POINTER_SIZE.bytes(),
-                                    dst_slot,
+                                    dest.slot,
                                 ));
-                                dst_slot
+                                dest
                             } else {
                                 panic!("cannot reify function: {}", src_ty)
                             }
@@ -932,8 +932,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         PointerCast::ClosureFnPointer => {
                             let src_ty = self.expr_ty(*source);
                             if let TypeKind::Closure(closure, subs) = src_ty.kind() {
-                                let dst_slot =
-                                    dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                let dest =
+                                    dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                 assert!(subs.is_concrete());
 
@@ -942,9 +942,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 self.out_bc.push(bytecode_select::literal(
                                     func_ptr as i128,
                                     POINTER_SIZE.bytes(),
-                                    dst_slot,
+                                    dest.slot,
                                 ));
-                                dst_slot
+                                dest
                             } else {
                                 panic!("cannot convert closure to function pointer: {}", src_ty)
                             }
@@ -953,17 +953,16 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
                 }
                 ExprKind::Tuple(fields) => {
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    for (field, offset) in fields
-                        .iter()
-                        .zip(expr_ty.layout().field_offsets.assert_single().iter())
+                    for (field_index, field) in fields
+                        .iter().enumerate()
                     {
-                        let field_slot = dst_slot.offset_by(*offset as i32);
-                        self.lower_expr(*field, Some(field_slot));
+                        let field_local = dest.get_field(VariantIndex::new(0), field_index as u32);
+                        self.lower_expr(*field, Some(field_local));
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Array(fields) => {
                     let TypeKind::Array(elem_ty,_) = expr_ty.kind() else {
@@ -972,14 +971,20 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let elem_size = elem_ty.layout().assert_size();
 
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     for (i, field) in fields.iter().enumerate() {
-                        let field_slot = dst_slot.offset_by(i as i32 * elem_size as i32);
-                        self.lower_expr(*field, Some(field_slot));
+                        let field_slot = dest.slot.offset_by(i as i32 * elem_size as i32);
+                        // array child drops are not tracked
+                        let field_local = Local{
+                            slot: field_slot,
+                            ty: *elem_ty,
+                            drop_id: None
+                        };
+                        self.lower_expr(*field, Some(field_local));
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::ArrayRepeat(arg, size) => {
                     let count = size
@@ -988,17 +993,17 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let elem_size = self.expr_ty(*arg).layout().assert_size();
 
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    self.lower_expr(*arg, Some(dst_slot));
+                    self.lower_expr(*arg, Some(dest));
 
                     self.out_bc.push(Instr::ArrayRepeat {
-                        base: dst_slot,
+                        base: dest.slot,
                         size: elem_size,
                         count,
                     });
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Adt {
                     variant,
@@ -1010,6 +1015,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let expr_layout = expr_ty.layout();
                     let adt_info = expr_ty.adt_info();
 
+                    // write enum discriminant
                     if let Some(enum_info) = adt_info.enum_info() {
                         let disc = adt_info.variant_discriminants(self.vm).get(*variant);
 
@@ -1018,15 +1024,16 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             self.out_bc.push(bytecode_select::literal(
                                 disc_val,
                                 dl.assert_size(),
-                                dst_slot,
+                                dest.slot,
                             ));
                         }
                     }
 
                     for (field_index, expr) in fields.iter() {
-                        let offset = expr_layout.field_offsets.get(*variant)[*field_index as usize];
-                        let field_slot = dst_slot.offset_by(offset as i32);
-                        self.lower_expr(*expr, Some(field_slot));
+                        //let offset = expr_layout.field_offsets.get(*variant)[*field_index as usize];
+                        //let field_slot = dst_slot.offset_by(offset as i32);
+                        let field_local = dest.get_field(*variant, *field_index);
+                        self.lower_expr(*expr, Some(field_local));
                     }
 
                     // TODO this will need careful handling for drop
@@ -1045,15 +1052,15 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         //let adt_subs = adt_subs.sub(self.in_func_subs);
 
                         //let all_offsets = expr_layout.field_offsets.get(*variant);
-                        //let all_fields = adt_info.variant_fields.get(*variant);
+                        let all_fields = adt_info.variant_fields.get(*variant);
 
-                        for (field_n, (field_ty, field_offset)) in
-                            all_fields.iter().zip(all_offsets).enumerate()
+                        for (field_index, _) in
+                            all_fields.iter().enumerate()
                         {
-                            if fields.iter().all(|(f, _)| *f != field_n as u32) {
+                            if fields.iter().all(|(f, _)| *f != field_index as u32) {
                                 //let field_ty = field_ty.sub(&adt_subs);
-                                let field_src = rest_source.get_field(*variant, field);
-                                let field_dst = dest.get_field(*variant, field);
+                                let field_src = rest_source.get_field(*variant, field_index as u32);
+                                let field_dst = dest.get_field(*variant, field_index as u32);
 
                                 let copy_instr =
                                     bytecode_select::copy(field_dst.slot, field_src.slot, field_src.ty);
@@ -1065,19 +1072,19 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Let { pattern, init } => {
                     // the bool result
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    self.match_pattern_expr(*pattern, Some(*init), Some(dst_slot));
+                    self.match_pattern_expr(*pattern, Some(*init), Some(dest.slot));
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::Match { arg, arms } => {
                     // the result value
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     // the bool pattern match result slot
                     let bool_ty = self.vm.common_types().bool;
@@ -1101,7 +1108,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             None
                         };
 
-                        self.lower_expr(arm.body, Some(dst_slot));
+                        self.lower_expr(arm.body, Some(dest));
                         jump_gaps.push(self.skip_instr());
 
                         self.out_bc[check_end_index] =
@@ -1119,11 +1126,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         self.out_bc[gap_index] = Instr::Jump(-self.get_jump_offset(gap_index));
                     }
 
-                    dst_slot
+                    dest
                 }
                 ExprKind::ConstParam(n) => {
                     // the result value
-                    let dst_slot = dst_slot.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     let param = self
                         .in_func_subs
@@ -1135,10 +1142,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     self.out_bc.push(bytecode_select::literal(
                         val,
                         expr_ty.layout().assert_size(),
-                        dst_slot,
+                        dest.slot,
                     ));
 
-                    dst_slot
+                    dest
                 }
                 _ => panic!("todo lower expr {:?}", expr.kind),
             }
@@ -1189,7 +1196,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn expr_to_place(&mut self, id: ExprId) -> Place {
+    fn expr_to_place(&mut self, id: ExprId) -> Place<'vm> {
         let expr = self.in_func.expr(id);
 
         if self.expr_is_place(id) {
@@ -1399,10 +1406,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     /// `override_arg_0` MUST be a thin pointer if present.
     fn build_call(
         &mut self,
-        res_ty: Type,
+        res_ty: Type<'vm>,
         args: &[ExprId],
-        override_arg_0: Option<Local>,
-    ) -> Local {
+        override_arg_0: Option<Local<'vm>>,
+    ) -> Local<'vm> {
         // this is annoying and not very performant, but it's the least buggy way to build call frames I've found
 
         // start by evaluating the args
@@ -1460,7 +1467,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         self.apply_subs(ty)
     }
 
-    fn alloc_pattern(&mut self, pat_id: PatternId) -> Local {
+    fn alloc_pattern(&mut self, pat_id: PatternId) -> Local<'vm> {
         let pat = self.in_func.pattern(pat_id);
 
         let ty = self.apply_subs(pat.ty);
@@ -1470,7 +1477,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     fn match_pattern_place(
         &mut self,
         pat_id: PatternId,
-        source: Place,
+        source: Place<'vm>,
         match_result_slot: Option<Slot>,
     ) {
         let pat = self.in_func.pattern(pat_id);
@@ -1518,7 +1525,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     fn match_pattern_internal(
         &mut self,
         pat: &Pattern<'vm>,
-        source: Place,
+        source: Place<'vm>,
         can_alias: bool,
         match_result_slot: Option<Slot>,
     ) -> bool {
@@ -1792,7 +1799,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                         self.match_pattern_internal(
                             sub_pattern,
-                            Place::Ptr(new_slot, 0, ptr_kind),
+                            Place::Ptr(new_local.slot, 0, ptr_kind),
                             false,
                             match_result_slot,
                         )
@@ -1955,7 +1962,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     };
 
                     self.out_bc
-                        .push(end_cmp_ctor(match_result_slot, val_slot, end_cmp_val.slot));
+                        .push(end_cmp_ctor(match_result_slot, val.slot, end_cmp_val.slot));
 
                     if let Some(start) = start {
                         // start AND end, we need to insert a jump
@@ -2245,7 +2252,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         }
     }
 
-    fn find_local(&self, local_id: u32) -> Local {
+    fn find_local(&self, local_id: u32) -> Local<'vm> {
         for (id, local) in &self.locals {
             if *id == local_id {
                 return *local;
@@ -2254,7 +2261,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         panic!("failed to find local {}", local_id);
     }
 
-    fn find_or_alloc_local(&mut self, local_id: u32, ty: Type) -> Local {
+    fn find_or_alloc_local(&mut self, local_id: u32, ty: Type<'vm>) -> Local<'vm> {
         for (id, local) in &self.locals {
             if *id == local_id {
                 return *local;
@@ -2285,20 +2292,20 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Place {
-    Local(Local),
+enum Place<'vm> {
+    Local(Local<'vm>),
     /// Pointer with offset
     Ptr(Slot, i32, PointerKind),
 }
 
-impl Place {
+impl<'vm> Place<'vm> {
     /// Because of drop handling restrictions, this should ONLY be used for arrays and slices.
     pub fn offset_by(&self, n: i32) -> Self {
         match self {
             Place::Local(local) => {
                 assert!(local.drop_id.is_none());
                 Place::Local(Local {
-                    slot: slot.offset_by(n),
+                    slot: local.slot.offset_by(n),
                     drop_id: None,
                     ty: local.ty
                 })
@@ -2348,7 +2355,7 @@ impl Drop for StackScope {
 }
 
 impl CompilerStack {
-    pub fn alloc(&mut self, ty: Type) -> Local {
+    pub fn alloc<'vm>(&mut self, ty: Type<'vm>) -> Local<'vm> {
         let drop_info = ty.drop_info();
 
         let drop_id = match drop_info {
@@ -2411,29 +2418,6 @@ struct StackEntry {
     base: u32,
     size: u32,
 }
-/*
-#[derive(Default)]
-struct CallFrame {
-    top: u32,
-}
-
-impl CallFrame {
-    fn alloc(&mut self, ty: Type) -> Slot {
-        let layout = ty.layout();
-
-        self.align(layout.align);
-
-        let base = self.top;
-        let size = layout.assert_size();
-
-        self.top += size;
-        Slot::new_frame_sub(base)
-    }
-
-    fn align(&mut self, align: u32) {
-        self.top = crate::abi::align(self.top, align);
-    }
-}*/
 
 #[derive(Debug, Clone, Copy)]
 struct DropId(u32);
@@ -2449,7 +2433,7 @@ pub struct Local<'vm> {
     drop_id: Option<DropId>,
 }
 
-impl Local {
+impl<'vm> Local<'vm> {
     pub fn void(vm: &'vm VM<'vm>) -> Self {
         let void = vm.common_types().void;
         Self {
