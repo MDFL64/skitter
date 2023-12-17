@@ -276,15 +276,20 @@ fn run_test(
             if !cmd_res.success {
                 let skitter_err =
                     std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
-                let first_line = skitter_err.lines().nth(0).unwrap_or_else(|| "");
+                
+                let search_str = "panicked at";
 
-                let first_line = if first_line.len() > ERROR_CHARS {
-                    &first_line[..ERROR_CHARS]
+                let err_start = skitter_err.find(search_str);
+
+                let skitter_err = if let Some(err_start) = err_start {
+                    skitter_err[err_start..].lines().nth(0)
                 } else {
-                    first_line
+                    skitter_err.lines().last()
                 };
 
-                return Err(format!("skitter failed ( {} )", first_line));
+                let skitter_err = skitter_err.unwrap_or("no message found");
+
+                return Err(format!("skitter failed ( {} )", skitter_err));
             } else {
                 (cmd_res.stdout, cmd_res.time)
             }

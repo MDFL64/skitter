@@ -2444,7 +2444,34 @@ impl<'vm> Local<'vm> {
     }
 
     pub fn get_field(&self, variant: VariantIndex, field: u32) -> Self {
-        panic!("local get field");
+        assert!(self.drop_id.is_none());
+
+        let offset = self.ty.layout().field_offsets.get(variant)[field as usize];
+
+        let field_ty = match self.ty.kind() {
+            TypeKind::Tuple(fields) => fields[field as usize],
+            TypeKind::Adt(item) => {
+                let info = item.item.adt_info();
+                let res = info.variant_fields.get(variant)[field as usize];
+                res.sub(&item.subs)
+            }
+            TypeKind::Closure(closure,subs) => {
+                let env = closure.env(subs);
+
+                if let TypeKind::Tuple(fields) = env.kind() {
+                    fields[field as usize]
+                } else {
+                    panic!("closure env should be a tuple");
+                }
+            }
+            _ => panic!("field of {}",self.ty)
+        };
+
+        Self {
+            slot: self.slot.offset_by(offset as i32),
+            drop_id: None,
+            ty: field_ty
+        }
     }
 }
 
