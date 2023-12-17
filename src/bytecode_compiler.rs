@@ -991,11 +991,17 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         .sub(self.in_func_subs, self.vm.common_types().usize)
                         .get_value() as u32;
 
-                    let elem_size = self.expr_ty(*arg).layout().assert_size();
+                    let elem_ty = self.expr_ty(*arg);
+                    let elem_size = elem_ty.layout().assert_size();
 
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    self.lower_expr(*arg, Some(dest));
+                    // array child drops are not tracked
+                    self.lower_expr(*arg, Some(Local{
+                        slot: dest.slot,
+                        ty: elem_ty,
+                        drop_id: None
+                    }));
 
                     self.out_bc.push(Instr::ArrayRepeat {
                         base: dest.slot,
@@ -1270,10 +1276,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     // can we ever use a field with an enum?
                     assert!(variant.index() == 0);
 
-                    let layout = self.expr_ty(*lhs).layout();
-                    let field_offset = layout.field_offsets.get(*variant)[*field as usize];
+                    let lhs_ty = self.expr_ty(*lhs);
 
-                    self.expr_to_place(*lhs).offset_by(field_offset as i32)
+                    self.expr_to_place(*lhs).get_field(*variant, *field, lhs_ty)
                 }
                 ExprKind::Index { lhs, index } => {
                     let index_ty = self.expr_ty(*index);
@@ -2304,13 +2309,32 @@ impl<'vm> Place<'vm> {
         match self {
             Place::Local(local) => {
                 assert!(local.drop_id.is_none());
+
+                let child_ty = match local.ty.kind() {
+                    TypeKind::Array(child,_) => *child,
+                    _ => panic!("cannot offset place of type {}",local.ty)
+                };
+
                 Place::Local(Local {
                     slot: local.slot.offset_by(n),
                     drop_id: None,
-                    ty: local.ty
+                    ty: child_ty
                 })
             }
             Place::Ptr(slot, offset, kind) => Place::Ptr(*slot, offset + n, *kind),
+        }
+    }
+
+    pub fn get_field(&self, variant: VariantIndex, field: u32, ty: Type<'vm>) -> Self {
+        match self {
+            Place::Local(local) => {
+                Place::Local(local.get_field(variant, field))
+            }
+            Place::Ptr(slot, offset, kind) => {
+                let field_offset = ty.layout().field_offsets.get(variant)[field as usize];
+
+                Place::Ptr(*slot, *offset + field_offset as i32, *kind)
+            }
         }
     }
 }
@@ -2445,6 +2469,7 @@ impl<'vm> Local<'vm> {
 
     pub fn get_field(&self, variant: VariantIndex, field: u32) -> Self {
         assert!(self.drop_id.is_none());
+        //println!("{} {:?} {}",self.ty,variant,field);
 
         let offset = self.ty.layout().field_offsets.get(variant)[field as usize];
 
