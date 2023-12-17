@@ -276,7 +276,7 @@ fn run_test(
             if !cmd_res.success {
                 let skitter_err =
                     std::str::from_utf8(&cmd_res.stderr).expect("failed to read stderr as utf8");
-                
+
                 let search_str = "panicked at";
 
                 let err_start = skitter_err.find(search_str);

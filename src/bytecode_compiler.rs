@@ -10,8 +10,8 @@ use crate::ir::{
 use crate::items::FunctionAbi;
 use crate::types::{DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind};
 use crate::variants::VariantIndex;
-use crate::vm::VM;
 use crate::vm::instr::Instr;
+use crate::vm::VM;
 use crate::vm::{self, instr::Slot};
 
 pub struct BytecodeCompiler<'vm, 'f> {
@@ -72,10 +72,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         let ret_slot = compiler.stack.alloc_no_drop(out_ty);
         assert_eq!(ret_slot.index(), 0);
 
-        let local_ret = Local{
+        let local_ret = Local {
             slot: ret_slot,
             ty: out_ty,
-            drop_id: None
+            drop_id: None,
         };
 
         let body_scope = compiler.stack.push_scope("body");
@@ -103,7 +103,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
             compiler.closure = Some(ClosureInfo {
                 kind: closure_kind,
-                self_local: param_slots[0]
+                self_local: param_slots[0],
             })
         }
 
@@ -249,7 +249,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             match self.expr_to_place(id) {
                 Place::Local(local_source) => {
                     if let Some(dest) = dest {
-                        if let Some(instr) = bytecode_select::copy(dest.slot, local_source.slot, expr_ty) {
+                        if let Some(instr) =
+                            bytecode_select::copy(dest.slot, local_source.slot, expr_ty)
+                        {
                             self.out_bc.push(instr);
                         }
 
@@ -325,8 +327,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     // Sometimes we will encounter a no-op cast.
                     if arg_ty == dst_ty {
-                        self.out_bc
-                            .push(bytecode_select::copy(dest.slot, arg_local.slot, arg_ty).unwrap());
+                        self.out_bc.push(
+                            bytecode_select::copy(dest.slot, arg_local.slot, arg_ty).unwrap(),
+                        );
 
                         dest
                     } else {
@@ -345,9 +348,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let (ctor, swap) = bytecode_select::binary(*op, lhs_ty);
                     if swap {
-                        self.out_bc.push(ctor(dest.slot, rhs_local.slot, lhs_local.slot));
+                        self.out_bc
+                            .push(ctor(dest.slot, rhs_local.slot, lhs_local.slot));
                     } else {
-                        self.out_bc.push(ctor(dest.slot, lhs_local.slot, rhs_local.slot));
+                        self.out_bc
+                            .push(ctor(dest.slot, lhs_local.slot, rhs_local.slot));
                     }
                     dest
                 }
@@ -365,9 +370,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             }
                         }
                         Place::Ptr(ptr_slot, offset, _) => {
-                            if let Some(instr) =
-                                bytecode_select::copy_to_ptr(ptr_slot, rhs_local.slot, assign_ty, offset)
-                            {
+                            if let Some(instr) = bytecode_select::copy_to_ptr(
+                                ptr_slot,
+                                rhs_local.slot,
+                                assign_ty,
+                                offset,
+                            ) {
                                 self.out_bc.push(instr);
                             }
                         }
@@ -386,7 +394,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     match self.expr_to_place(*lhs) {
                         Place::Local(lhs_local) => {
-                            self.out_bc.push(ctor(lhs_local.slot, lhs_local.slot, rhs_local.slot));
+                            self.out_bc
+                                .push(ctor(lhs_local.slot, lhs_local.slot, rhs_local.slot));
                         }
                         Place::Ptr(ptr_slot, offset, _) => {
                             let assign_ty = self.expr_ty(*lhs);
@@ -430,7 +439,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 &mut self.out_bc,
                                 &mut self.stack,
                                 arg_slots,
-                                dest
+                                dest,
                             );
 
                             dest
@@ -446,7 +455,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                         arg_ty.layout().assert_size() == POINTER_SIZE.bytes() * 2
                                     );
                                     let receiver = self.lower_expr(args[0], None);
-                                    (receiver, receiver.slot.offset_by(POINTER_SIZE.bytes() as i32))
+                                    (
+                                        receiver,
+                                        receiver.slot.offset_by(POINTER_SIZE.bytes() as i32),
+                                    )
                                 };
 
                                 let func_ptr = self.stack.alloc(self.vm.common_types().usize);
@@ -496,7 +508,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             func_ptr: func_ptr.slot,
                         });
                         if let Some(dest) = dest {
-                            if let Some(instr) = bytecode_select::copy(dest.slot, ret_local.slot, expr_ty)
+                            if let Some(instr) =
+                                bytecode_select::copy(dest.slot, ret_local.slot, expr_ty)
                             {
                                 self.out_bc.push(instr);
                             }
@@ -636,16 +649,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     dest.unwrap_or_else(|| Local::void(self.vm))
                 }
                 ExprKind::Return(value) => {
-                    
                     if let Some(value) = value {
-
                         let ret_ty = self.expr_ty(*value);
 
                         // the return value is never dropped, so this is fine
-                        let ret_local = Local{
+                        let ret_local = Local {
                             slot: Slot::new(0),
                             drop_id: None,
-                            ty: ret_ty
+                            ty: ret_ty,
                         };
 
                         self.lower_expr(*value, Some(ret_local));
@@ -717,21 +728,23 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 let stack_alloc = self.stack.alloc(arg_ty);
 
                                 if let Some(copy_bc) = bytecode_select::copy_from_ptr(
-                                    stack_alloc.slot, src_slot, arg_ty, offset,
+                                    stack_alloc.slot,
+                                    src_slot,
+                                    arg_ty,
+                                    offset,
                                 ) {
                                     self.out_bc.push(copy_bc);
                                 }
 
-                                let dest =
-                                    dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                                self.out_bc.push(Instr::SlotAddr(dest.slot, stack_alloc.slot));
+                                self.out_bc
+                                    .push(Instr::SlotAddr(dest.slot, stack_alloc.slot));
 
                                 dest
                             } else {
                                 if offset != 0 {
-                                    let dest =
-                                        dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                    let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                     self.out_bc
                                         .push(Instr::PointerOffset2(dest.slot, src_slot, offset));
@@ -765,10 +778,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                                         dest
                                     } else {
-                                        Local{
+                                        Local {
                                             slot: src_slot,
                                             drop_id: None,
-                                            ty: expr_ty
+                                            ty: expr_ty,
                                         }
                                     }
                                 }
@@ -904,8 +917,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                             let source = self.lower_expr(*source, None);
 
-                            self.out_bc
-                                .push(bytecode_select::copy(dest.slot, source.slot, expr_ty).unwrap());
+                            self.out_bc.push(
+                                bytecode_select::copy(dest.slot, source.slot, expr_ty).unwrap(),
+                            );
 
                             dest
                         }
@@ -913,8 +927,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             let src_ty = self.expr_ty(*source);
 
                             if let Some(func_ref) = src_ty.func_item() {
-                                let dest =
-                                    dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                 let func_ptr = func_ref.item.func_mono(&func_ref.subs) as *const _;
 
@@ -932,8 +945,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         PointerCast::ClosureFnPointer => {
                             let src_ty = self.expr_ty(*source);
                             if let TypeKind::Closure(closure, subs) = src_ty.kind() {
-                                let dest =
-                                    dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
+                                let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                                 assert!(subs.is_concrete());
 
@@ -955,9 +967,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 ExprKind::Tuple(fields) => {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                    for (field_index, field) in fields
-                        .iter().enumerate()
-                    {
+                    for (field_index, field) in fields.iter().enumerate() {
                         let field_local = dest.get_field(VariantIndex::new(0), field_index as u32);
                         self.lower_expr(*field, Some(field_local));
                     }
@@ -976,10 +986,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     for (i, field) in fields.iter().enumerate() {
                         let field_slot = dest.slot.offset_by(i as i32 * elem_size as i32);
                         // array child drops are not tracked
-                        let field_local = Local{
+                        let field_local = Local {
                             slot: field_slot,
                             ty: *elem_ty,
-                            drop_id: None
+                            drop_id: None,
                         };
                         self.lower_expr(*field, Some(field_local));
                     }
@@ -997,11 +1007,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     // array child drops are not tracked
-                    self.lower_expr(*arg, Some(Local{
-                        slot: dest.slot,
-                        ty: elem_ty,
-                        drop_id: None
-                    }));
+                    self.lower_expr(
+                        *arg,
+                        Some(Local {
+                            slot: dest.slot,
+                            ty: elem_ty,
+                            drop_id: None,
+                        }),
+                    );
 
                     self.out_bc.push(Instr::ArrayRepeat {
                         base: dest.slot,
@@ -1060,16 +1073,17 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         //let all_offsets = expr_layout.field_offsets.get(*variant);
                         let all_fields = adt_info.variant_fields.get(*variant);
 
-                        for (field_index, _) in
-                            all_fields.iter().enumerate()
-                        {
+                        for (field_index, _) in all_fields.iter().enumerate() {
                             if fields.iter().all(|(f, _)| *f != field_index as u32) {
                                 //let field_ty = field_ty.sub(&adt_subs);
                                 let field_src = rest_source.get_field(*variant, field_index as u32);
                                 let field_dst = dest.get_field(*variant, field_index as u32);
 
-                                let copy_instr =
-                                    bytecode_select::copy(field_dst.slot, field_src.slot, field_src.ty);
+                                let copy_instr = bytecode_select::copy(
+                                    field_dst.slot,
+                                    field_src.slot,
+                                    field_src.ty,
+                                );
 
                                 if let Some(copy_instr) = copy_instr {
                                     self.out_bc.push(copy_instr);
@@ -1228,9 +1242,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     match closure.kind {
                         // self is a ref to a tuple-like env
                         FnTrait::Fn | FnTrait::FnMut => {
-                            let field_offset =
-                                closure.self_local.ty.layout().field_offsets.assert_single()
-                                    [upvar.index as usize] as i32;
+                            let self_ty = match closure.self_local.ty.kind() {
+                                TypeKind::Ref(x, _) => *x,
+                                _ => panic!("closure self ty = {}", closure.self_local.ty),
+                            };
+
+                            let field_offset = self_ty.layout().field_offsets.assert_single()
+                                [upvar.index as usize]
+                                as i32;
 
                             let ref_ty = expr.ty.ref_to(Mutability::Const);
 
@@ -1621,18 +1640,18 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 }
             }
             PatternKind::Struct { fields } => {
-                let layout = self.apply_subs(pat.ty).layout();
+                let pat_ty = self.apply_subs(pat.ty);
 
                 let mut jump_gaps = Vec::new();
                 let mut result = false;
 
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
+                    let field_source = source.get_field(VariantIndex::new(0), field.field, pat_ty);
 
-                    let offset = layout.field_offsets.assert_single()[field.field as usize];
                     let refutable = self.match_pattern_internal(
                         field_pattern,
-                        source.offset_by(offset as i32),
+                        field_source,
                         can_alias,
                         match_result_slot,
                     );
@@ -1664,13 +1683,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                 fields,
                 variant_index,
             } => {
-                let layout = self.apply_subs(pat.ty).layout();
+                let pat_ty = self.apply_subs(pat.ty);
 
                 let mut jump_gaps = Vec::new();
 
                 // test the discriminator by building a fake literal pattern
                 {
-                    let adt_info = pat.ty.adt_info();
+                    let adt_info = pat_ty.adt_info();
 
                     let discriminant_ty = adt_info
                         .enum_info()
@@ -1698,12 +1717,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
-
-                    let offset = layout.field_offsets.get(*variant_index)[field.field as usize];
+                    let field_source = source.get_field(*variant_index, field.field, pat_ty);
 
                     let refutable = self.match_pattern_internal(
                         field_pattern,
-                        source.offset_by(offset as i32),
+                        field_source,
                         can_alias,
                         match_result_slot,
                     );
@@ -2311,14 +2329,14 @@ impl<'vm> Place<'vm> {
                 assert!(local.drop_id.is_none());
 
                 let child_ty = match local.ty.kind() {
-                    TypeKind::Array(child,_) => *child,
-                    _ => panic!("cannot offset place of type {}",local.ty)
+                    TypeKind::Array(child, _) => *child,
+                    _ => panic!("cannot offset place of type {}", local.ty),
                 };
 
                 Place::Local(Local {
                     slot: local.slot.offset_by(n),
                     drop_id: None,
-                    ty: child_ty
+                    ty: child_ty,
                 })
             }
             Place::Ptr(slot, offset, kind) => Place::Ptr(*slot, offset + n, *kind),
@@ -2327,9 +2345,7 @@ impl<'vm> Place<'vm> {
 
     pub fn get_field(&self, variant: VariantIndex, field: u32, ty: Type<'vm>) -> Self {
         match self {
-            Place::Local(local) => {
-                Place::Local(local.get_field(variant, field))
-            }
+            Place::Local(local) => Place::Local(local.get_field(variant, field)),
             Place::Ptr(slot, offset, kind) => {
                 let field_offset = ty.layout().field_offsets.get(variant)[field as usize];
 
@@ -2387,16 +2403,12 @@ impl CompilerStack {
                 panic!("drop branch!");
             }
             DropInfo::Leaf(_) => panic!("drop leaf! {}", ty),
-            DropInfo::None => None
+            DropInfo::None => None,
         };
 
         let slot = self.alloc_no_drop(ty);
 
-        Local {
-            slot,
-            ty,
-            drop_id
-        }
+        Local { slot, ty, drop_id }
     }
 
     pub fn alloc_no_drop(&mut self, ty: Type) -> Slot {
@@ -2463,7 +2475,7 @@ impl<'vm> Local<'vm> {
         Self {
             slot: Slot::new(0),
             ty: void,
-            drop_id: None
+            drop_id: None,
         }
     }
 
@@ -2480,7 +2492,7 @@ impl<'vm> Local<'vm> {
                 let res = info.variant_fields.get(variant)[field as usize];
                 res.sub(&item.subs)
             }
-            TypeKind::Closure(closure,subs) => {
+            TypeKind::Closure(closure, subs) => {
                 let env = closure.env(subs);
 
                 if let TypeKind::Tuple(fields) = env.kind() {
@@ -2489,13 +2501,13 @@ impl<'vm> Local<'vm> {
                     panic!("closure env should be a tuple");
                 }
             }
-            _ => panic!("field of {}",self.ty)
+            _ => panic!("field of {}", self.ty),
         };
 
         Self {
             slot: self.slot.offset_by(offset as i32),
             drop_id: None,
-            ty: field_ty
+            ty: field_ty,
         }
     }
 }
