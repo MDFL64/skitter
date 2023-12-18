@@ -10,8 +10,11 @@ use super::TypeKind;
 // TODO, this is just a function. This function:
 // 1. Calls drop, if applicable.
 // 2. Drops all fields, if applicable.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct DropGlue<'vm>(&'vm Function<'vm>);
+
+#[derive(Debug, Clone, Copy)]
+pub struct DropBit(u32);
 
 // Jargon:
 // Drop "glue" refers to all the code required to drop a type, which may include a Drop impl and code to drop fields.
@@ -153,5 +156,15 @@ impl<'vm> DropGlue<'vm> {
         let bc = vm.alloc_bytecode(bc);
 
         Self(vm.alloc_function(FunctionSource::RawBytecode(bc), SubList::empty()))
+    }
+}
+
+impl DropBit {
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn index(&self) -> u32 {
+        self.0
     }
 }

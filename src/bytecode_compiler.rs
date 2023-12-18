@@ -8,7 +8,9 @@ use crate::ir::{
     Pattern, PatternId, PatternKind, PointerCast, Stmt,
 };
 use crate::items::FunctionAbi;
-use crate::types::{DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind};
+use crate::types::{
+    DropBit, DropGlue, DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind,
+};
 use crate::variants::VariantIndex;
 use crate::vm::instr::Instr;
 use crate::vm::VM;
@@ -19,7 +21,7 @@ pub struct BytecodeCompiler<'vm, 'f> {
     in_func: &'f IRFunction<'vm>,
     out_bc: Vec<Instr<'vm>>,
     vm: &'vm vm::VM<'vm>,
-    stack: CompilerStack,
+    stack: CompilerStack<'vm>,
     locals: Vec<(u32, Local<'vm>)>,
     loops: Vec<LoopInfo<'vm>>,
     loop_breaks: Vec<BreakInfo>,
@@ -487,7 +489,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 ret_local
                             };
 
-                            if let Some(dest) = dest {
+                            let dest = if let Some(dest) = dest {
                                 if let Some(instr) =
                                     bytecode_select::copy(dest.slot, ret_local.slot, expr_ty)
                                 {
@@ -496,7 +498,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 dest
                             } else {
                                 ret_local
-                            }
+                            };
+                            self.local_init(dest);
+                            dest
                         }
                     } else if let TypeKind::FunctionPointer(_) = ty.kind() {
                         let ret_local = self.build_call(expr_ty, args, None);
@@ -507,7 +511,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             frame: ret_local.slot,
                             func_ptr: func_ptr.slot,
                         });
-                        if let Some(dest) = dest {
+
+                        let dest = if let Some(dest) = dest {
                             if let Some(instr) =
                                 bytecode_select::copy(dest.slot, ret_local.slot, expr_ty)
                             {
@@ -516,7 +521,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             dest
                         } else {
                             ret_local
-                        }
+                        };
+                        self.local_init(dest);
+                        dest
                     } else {
                         panic!("bad call");
                     }
@@ -1475,6 +1482,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             if let Some(copy) = bytecode_select::copy(dst, src.slot, ty) {
                 self.out_bc.push(copy);
             }
+            self.local_forget(src);
         }
 
         ret_val
@@ -1561,17 +1569,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             } => {
                 match (mode, source) {
                     (BindingMode::Value, Place::Local(source)) => {
-                        // likely will need drop handling, but don't think about that for now
-                        // we should probably NEVER alias droppable values
-                        assert!(source.drop_id.is_none());
-
                         // copy values if there are possible aliases
                         if !can_alias || sub_pattern.is_some() {
                             let ty = self.apply_subs(pat.ty);
                             let var = self.find_or_alloc_local(*local_id, ty);
-                            if let Some(instr) = bytecode_select::copy(var.slot, source.slot, ty) {
-                                self.out_bc.push(instr);
-                            }
+                            self.local_init_move(var, source);
                         } else {
                             self.assert_local_undef(*local_id);
                             self.locals.push((*local_id, source));
@@ -2312,6 +2314,41 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     fn get_jump_offset(&mut self, other: usize) -> i32 {
         other as i32 - self.out_bc.len() as i32
     }
+
+    /// Initializes a local by moving from a local.
+    /// LocalMove(src) (assert all bits set, clear them)
+    /// LocalInit(dst) (assert all bits clear, set them)
+    fn local_init_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
+        assert!(dst.ty == src.ty);
+
+        if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
+            self.out_bc.push(instr);
+        }
+
+        if let Some(bits) = self.stack.drop_bits(src.drop_id) {
+            self.out_bc.push(Instr::LocalMove(bits));
+        }
+
+        if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
+            self.out_bc.push(Instr::LocalInit(bits));
+        }
+    }
+
+    // assert values are dead
+    // mark values as live
+    fn local_init(&mut self, local: Local<'vm>) {
+        if let Some(bits) = self.stack.drop_bits(local.drop_id) {
+            self.out_bc.push(Instr::LocalInit(bits));
+        }
+    }
+
+    // assert values are live
+    // mark values as dead
+    fn local_forget(&mut self, local: Local<'vm>) {
+        if let Some(bits) = self.stack.drop_bits(local.drop_id) {
+            self.out_bc.push(Instr::LocalMove(bits));
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2375,11 +2412,12 @@ impl PointerKind {
 }
 
 #[derive(Default)]
-pub struct CompilerStack {
+pub struct CompilerStack<'vm> {
     entries: Vec<StackEntry>,
     top: u32,
     next_scope_id: u32,
-    drop_info: Vec<()>,
+    drop_info: Vec<CompilerDropInfo>,
+    drop_leafs: Vec<(Slot, DropGlue<'vm>)>,
 }
 
 struct StackScope {
@@ -2394,19 +2432,19 @@ impl Drop for StackScope {
     }
 }
 
-impl CompilerStack {
-    pub fn alloc<'vm>(&mut self, ty: Type<'vm>) -> Local<'vm> {
+impl<'vm> CompilerStack<'vm> {
+    pub fn alloc(&mut self, ty: Type<'vm>) -> Local<'vm> {
         let drop_info = ty.drop_info();
+
+        let slot = self.alloc_no_drop(ty);
 
         let drop_id = match drop_info {
             DropInfo::Branch { fields, .. } => {
                 panic!("drop branch!");
             }
-            DropInfo::Leaf(_) => panic!("drop leaf! {}", ty),
+            DropInfo::Leaf(glue) => Some(self.register_drop_leaf(slot, *glue)),
             DropInfo::None => None,
         };
-
-        let slot = self.alloc_no_drop(ty);
 
         Local { slot, ty, drop_id }
     }
@@ -2448,6 +2486,29 @@ impl CompilerStack {
         self.top = scope.old_top;
         std::mem::forget(scope);
     }
+
+    fn drop_bits(&self, id: Option<DropId>) -> Option<(DropBit, DropBit)> {
+        match id {
+            Some(id) => {
+                let info = &self.drop_info[id.0 as usize];
+                match info {
+                    CompilerDropInfo::Leaf(bit) => Some((*bit, *bit)),
+                    CompilerDropInfo::Branch(_) => panic!("branch"),
+                }
+            }
+            None => None,
+        }
+    }
+
+    fn register_drop_leaf(&mut self, slot: Slot, glue: DropGlue<'vm>) -> DropId {
+        let bit = DropBit::new(self.drop_leafs.len() as u32);
+        self.drop_leafs.push((slot, glue));
+
+        let id = DropId(self.drop_info.len() as u32);
+        self.drop_info.push(CompilerDropInfo::Leaf(bit));
+
+        id
+    }
 }
 
 struct StackEntry {
@@ -2457,9 +2518,6 @@ struct StackEntry {
 
 #[derive(Debug, Clone, Copy)]
 struct DropId(u32);
-
-#[derive(Debug, Clone, Copy)]
-struct DropBit(u32);
 
 /// A slot paired with an id. The id is used to look up drop info, including drop info for child slots.
 #[derive(Debug, Clone, Copy)]

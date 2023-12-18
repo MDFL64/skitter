@@ -1,3 +1,5 @@
+use crate::types::DropBit;
+
 use super::vm::Function;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -334,6 +336,9 @@ pub enum Instr<'vm> {
     },
 
     VTableFunc(Slot, Slot, u32),
+
+    LocalInit((DropBit, DropBit)),
+    LocalMove((DropBit, DropBit)),
 
     Return,
     Error(Box<String>),
