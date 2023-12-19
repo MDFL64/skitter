@@ -1,4 +1,5 @@
 use crate::{
+    bytecode_compiler::FunctionBytecode,
     items::Item,
     types::{SubList, Type},
     variants::VariantIndex,
@@ -151,7 +152,10 @@ impl<'vm> DropGlue<'vm> {
         // 2. handling drops in functions may involve generating similar bytecode, there may be some opportunity for re-use
         // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
 
-        let bc = vec![Instr::Error(Box::new("drop glue".to_owned()))];
+        let bc = FunctionBytecode {
+            code: vec![Instr::Error(Box::new("drop glue".to_owned()))],
+            drops: Vec::new(),
+        };
 
         let bc = vm.alloc_bytecode(bc);
 

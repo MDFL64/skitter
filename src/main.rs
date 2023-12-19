@@ -129,7 +129,7 @@ fn run(args: &cli::CliArgs) {
 
     let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
 
-    let thread = vm.make_thread();
+    let mut thread = vm.make_thread();
     thread.call(&main_fn, 0);
 }
 

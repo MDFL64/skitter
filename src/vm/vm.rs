@@ -3,6 +3,7 @@ use colosseum::sync::Arena;
 
 use crate::abi::align;
 use crate::bytecode_compiler::BytecodeCompiler;
+use crate::bytecode_compiler::FunctionBytecode;
 use crate::cache_provider::CacheProvider;
 use crate::cli::CliArgs;
 use crate::closure::Closure;
@@ -54,7 +55,7 @@ pub struct VM<'vm> {
     arena_items: Arena<Item<'vm>>,
     arena_functions: Arena<Function<'vm>>,
     arena_closures: Arena<Closure<'vm>>,
-    arena_bytecode: Arena<Vec<Instr<'vm>>>,
+    arena_bytecode: Arena<FunctionBytecode<'vm>>,
     arena_constants: Arena<Vec<u8>>,
     arena_paths: Arena<String>,
     arena_vtables: Arena<VTable<'vm>>,
@@ -70,10 +71,11 @@ static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
 pub struct VMThread<'vm> {
     vm: &'vm VM<'vm>,
     stack: Vec<u128>,
+    drop_flags: Vec<u8>,
 }
 
 impl<'vm> VMThread<'vm> {
-    pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
+    pub fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
         let native = func.get_native();
 
         if self.vm.cli_args.debug_trace_calls && !native.is_some() {
@@ -139,17 +141,25 @@ impl<'vm> VMThread<'vm> {
         }
     }
 
-    pub fn run_bytecode(&self, bc: &[Instr<'vm>], stack_offset: u32) {
+    pub fn run_bytecode(&mut self, func: &FunctionBytecode<'vm>, stack_offset: u32) {
+        let drops_base = self.drop_flags.len();
+        if func.drops.len() > 0 {
+            let bytes = (func.drops.len() - 1) / 8 + 1;
+            self.drop_flags.resize(drops_base + bytes, 0);
+        }
+
         unsafe {
             let mut pc = 0;
             let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
 
             loop {
-                let instr = &bc[pc];
+                let instr = &func.code[pc];
                 include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
                 pc += 1;
             }
         }
+
+        self.drop_flags.truncate(drops_base);
     }
 
     pub fn copy_result(&self, offset: usize, size: usize) -> Vec<u8> {
@@ -160,6 +170,34 @@ impl<'vm> VMThread<'vm> {
 
     pub fn copy_ptr(&self, slot: Slot) -> usize {
         unsafe { read_stack(self.stack.as_ptr() as _, slot) }
+    }
+
+    fn local_init(&mut self, base: usize, n: u32) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            panic!("drop flag was initialized twice");
+        }
+
+        *byte |= mask;
+    }
+
+    fn local_move(&mut self, base: usize, n: u32) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) == 0 {
+            panic!("attempt to clear uninitialized drop flag");
+        }
+
+        *byte ^= mask;
     }
 }
 
@@ -214,7 +252,11 @@ impl<'vm> VM<'vm> {
             // 1M stack
             stack_pool.pop().unwrap_or_else(|| vec![0; 65536])
         };
-        VMThread { vm: self, stack }
+        VMThread {
+            vm: self,
+            stack,
+            drop_flags: Vec::new(),
+        }
     }
 
     /// Attempts to build a cache provider for the given crate, then falls back to rustc if that fails.
@@ -302,7 +344,7 @@ impl<'vm> VM<'vm> {
         self.arena_items.alloc(item)
     }
 
-    pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &'vm Vec<Instr<'vm>> {
+    pub fn alloc_bytecode(&'vm self, bc: FunctionBytecode<'vm>) -> &'vm FunctionBytecode<'vm> {
         self.arena_bytecode.alloc(bc)
     }
 
@@ -464,7 +506,7 @@ impl<'vm> VM<'vm> {
 pub enum FunctionSource<'vm> {
     Item(&'vm Item<'vm>),
     Closure(&'vm Closure<'vm>),
-    RawBytecode(&'vm Vec<Instr<'vm>>),
+    RawBytecode(&'vm FunctionBytecode<'vm>),
 }
 
 impl<'vm> FunctionSource<'vm> {
@@ -499,7 +541,7 @@ pub struct Function<'vm> {
     subs: SubList<'vm>,
     /// Store a void pointer because function pointers can't be stored by AtomicPtr(?)
     native: AtomicPtr<std::ffi::c_void>,
-    bytecode: AtomicPtr<Vec<Instr<'vm>>>,
+    bytecode: AtomicPtr<FunctionBytecode<'vm>>,
 }
 
 impl<'vm> Function<'vm> {
@@ -512,7 +554,7 @@ impl<'vm> Function<'vm> {
         }
     }
 
-    pub fn get_bytecode(&self) -> Option<&'vm Vec<Instr<'vm>>> {
+    pub fn get_bytecode(&self) -> Option<&'vm FunctionBytecode<'vm>> {
         let raw = self.bytecode.load(Ordering::Acquire);
         if raw.is_null() {
             None
@@ -526,11 +568,11 @@ impl<'vm> Function<'vm> {
             .store(unsafe { std::mem::transmute(native) }, Ordering::Release);
     }
 
-    pub fn set_bytecode(&self, bc: &'vm Vec<Instr>) {
+    pub fn set_bytecode(&self, bc: &'vm FunctionBytecode<'vm>) {
         self.bytecode.store(bc as *const _ as _, Ordering::Release);
     }
 
-    fn bytecode(&self) -> &'vm [Instr<'vm>] {
+    fn bytecode(&self) -> &'vm FunctionBytecode<'vm> {
         loop {
             if let Some(bc) = self.get_bytecode() {
                 return bc;

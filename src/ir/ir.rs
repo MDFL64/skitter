@@ -132,7 +132,7 @@ impl<'vm> IRFunction<'vm> {
     pub fn const_eval(&self, vm: &'vm VM<'vm>, subs: &SubList<'vm>) -> (Vec<u8>, Type<'vm>) {
         let bc = BytecodeCompiler::compile(vm, self, subs, "<const block>", subs);
 
-        let eval_thread = vm.make_thread();
+        let mut eval_thread = vm.make_thread();
         eval_thread.run_bytecode(&bc, 0);
 
         let ty = self.sig.output; // todo sub?

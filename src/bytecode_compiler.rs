@@ -44,6 +44,11 @@ struct BreakInfo {
     break_index: usize,
 }
 
+pub struct FunctionBytecode<'vm> {
+    pub code: Vec<Instr<'vm>>,
+    pub drops: Vec<(Slot, DropGlue<'vm>)>,
+}
+
 impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     pub fn compile(
         vm: &'vm vm::VM<'vm>,
@@ -51,7 +56,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         subs: &'f SubList<'vm>,
         path: &str,
         original_subs: &'f SubList<'vm>,
-    ) -> Vec<Instr<'vm>> {
+    ) -> FunctionBytecode<'vm> {
         if vm.cli_args.verbose {
             println!("compiling {}{}", path, original_subs);
             //ir.print();
@@ -112,6 +117,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         for (pat_id, slot) in ir.params.iter().zip(param_slots) {
             let pat = compiler.in_func.pattern(*pat_id);
             compiler.match_pattern_internal(pat, Place::Local(slot), true, None);
+            compiler.local_init(slot);
         }
 
         compiler.lower_expr(ir.root_expr, Some(local_ret));
@@ -126,8 +132,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             println!("<-");
         }
 
-        //println!("{:?}",compiler.out_bc);
-        compiler.out_bc
+        FunctionBytecode {
+            code: compiler.out_bc,
+            drops: compiler.stack.drop_leafs,
+        }
     }
 
     pub fn compile_promoted_const(
@@ -164,13 +172,19 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             println!("<-");
         }
 
-        let const_thread = vm.make_thread();
-        const_thread.run_bytecode(&compiler.out_bc, 0);
+        let out_size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
+
+        let bc = FunctionBytecode {
+            code: compiler.out_bc,
+            drops: compiler.stack.drop_leafs,
+        };
+
+        let mut const_thread = vm.make_thread();
+        const_thread.run_bytecode(&bc, 0);
 
         match place {
             Place::Local(local) => {
-                let size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
-                let data = const_thread.copy_result(local.slot.index(), size);
+                let data = const_thread.copy_result(local.slot.index(), out_size);
                 let ptr = vm.alloc_constant(data).as_ptr() as usize;
                 (ptr, None)
             }

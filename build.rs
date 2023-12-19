@@ -522,6 +522,16 @@ fn write_exec_match() {
         let res = self.vm.alloc_bytes(*size as usize,*align as usize);
         write_stack(stack, *out, res);
     }
+    Instr::LocalInit((start,end)) => {
+        for i in start.index()..=end.index() {
+            self.local_init(drops_base, i);
+        }
+    }
+    Instr::LocalMove((start,end)) => {
+        for i in start.index()..=end.index() {
+            self.local_move(drops_base, i);
+        }
+    }
     _ => panic!("NYI {:?}",instr)
 }"#,
     );
