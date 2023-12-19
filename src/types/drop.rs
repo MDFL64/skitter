@@ -3,7 +3,7 @@ use crate::{
     items::Item,
     types::{SubList, Type},
     variants::VariantIndex,
-    vm::{instr::Instr, Function, FunctionSource, VM},
+    vm::{instr::{Instr, Slot}, Function, FunctionSource, VM},
 };
 
 use super::TypeKind;
@@ -152,14 +152,27 @@ impl<'vm> DropGlue<'vm> {
         // 2. handling drops in functions may involve generating similar bytecode, there may be some opportunity for re-use
         // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
 
+        let mut code = Vec::new();
+        if let Some(drop_fn) = drop_fn {
+            code.push(Instr::Call(Slot::new(0), drop_fn));
+        }
+
+        assert!(fields.len() == 0);
+
+        code.push(Instr::Return);
+
         let bc = FunctionBytecode {
-            code: vec![Instr::Error(Box::new("drop glue".to_owned()))],
+            code,
             drops: Vec::new(),
         };
 
         let bc = vm.alloc_bytecode(bc);
 
         Self(vm.alloc_function(FunctionSource::RawBytecode(bc), SubList::empty()))
+    }
+
+    pub fn function(&self) -> &'vm Function<'vm> {
+        self.0
     }
 }
 

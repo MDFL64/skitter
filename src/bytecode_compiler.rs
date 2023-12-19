@@ -172,7 +172,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             println!("<-");
         }
 
-        let out_size = compiler.expr_ty(root_expr).layout().assert_size() as usize;
+        let out_ty = compiler.expr_ty(root_expr);
 
         let bc = FunctionBytecode {
             code: compiler.out_bc,
@@ -184,6 +184,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         match place {
             Place::Local(local) => {
+                let out_size = out_ty.layout().assert_size() as usize;
                 let data = const_thread.copy_result(local.slot.index(), out_size);
                 let ptr = vm.alloc_constant(data).as_ptr() as usize;
                 (ptr, None)

@@ -18,6 +18,7 @@ use crate::items::ItemPath;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
+use crate::types::DropGlue;
 use crate::types::ItemWithSubs;
 use crate::types::Sub;
 use crate::types::SubList;
@@ -157,11 +158,12 @@ impl<'vm> VMThread<'vm> {
                 include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
                 pc += 1;
             }
+
+            for i in 0..func.drops.len() {
+                self.local_drop(drops_base, i as u32, &func.drops, stack);
+            }
         }
 
-        for i in 0..func.drops.len() {
-            self.local_drop(drops_base, i as u32);
-        }
 
         self.drop_flags.truncate(drops_base);
     }
@@ -204,7 +206,7 @@ impl<'vm> VMThread<'vm> {
         *byte ^= mask;
     }
 
-    fn local_drop(&mut self, base: usize, n: u32) {
+    unsafe fn local_drop(&mut self, base: usize, n: u32, drops: &[(Slot, DropGlue<'vm>)], stack: *mut u8) {
         let offset = (n >> 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
@@ -213,7 +215,15 @@ impl<'vm> VMThread<'vm> {
 
         if (*byte & mask) != 0 {
             *byte ^= mask;
-            println!("DROP {}", n);
+
+            let (slot, glue) = drops[n as usize];
+
+            let slot_ptr = stack.add(slot.index());
+
+            let mut drop_thread = self.vm.make_thread();
+            write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
+
+            drop_thread.call(glue.function(), 0);
         }
     }
 }
@@ -531,7 +541,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.vm,
             Self::Closure(closure) => closure.vm,
-            Self::RawBytecode(_) => panic!("no source"),
+            Self::RawBytecode(_) => panic!("raw bytecode has no vm"),
         }
     }
 
@@ -539,7 +549,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.ir(subs),
             Self::Closure(closure) => (closure.ir_base(), Cow::Borrowed(subs)),
-            Self::RawBytecode(_) => panic!("no source"),
+            Self::RawBytecode(_) => panic!("raw bytecode has no ir"),
         }
     }
 
@@ -547,7 +557,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.path.as_string(),
             Self::Closure(_) => "[closure]",
-            Self::RawBytecode(_) => "[raw bytecode, probably drop glue]",
+            Self::RawBytecode(..) => "[raw bytecode, probably drop glue]",
         }
     }
 }
@@ -594,15 +604,19 @@ impl<'vm> Function<'vm> {
             if let Some(bc) = self.get_bytecode() {
                 return bc;
             }
+            
+            let bc = if let FunctionSource::RawBytecode(bc) = self.source {
+                bc
+            } else {
+                let vm = self.source.vm();
+                let (ir, new_subs) = self.source.ir(&self.subs);
+                let path = self.source.debug_name();
+    
+                let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
+                vm.alloc_bytecode(bc)
+            };
 
-            let vm = self.source.vm();
-            let (ir, new_subs) = self.source.ir(&self.subs);
-            let path = self.source.debug_name();
-
-            let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
-            let bc_ref = vm.alloc_bytecode(bc);
-
-            self.set_bytecode(bc_ref);
+            self.set_bytecode(bc);
         }
     }
 }

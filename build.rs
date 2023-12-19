@@ -533,8 +533,8 @@ fn write_exec_match() {
         }
     }
     Instr::LocalDrop((start,end)) => {
-        for i in start.index()..=end.index() {
-            self.local_drop(drops_base, i);
+        for i in (start.index()..=end.index()).rev() {
+            self.local_drop(drops_base, i, &func.drops, stack);
         }
     }
     _ => panic!("NYI {:?}",instr)
