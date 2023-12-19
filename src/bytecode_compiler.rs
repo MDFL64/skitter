@@ -67,7 +67,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             in_func: &ir,
             out_bc: Vec::new(),
             vm,
-            stack: Default::default(),
+            stack: CompilerStack::new(),
             locals: Vec::new(),
             loops: Vec::new(),
             loop_breaks: Vec::new(),
@@ -122,7 +122,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         compiler.lower_expr(ir.root_expr, Some(local_ret));
 
-        compiler.stack.pop_scope(body_scope);
+        compiler.stack.pop_scope(body_scope, &mut compiler.out_bc);
         compiler.out_bc.push(Instr::Return);
 
         if vm.cli_args.verbose {
@@ -155,7 +155,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             in_func: &ir,
             out_bc: Vec::new(),
             vm,
-            stack: Default::default(),
+            stack: CompilerStack::new(),
             locals: Vec::new(),
             loops: Vec::new(),
             loop_breaks: Vec::new(),
@@ -232,7 +232,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             self.lower_expr(expr, Some(dest));
         }
 
-        self.stack.pop_scope(scope);
+        self.stack.pop_scope(scope, &mut self.out_bc);
 
         dest
     }
@@ -252,7 +252,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             Stmt::Expr(expr) => {
                 let stmt_scope = self.stack.push_scope("stmt");
                 self.lower_expr(*expr, None);
-                self.stack.pop_scope(stmt_scope);
+                self.stack.pop_scope(stmt_scope, &mut self.out_bc);
             }
         }
     }
@@ -2425,18 +2425,18 @@ impl PointerKind {
     }
 }
 
-#[derive(Default)]
 pub struct CompilerStack<'vm> {
     entries: Vec<StackEntry>,
     top: u32,
-    next_scope_id: u32,
     drop_info: Vec<CompilerDropInfo>,
     drop_leafs: Vec<(Slot, DropGlue<'vm>)>,
+    first_drop: DropBit,
 }
 
 struct StackScope {
     old_entries: usize,
     old_top: u32,
+    old_first_drop: DropBit,
     name: &'static str,
 }
 
@@ -2447,6 +2447,16 @@ impl Drop for StackScope {
 }
 
 impl<'vm> CompilerStack<'vm> {
+    pub fn new() -> Self {
+        Self {
+            entries: vec![],
+            top: 0,
+            drop_info: vec![],
+            drop_leafs: vec![],
+            first_drop: DropBit::new(0),
+        }
+    }
+
     pub fn alloc(&mut self, ty: Type<'vm>) -> Local<'vm> {
         let drop_info = ty.drop_info();
 
@@ -2486,18 +2496,27 @@ impl<'vm> CompilerStack<'vm> {
     }
 
     fn push_scope(&mut self, name: &'static str) -> StackScope {
-        eprintln!("- enter {}", name);
-        StackScope {
+        let res = StackScope {
             old_entries: self.entries.len(),
             old_top: self.top,
+            old_first_drop: self.first_drop,
             name,
-        }
+        };
+        self.first_drop = DropBit::new(self.drop_leafs.len() as u32);
+        res
     }
 
-    fn pop_scope(&mut self, scope: StackScope) {
-        eprintln!("- exit {}", scope.name);
+    fn pop_scope(&mut self, scope: StackScope, bc: &mut Vec<Instr>) {
+        if self.drop_leafs.len() > 0 {
+            let last_drop = DropBit::new(self.drop_leafs.len() as u32 - 1);
+            if last_drop.index() >= self.first_drop.index() {
+                bc.push(Instr::LocalDrop((self.first_drop, last_drop)));
+            }
+        }
+
         self.entries.truncate(scope.old_entries);
         self.top = scope.old_top;
+        self.first_drop = scope.old_first_drop;
         std::mem::forget(scope);
     }
 

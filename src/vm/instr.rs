@@ -339,6 +339,7 @@ pub enum Instr<'vm> {
 
     LocalInit((DropBit, DropBit)),
     LocalMove((DropBit, DropBit)),
+    LocalDrop((DropBit, DropBit)),
 
     Return,
     Error(Box<String>),

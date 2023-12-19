@@ -159,6 +159,10 @@ impl<'vm> VMThread<'vm> {
             }
         }
 
+        for i in 0..func.drops.len() {
+            self.local_drop(drops_base, i as u32);
+        }
+
         self.drop_flags.truncate(drops_base);
     }
 
@@ -198,6 +202,19 @@ impl<'vm> VMThread<'vm> {
         }
 
         *byte ^= mask;
+    }
+
+    fn local_drop(&mut self, base: usize, n: u32) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            *byte ^= mask;
+            println!("DROP {}", n);
+        }
     }
 }
 
