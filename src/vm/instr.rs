@@ -340,6 +340,8 @@ pub enum Instr<'vm> {
     LocalInit((DropBit, DropBit)),
     LocalMove((DropBit, DropBit)),
     LocalDrop((DropBit, DropBit)),
+    /// Fused drop-init, drops values but leaves their flags initialized.
+    LocalDropInit((DropBit, DropBit)),
 
     Return,
     Error(Box<String>),

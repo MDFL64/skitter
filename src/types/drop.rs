@@ -3,7 +3,10 @@ use crate::{
     items::Item,
     types::{SubList, Type},
     variants::VariantIndex,
-    vm::{instr::{Instr, Slot}, Function, FunctionSource, VM},
+    vm::{
+        instr::{Instr, Slot},
+        Function, FunctionSource, VM,
+    },
 };
 
 use super::TypeKind;
@@ -91,6 +94,14 @@ impl<'vm> DropInfo<'vm> {
         match self {
             Self::None => true,
             _ => false,
+        }
+    }
+
+    pub fn glue(&self) -> Option<&DropGlue<'vm>> {
+        match self {
+            Self::Leaf(glue) => Some(glue),
+            Self::Branch { glue, fields: _ } => Some(glue),
+            Self::None => None,
         }
     }
 }

@@ -159,11 +159,10 @@ impl<'vm> VMThread<'vm> {
                 pc += 1;
             }
 
-            for i in 0..func.drops.len() {
+            for i in (0..func.drops.len()).rev() {
                 self.local_drop(drops_base, i as u32, &func.drops, stack);
             }
         }
-
 
         self.drop_flags.truncate(drops_base);
     }
@@ -206,7 +205,13 @@ impl<'vm> VMThread<'vm> {
         *byte ^= mask;
     }
 
-    unsafe fn local_drop(&mut self, base: usize, n: u32, drops: &[(Slot, DropGlue<'vm>)], stack: *mut u8) {
+    unsafe fn local_drop(
+        &mut self,
+        base: usize,
+        n: u32,
+        drops: &[(Slot, DropGlue<'vm>)],
+        stack: *mut u8,
+    ) {
         let offset = (n >> 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
@@ -224,6 +229,33 @@ impl<'vm> VMThread<'vm> {
             write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
 
             drop_thread.call(glue.function(), 0);
+        }
+    }
+
+    unsafe fn local_drop_init(
+        &mut self,
+        base: usize,
+        n: u32,
+        drops: &[(Slot, DropGlue<'vm>)],
+        stack: *mut u8,
+    ) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            let (slot, glue) = drops[n as usize];
+
+            let slot_ptr = stack.add(slot.index());
+
+            let mut drop_thread = self.vm.make_thread();
+            write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
+
+            drop_thread.call(glue.function(), 0);
+        } else {
+            *byte |= mask;
         }
     }
 }
@@ -604,14 +636,14 @@ impl<'vm> Function<'vm> {
             if let Some(bc) = self.get_bytecode() {
                 return bc;
             }
-            
+
             let bc = if let FunctionSource::RawBytecode(bc) = self.source {
                 bc
             } else {
                 let vm = self.source.vm();
                 let (ir, new_subs) = self.source.ir(&self.subs);
                 let path = self.source.debug_name();
-    
+
                 let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
                 vm.alloc_bytecode(bc)
             };

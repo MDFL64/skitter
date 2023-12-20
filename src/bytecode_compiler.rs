@@ -85,8 +85,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             drop_id: None,
         };
 
-        let body_scope = compiler.stack.push_scope("body");
-
         let param_slots: Vec<_> = ir
             .params
             .iter()
@@ -122,7 +120,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         compiler.lower_expr(ir.root_expr, Some(local_ret));
 
-        compiler.stack.pop_scope(body_scope, &mut compiler.out_bc);
         compiler.out_bc.push(Instr::Return);
 
         if vm.cli_args.verbose {
@@ -380,21 +377,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     match self.expr_to_place(*lhs) {
                         Place::Local(lhs_local) => {
-                            if let Some(instr) =
-                                bytecode_select::copy(lhs_local.slot, rhs_local.slot, assign_ty)
-                            {
-                                self.out_bc.push(instr);
-                            }
+                            self.local_move(lhs_local, rhs_local);
                         }
                         Place::Ptr(ptr_slot, offset, _) => {
-                            if let Some(instr) = bytecode_select::copy_to_ptr(
-                                ptr_slot,
-                                rhs_local.slot,
-                                assign_ty,
-                                offset,
-                            ) {
-                                self.out_bc.push(instr);
-                            }
+                            self.local_move_to_ptr(ptr_slot, rhs_local, offset);
                         }
                     }
 
@@ -2331,8 +2317,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     }
 
     /// Initializes a local by moving from a local.
-    /// LocalMove(src) (assert all bits set, clear them)
-    /// LocalInit(dst) (assert all bits clear, set them)
     fn local_init_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
         assert!(dst.ty == src.ty);
 
@@ -2346,6 +2330,44 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
             self.out_bc.push(Instr::LocalInit(bits));
+        }
+    }
+
+    /// Moves a local to another local. The destination local may or may not be initialized.
+    fn local_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
+        assert!(dst.ty == src.ty);
+
+        if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
+            self.out_bc.push(Instr::LocalDropInit(bits));
+        }
+
+        if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
+            self.out_bc.push(instr);
+        }
+
+        if let Some(bits) = self.stack.drop_bits(src.drop_id) {
+            self.out_bc.push(Instr::LocalMove(bits));
+        }
+    }
+
+    fn local_move_to_ptr(&mut self, ptr_slot: Slot, src: Local<'vm>, ptr_offset: i32) {
+        if let Some(drop_info) = src.ty.drop_info().glue() {
+            let ptr_ty = src.ty.ref_to(Mutability::Mut);
+            let arg_slot = self.stack.alloc_no_drop(ptr_ty);
+
+            self.out_bc
+                .push(bytecode_select::copy(arg_slot, ptr_slot, ptr_ty).unwrap());
+            self.out_bc
+                .push(Instr::Call(arg_slot, drop_info.function()));
+            //panic!("DROP PTR");
+        }
+
+        if let Some(instr) = bytecode_select::copy_to_ptr(ptr_slot, src.slot, src.ty, ptr_offset) {
+            self.out_bc.push(instr);
+        }
+
+        if let Some(bits) = self.stack.drop_bits(src.drop_id) {
+            self.out_bc.push(Instr::LocalMove(bits));
         }
     }
 
