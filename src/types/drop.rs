@@ -1,12 +1,12 @@
 use crate::{
     bytecode_compiler::FunctionBytecode,
-    items::Item,
+    items::{Item, AdtInfo},
     types::{SubList, Type},
-    variants::VariantIndex,
+    variants::{VariantIndex, Variants},
     vm::{
         instr::{Instr, Slot},
         Function, FunctionSource, VM,
-    },
+    }, abi::POINTER_SIZE,
 };
 
 use super::TypeKind;
@@ -41,31 +41,34 @@ pub enum DropInfo<'vm> {
 
 #[derive(Clone, Debug)]
 pub struct DropField<'vm> {
-    variant: VariantIndex,
-    field: u32,
-    ty: Type<'vm>,
+    pub variant: VariantIndex,
+    pub offset: u32,
+    pub ty: Type<'vm>,
 }
 
 impl<'vm> DropInfo<'vm> {
     fn new(
         vm: &'vm VM<'vm>,
         drop_fn: Option<&'vm Item<'vm>>,
-        variant_fields: &[Vec<Type<'vm>>],
+        field_types: &[Vec<Type<'vm>>],
+        field_offsets: &Variants<Vec<u32>>,
         subs: &SubList<'vm>,
+        adt_info: Option<&AdtInfo>
     ) -> Self {
         let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
 
         let mut fields = Vec::new();
 
-        for (variant, field_tys) in variant_fields.iter().enumerate() {
+        for (variant, field_tys) in field_types.iter().enumerate() {
             let variant = VariantIndex::new(variant as u32);
 
             for (field_index, ty) in field_tys.iter().enumerate() {
                 let ty = ty.sub(subs);
                 if ty.drop_info().is_drop() {
+                    let offset = field_offsets.get(variant)[field_index as usize];
                     fields.push(DropField {
                         variant,
-                        field: field_index as u32,
+                        offset,
                         ty,
                     })
                 }
@@ -73,6 +76,12 @@ impl<'vm> DropInfo<'vm> {
         }
 
         if fields.len() > 0 || drop_fn.is_some() {
+            if let Some(adt_info) = adt_info {
+                // TODO SKIP UNIONS
+                // TODO PASS *ENUM* DISCRIMINANTS TO DropGlue::new
+                assert!(adt_info.is_struct());
+            }
+
             let glue = DropGlue::new(vm, drop_fn, &fields);
 
             if drop_fn.is_some() {
@@ -132,7 +141,9 @@ impl<'vm> Type<'vm> {
                 }
 
                 TypeKind::Tuple(fields) => {
-                    DropInfo::new(vm, None, std::slice::from_ref(fields), &SubList::empty())
+                    let offsets = &self.layout().field_offsets;
+
+                    DropInfo::new(vm, None, std::slice::from_ref(fields), offsets, &SubList::empty(), None)
                 }
                 TypeKind::Closure(closure, subs) => {
                     let env = closure.env(subs);
@@ -141,8 +152,9 @@ impl<'vm> Type<'vm> {
                 TypeKind::Adt(info) => {
                     let adt_info = info.item.adt_info();
                     let drop_fn = self.1.find_drop(*self);
+                    let offsets = &self.layout().field_offsets;
 
-                    DropInfo::new(vm, drop_fn, adt_info.variant_fields.as_slice(), &info.subs)
+                    DropInfo::new(vm, drop_fn, adt_info.variant_fields.as_slice(), offsets, &info.subs, Some(adt_info))
                 }
                 _ => panic!("drop info: {:?}", self),
             }
@@ -163,12 +175,21 @@ impl<'vm> DropGlue<'vm> {
         // 2. handling drops in functions may involve generating similar bytecode, there may be some opportunity for re-use
         // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
 
+        let self_slot = Slot::new(0);
+        // temporary slot used to store field offsets
+        // use POINTER_SIZE * 2 in case this type is unsized
+        let member_slot = Slot::new(POINTER_SIZE.bytes() * 2);
+
         let mut code = Vec::new();
         if let Some(drop_fn) = drop_fn {
-            code.push(Instr::Call(Slot::new(0), drop_fn));
+            code.push(Instr::Call(self_slot, drop_fn));
         }
 
-        assert!(fields.len() == 0);
+        for field in fields {
+            assert!(field.variant == VariantIndex::new(0));
+            println!("f {} / {}",field.offset,field.ty);
+            code.push(Instr::Error(Box::new("err".into())));
+        }
 
         code.push(Instr::Return);
 

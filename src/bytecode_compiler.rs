@@ -9,7 +9,7 @@ use crate::ir::{
 };
 use crate::items::FunctionAbi;
 use crate::types::{
-    DropBit, DropGlue, DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind,
+    DropBit, DropGlue, DropInfo, ItemWithSubs, Mutability, SubList, Type, TypeKind, DropField,
 };
 use crate::variants::VariantIndex;
 use crate::vm::instr::Instr;
@@ -976,7 +976,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
                     for (field_index, field) in fields.iter().enumerate() {
-                        let field_local = dest.get_field(VariantIndex::new(0), field_index as u32);
+                        let field_local = dest.get_field(VariantIndex::new(0), field_index as u32, &self.stack);
                         self.lower_expr(*field, Some(field_local));
                     }
 
@@ -1059,7 +1059,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     for (field_index, expr) in fields.iter() {
                         //let offset = expr_layout.field_offsets.get(*variant)[*field_index as usize];
                         //let field_slot = dst_slot.offset_by(offset as i32);
-                        let field_local = dest.get_field(*variant, *field_index);
+                        let field_local = dest.get_field(*variant, *field_index, &self.stack);
                         self.lower_expr(*expr, Some(field_local));
                     }
 
@@ -1084,8 +1084,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         for (field_index, _) in all_fields.iter().enumerate() {
                             if fields.iter().all(|(f, _)| *f != field_index as u32) {
                                 //let field_ty = field_ty.sub(&adt_subs);
-                                let field_src = rest_source.get_field(*variant, field_index as u32);
-                                let field_dst = dest.get_field(*variant, field_index as u32);
+                                let field_src = rest_source.get_field(*variant, field_index as u32, &self.stack);
+                                let field_dst = dest.get_field(*variant, field_index as u32, &self.stack);
 
                                 let copy_instr = bytecode_select::copy(
                                     field_dst.slot,
@@ -1285,7 +1285,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         FnTrait::FnOnce => {
                             let field = closure
                                 .self_local
-                                .get_field(VariantIndex::new(0), upvar.index);
+                                .get_field(VariantIndex::new(0), upvar.index, &self.stack);
                             if upvar.is_ref {
                                 // stored inline, must be a thin pointer
                                 Place::Ptr(field.slot, 0, PointerKind::Thin)
@@ -1305,7 +1305,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                     let lhs_ty = self.expr_ty(*lhs);
 
-                    self.expr_to_place(*lhs).get_field(*variant, *field, lhs_ty)
+                    self.expr_to_place(*lhs).get_field(*variant, *field, lhs_ty, &self.stack)
                 }
                 ExprKind::Index { lhs, index } => {
                     let index_ty = self.expr_ty(*index);
@@ -1650,7 +1650,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
-                    let field_source = source.get_field(VariantIndex::new(0), field.field, pat_ty);
+                    let field_source = source.get_field(VariantIndex::new(0), field.field, pat_ty, &self.stack);
 
                     let refutable = self.match_pattern_internal(
                         field_pattern,
@@ -1720,7 +1720,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 for field in fields {
                     let field_pattern = self.in_func.pattern(field.pattern);
-                    let field_source = source.get_field(*variant_index, field.field, pat_ty);
+                    let field_source = source.get_field(*variant_index, field.field, pat_ty, &self.stack);
 
                     let refutable = self.match_pattern_internal(
                         field_pattern,
@@ -2417,9 +2417,9 @@ impl<'vm> Place<'vm> {
         }
     }
 
-    pub fn get_field(&self, variant: VariantIndex, field: u32, ty: Type<'vm>) -> Self {
+    pub fn get_field(&self, variant: VariantIndex, field: u32, ty: Type<'vm>, stack: &CompilerStack<'vm>) -> Self {
         match self {
-            Place::Local(local) => Place::Local(local.get_field(variant, field)),
+            Place::Local(local) => Place::Local(local.get_field(variant, field, stack)),
             Place::Ptr(slot, offset, kind) => {
                 let field_offset = ty.layout().field_offsets.get(variant)[field as usize];
 
@@ -2487,7 +2487,7 @@ impl<'vm> CompilerStack<'vm> {
 
         let drop_id = match drop_info {
             DropInfo::Branch { fields, .. } => {
-                panic!("drop branch!");
+                Some(self.register_drop_branch(slot, fields))
             }
             DropInfo::Leaf(glue) => Some(self.register_drop_leaf(slot, *glue)),
             DropInfo::None => None,
@@ -2565,6 +2565,33 @@ impl<'vm> CompilerStack<'vm> {
 
         id
     }
+
+    fn register_drop_branch(&mut self, base_slot: Slot, fields: &[DropField<'vm>]) -> DropId {
+        let new_fields = fields.iter().map(|field| {
+            assert!(field.variant == VariantIndex::new(0));
+
+            let field_slot = base_slot.offset_by(field.offset as i32);
+            let drop_info = field.ty.drop_info();
+
+            let field_id = match drop_info {
+                DropInfo::Leaf(field_glue) => {
+                    self.register_drop_leaf(field_slot, *field_glue)
+                }
+                _ => panic!("non-trivial branch")
+            };
+
+            CompilerDropField{
+                drop_id: field_id,
+                offset: field.offset,
+                variant: field.variant
+            }
+        }).collect();
+
+        let id = DropId(self.drop_info.len() as u32);
+        self.drop_info.push(CompilerDropInfo::Branch(new_fields));
+
+        id
+    }
 }
 
 struct StackEntry {
@@ -2593,10 +2620,7 @@ impl<'vm> Local<'vm> {
         }
     }
 
-    pub fn get_field(&self, variant: VariantIndex, field: u32) -> Self {
-        assert!(self.drop_id.is_none());
-        //println!("{} {:?} {}",self.ty,variant,field);
-
+    pub fn get_field(&self, variant: VariantIndex, field: u32, stack: &CompilerStack<'vm>) -> Self {
         let offset = self.ty.layout().field_offsets.get(variant)[field as usize];
 
         let field_ty = match self.ty.kind() {
@@ -2618,6 +2642,12 @@ impl<'vm> Local<'vm> {
             _ => panic!("field of {}", self.ty),
         };
 
+        if let Some(drop_id) = self.drop_id {
+            let drop_info = &stack.drop_info[drop_id.0 as usize];
+            println!("{:?}",drop_info);
+            panic!();
+        }
+
         Self {
             slot: self.slot.offset_by(offset as i32),
             drop_id: None,
@@ -2626,13 +2656,15 @@ impl<'vm> Local<'vm> {
     }
 }
 
+#[derive(Debug)]
 enum CompilerDropInfo {
     Leaf(DropBit),
     Branch(Vec<CompilerDropField>),
 }
 
+#[derive(Debug)]
 struct CompilerDropField {
     variant: VariantIndex,
-    field: u32,
+    offset: u32,
     drop_id: DropId,
 }
