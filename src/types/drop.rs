@@ -17,7 +17,7 @@ use super::TypeKind;
 #[derive(Clone, Copy)]
 pub struct DropGlue<'vm>(&'vm Function<'vm>);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DropBit(u32);
 
 // Jargon:
@@ -42,6 +42,7 @@ pub enum DropInfo<'vm> {
 #[derive(Clone, Debug)]
 pub struct DropField<'vm> {
     pub variant: VariantIndex,
+    pub field: u32,
     pub offset: u32,
     pub ty: Type<'vm>,
 }
@@ -68,6 +69,7 @@ impl<'vm> DropInfo<'vm> {
                     let offset = field_offsets.get(variant)[field_index as usize];
                     fields.push(DropField {
                         variant,
+                        field: field_index as u32,
                         offset,
                         ty,
                     })
@@ -187,10 +189,11 @@ impl<'vm> DropGlue<'vm> {
 
         for field in fields {
             assert!(field.variant == VariantIndex::new(0));
-            println!("f {} / {}",field.offset,field.ty);
-            code.push(Instr::Error(Box::new("err".into())));
-        }
+            code.push(Instr::PointerOffset2(member_slot, self_slot, field.offset as i32));
 
+            let field_glue = field.ty.drop_info().glue().expect("drop field missing glue");
+            code.push(Instr::Call(member_slot, field_glue.function()));
+        }
         code.push(Instr::Return);
 
         let bc = FunctionBytecode {

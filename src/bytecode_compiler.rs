@@ -1100,6 +1100,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
 
+                    // init the struct's own drop flag
+                    self.local_init_leaf(dest);
+
                     dest
                 }
                 ExprKind::Let { pattern, init } => {
@@ -2339,6 +2342,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
             self.out_bc.push(Instr::LocalDropInit(bits));
+        } else {
+            self.out_bc.push(Instr::Error(Box::new("todo unconditional drop".to_owned())));
         }
 
         if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
@@ -2376,6 +2381,13 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     fn local_init(&mut self, local: Local<'vm>) {
         if let Some(bits) = self.stack.drop_bits(local.drop_id) {
             self.out_bc.push(Instr::LocalInit(bits));
+        }
+    }
+
+    // initializes a local ONLY IF it is a drop leaf
+    fn local_init_leaf(&mut self, local: Local<'vm>) {
+        if let Some(bit) = self.stack.drop_bit_leaf(local.drop_id) {
+            self.out_bc.push(Instr::LocalInit((bit,bit)));
         }
     }
 
@@ -2549,7 +2561,20 @@ impl<'vm> CompilerStack<'vm> {
                 let info = &self.drop_info[id.0 as usize];
                 match info {
                     CompilerDropInfo::Leaf(bit) => Some((*bit, *bit)),
-                    CompilerDropInfo::Branch(_) => panic!("branch"),
+                    CompilerDropInfo::Branch(_,bits) => Some(*bits),
+                }
+            }
+            None => None,
+        }
+    }
+
+    fn drop_bit_leaf(&self, id: Option<DropId>) -> Option<DropBit> {
+        match id {
+            Some(id) => {
+                let info = &self.drop_info[id.0 as usize];
+                match info {
+                    CompilerDropInfo::Leaf(bit) => Some(*bit),
+                    _ => None
                 }
             }
             None => None,
@@ -2567,7 +2592,12 @@ impl<'vm> CompilerStack<'vm> {
     }
 
     fn register_drop_branch(&mut self, base_slot: Slot, fields: &[DropField<'vm>]) -> DropId {
-        let new_fields = fields.iter().map(|field| {
+        
+        let mut bit_range = None;
+        
+        // setup fields in reverse order
+        // this way they are dropped in-order when the drop code reverses through them
+        let new_fields = fields.iter().rev().map(|field| {
             assert!(field.variant == VariantIndex::new(0));
 
             let field_slot = base_slot.offset_by(field.offset as i32);
@@ -2580,15 +2610,25 @@ impl<'vm> CompilerStack<'vm> {
                 _ => panic!("non-trivial branch")
             };
 
+            // this is very dumb, but should be correct
+            let field_bits = self.drop_bits(Some(field_id)).unwrap();
+            if let Some((current_low,current_high)) = &mut bit_range {
+                let (field_low,field_high) = field_bits;
+                *current_low = field_low.min(*current_low);
+                *current_high = field_high.max(*current_high);
+            } else {
+                bit_range = Some(field_bits);
+            }
+
             CompilerDropField{
                 drop_id: field_id,
-                offset: field.offset,
+                field: field.field,
                 variant: field.variant
             }
         }).collect();
 
         let id = DropId(self.drop_info.len() as u32);
-        self.drop_info.push(CompilerDropInfo::Branch(new_fields));
+        self.drop_info.push(CompilerDropInfo::Branch(new_fields,bit_range.unwrap()));
 
         id
     }
@@ -2642,15 +2682,21 @@ impl<'vm> Local<'vm> {
             _ => panic!("field of {}", self.ty),
         };
 
-        if let Some(drop_id) = self.drop_id {
+        let drop_id = if let Some(drop_id) = self.drop_id {
             let drop_info = &stack.drop_info[drop_id.0 as usize];
-            println!("{:?}",drop_info);
-            panic!();
-        }
+            if let CompilerDropInfo::Branch(drop_fields,_) = drop_info {
+                let res = drop_fields.iter().find(|f| f.variant == variant && f.field == field);
+                res.map(|res| res.drop_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         Self {
             slot: self.slot.offset_by(offset as i32),
-            drop_id: None,
+            drop_id,
             ty: field_ty,
         }
     }
@@ -2659,12 +2705,13 @@ impl<'vm> Local<'vm> {
 #[derive(Debug)]
 enum CompilerDropInfo {
     Leaf(DropBit),
-    Branch(Vec<CompilerDropField>),
+    Branch(Vec<CompilerDropField>,(DropBit,DropBit)),
 }
 
 #[derive(Debug)]
 struct CompilerDropField {
     variant: VariantIndex,
-    offset: u32,
+    //offset: u32,
+    field: u32,
     drop_id: DropId,
 }
