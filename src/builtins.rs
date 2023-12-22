@@ -4,7 +4,7 @@ use skitter_macro::Persist;
 
 use crate::{
     abi::POINTER_SIZE,
-    bytecode_compiler::{CompilerStack, Local},
+    bytecode_compiler::{CompilerStack, Local, BytecodeCompiler},
     bytecode_select,
     closure::FnTrait,
     crate_provider::TraitImpl,
@@ -347,14 +347,14 @@ impl BuiltinTrait {
 pub fn compile_rust_intrinsic<'vm>(
     name: &str,
     subs: &SubList<'vm>,
-    vm: &'vm VM<'vm>,
-    out_bc: &mut Vec<Instr<'vm>>,
-    stack: &mut CompilerStack,
-    arg_slots: Vec<Local>,
-    out_slot: Local,
+    
+    args: Vec<Local<'vm>>,
+    out: Local<'vm>,
+
+    compiler: &mut BytecodeCompiler<'vm,'_>
 ) {
-    /*match name {
-        "transmute" | "transmute_unchecked" => {
+    match name {
+        /*"transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
             assert!(arg_slots.len() == 1);
 
@@ -925,12 +925,12 @@ pub fn compile_rust_intrinsic<'vm>(
         "maxnumf64" => {
             assert!(arg_slots.len() == 2);
             out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
-        }
+        }*/
 
         // special skitter-specific intrinsics
         "skitter_box_new" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
             let layout = arg_ty.layout();
@@ -938,21 +938,22 @@ pub fn compile_rust_intrinsic<'vm>(
             let size = layout.assert_size();
             if size == 0 {
                 // dangling pointer
-                out_bc.push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out_slot));
+                compiler.out_bc.push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out.slot));
             } else {
-                out_bc.push(Instr::Alloc {
-                    out: out_slot,
+                compiler.out_bc.push(Instr::Alloc {
+                    out: out.slot,
                     size: layout.assert_size(),
                     align: layout.align,
                 });
-                out_bc
-                    .push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
+                compiler.local_move_to_ptr(out.slot, args[0], 0);
+                
+                //out_bc
+                //    .push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
             }
         }
 
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);
         }
-    }*/
-    panic!("intrinsics disabled");
+    }
 }

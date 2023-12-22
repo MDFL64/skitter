@@ -1,12 +1,13 @@
 use crate::{
+    abi::POINTER_SIZE,
     bytecode_compiler::FunctionBytecode,
-    items::{Item, AdtInfo},
+    items::{AdtInfo, Item},
     types::{SubList, Type},
     variants::{VariantIndex, Variants},
     vm::{
         instr::{Instr, Slot},
         Function, FunctionSource, VM,
-    }, abi::POINTER_SIZE,
+    },
 };
 
 use super::TypeKind;
@@ -54,7 +55,7 @@ impl<'vm> DropInfo<'vm> {
         field_types: &[Vec<Type<'vm>>],
         field_offsets: &Variants<Vec<u32>>,
         subs: &SubList<'vm>,
-        adt_info: Option<&AdtInfo>
+        adt_info: Option<&AdtInfo>,
     ) -> Self {
         let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
 
@@ -145,7 +146,14 @@ impl<'vm> Type<'vm> {
                 TypeKind::Tuple(fields) => {
                     let offsets = &self.layout().field_offsets;
 
-                    DropInfo::new(vm, None, std::slice::from_ref(fields), offsets, &SubList::empty(), None)
+                    DropInfo::new(
+                        vm,
+                        None,
+                        std::slice::from_ref(fields),
+                        offsets,
+                        &SubList::empty(),
+                        None,
+                    )
                 }
                 TypeKind::Closure(closure, subs) => {
                     let env = closure.env(subs);
@@ -156,7 +164,14 @@ impl<'vm> Type<'vm> {
                     let drop_fn = self.1.find_drop(*self);
                     let offsets = &self.layout().field_offsets;
 
-                    DropInfo::new(vm, drop_fn, adt_info.variant_fields.as_slice(), offsets, &info.subs, Some(adt_info))
+                    DropInfo::new(
+                        vm,
+                        drop_fn,
+                        adt_info.variant_fields.as_slice(),
+                        offsets,
+                        &info.subs,
+                        Some(adt_info),
+                    )
                 }
                 _ => panic!("drop info: {:?}", self),
             }
@@ -189,9 +204,17 @@ impl<'vm> DropGlue<'vm> {
 
         for field in fields {
             assert!(field.variant == VariantIndex::new(0));
-            code.push(Instr::PointerOffset2(member_slot, self_slot, field.offset as i32));
+            code.push(Instr::PointerOffset2(
+                member_slot,
+                self_slot,
+                field.offset as i32,
+            ));
 
-            let field_glue = field.ty.drop_info().glue().expect("drop field missing glue");
+            let field_glue = field
+                .ty
+                .drop_info()
+                .glue()
+                .expect("drop field missing glue");
             code.push(Instr::Call(member_slot, field_glue.function()));
         }
         code.push(Instr::Return);

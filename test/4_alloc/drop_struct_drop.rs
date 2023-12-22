@@ -24,7 +24,7 @@ pub fn main() {
         pair.a = LogDrop("2/a");
     }
 
-    /*{
+    {
         let mut pair = DropPair{
             a: LogDrop("3/a"),
             b: LogDrop("3/b"),
@@ -34,5 +34,5 @@ pub fn main() {
             a: LogDrop("4/a"),
             b: LogDrop("4/b"),
         }
-    }*/
+    }
 }
