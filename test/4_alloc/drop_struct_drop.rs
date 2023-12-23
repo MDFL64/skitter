@@ -16,8 +16,10 @@ impl Drop for DropPair {
 
 pub fn main() {
     {
+        let a = LogDrop("1/a");
+
         let mut pair = DropPair{
-            a: LogDrop("1/a"),
+            a,
             b: LogDrop("1/b"),
         };
     
@@ -25,9 +27,11 @@ pub fn main() {
     }
 
     {
+        let b = LogDrop("3/b");
+
         let mut pair = DropPair{
             a: LogDrop("3/a"),
-            b: LogDrop("3/b"),
+            b,
         };
 
         pair = DropPair{

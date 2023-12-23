@@ -28,6 +28,11 @@ pub enum BuiltinTrait {
     Pointee,
 }
 
+#[derive(Copy, Clone, Debug, Persist, PartialEq, Eq)]
+pub enum BuiltinAdt {
+    ManuallyDrop,
+}
+
 /// Used for marker trait impls.
 fn trait_impl_empty<'vm>() -> TraitImpl<'vm> {
     TraitImpl {
@@ -949,10 +954,30 @@ pub fn compile_rust_intrinsic<'vm>(
                     size: layout.assert_size(),
                     align: layout.align,
                 });
-                compiler.local_move_to_ptr(out.slot, args[0], 0);
+                // do not move, drops are handled by caller
+                compiler
+                    .out_bc
+                    .push(bytecode_select::copy_to_ptr(out.slot, args[0].slot, arg_ty, 0).unwrap());
+            }
+        }
+        "skitter_ptr_drop" => {
+            assert!(subs.list.len() == 1);
+            assert!(args.len() == 1);
 
-                //out_bc
-                //    .push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
+            let arg_ty = subs.list[0].assert_ty();
+            let ref_ty = arg_ty.ref_to(crate::types::Mutability::Mut);
+
+            if let Some(glue) = arg_ty.drop_info().glue() {
+                // arg is not guaranteed to be at top of stack, correct this
+                let call_slot = compiler
+                    .stack
+                    .alloc_no_drop(arg_ty.ref_to(crate::types::Mutability::Mut));
+                compiler
+                    .out_bc
+                    .push(bytecode_select::copy(call_slot, args[0].slot, ref_ty).unwrap());
+                compiler
+                    .out_bc
+                    .push(Instr::Call(call_slot, glue.function()));
             }
         }
 

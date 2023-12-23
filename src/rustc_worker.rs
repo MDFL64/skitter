@@ -14,14 +14,14 @@ use rustc_middle::ty::{ImplSubject, Ty, TyCtxt};
 use rustc_session::config;
 
 use crate::{
-    builtins::BuiltinTrait,
+    builtins::{BuiltinAdt, BuiltinTrait},
     crate_provider::{CrateProvider, TraitImpl},
     impls::{ImplBounds, ImplTable, ImplTableSimple},
     ir::{converter::IRFunctionConverter, IRFunction, IRKind},
     items::{
-        ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AdtTag, AssocValue, BoundKind,
-        CrateId, DiscriminantSource, EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item,
-        ItemId, ItemKind, ItemPath,
+        ident_from_rustc, path_from_rustc, AdtInfo, AdtKind, AssocValue, BoundKind, CrateId,
+        DiscriminantSource, EnumInfo, ExternCrate, FunctionAbi, GenericCounts, Item, ItemId,
+        ItemKind, ItemPath,
     },
     lazy_collections::{LazyArray, LazyTable},
     persist::{Persist, PersistWriteContext, PersistWriter},
@@ -301,8 +301,8 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         let mut adt_ids = Vec::new();
         let mut impl_items = Vec::new();
 
-        let mut found_box = false;
         let mut found_box_new = false;
+        let mut found_ptr_drop = false;
 
         for item_id in hir_items {
             let item = hir.item(item_id);
@@ -320,7 +320,19 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 // simple items, add to the index
                 HirItemKind::Fn(..) => {
                     let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-                    let kind = ItemKind::new_function();
+
+                    // HACK: we need to treat Box::new as an intrinsic
+                    let kind = if worker_config.crate_path.is_core()
+                        && item_path.as_string() == "::ptr::drop_in_place"
+                    {
+                        found_ptr_drop = true;
+                        ItemKind::new_function_extern(
+                            FunctionAbi::RustIntrinsic,
+                            "skitter_ptr_drop".to_owned(),
+                        )
+                    } else {
+                        ItemKind::new_function()
+                    };
 
                     items.index_item(kind, item_path, local_id, vm);
                 }
@@ -340,16 +352,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
-                        let mut tag = AdtTag::None;
-
-                        if worker_config.crate_path.is_alloc()
-                            && item_path.as_string() == "::boxed::Box"
-                        {
-                            found_box = true;
-                            tag = AdtTag::Box;
-                        }
-
-                        let kind = ItemKind::new_adt(tag);
+                        let kind = ItemKind::new_adt();
 
                         items.index_item(kind, item_path, local_id, vm)
                     };
@@ -366,7 +369,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                     let adt_id = {
                         let item_path = path_from_rustc(&hir.def_path(local_id), vm);
 
-                        let kind = ItemKind::new_adt(AdtTag::None);
+                        let kind = ItemKind::new_adt();
 
                         items.index_item(kind, item_path, local_id, vm)
                     };
@@ -802,12 +805,14 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 let lang_trait = ctx.item_by_did(lang_trait).unwrap();
                 lang_trait.trait_set_builtin(BuiltinTrait::Pointee);
             }
+            {
+                let lang_trait = lang_items.manually_drop().unwrap();
+                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
+                lang_trait.adt_set_builtin(BuiltinAdt::ManuallyDrop);
+            }
         }
 
         if worker_config.crate_path.is_alloc() {
-            if !found_box {
-                panic!("Box was not found!");
-            }
             if !found_box_new {
                 panic!("Box::new() was not found!");
             }

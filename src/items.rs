@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    builtins::BuiltinTrait,
+    builtins::{BuiltinAdt, BuiltinTrait},
     bytecode_compiler::BytecodeCompiler,
     closure::{Closure, ClosureRef},
     crate_provider::TraitImplResult,
@@ -285,9 +285,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('y' as u8);
                 virtual_info.persist_write(writer);
             }
-            ItemKind::Adt { info, tag } => {
+            ItemKind::Adt { info, builtin } => {
                 writer.write_byte('a' as u8);
-                tag.persist_write(writer);
+                builtin.get().copied().persist_write(writer);
 
                 let adt_block = {
                     let mut writer = writer.new_child_writer();
@@ -354,10 +354,15 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 kind
             }
             'a' => {
-                let tag = Persist::persist_read(reader);
+                let builtin = if let Some(builtin) = Option::<BuiltinAdt>::persist_read(reader) {
+                    OnceLock::from(builtin)
+                } else {
+                    OnceLock::new()
+                };
+
                 ir = reader.read_byte_slice();
                 ItemKind::Adt {
-                    tag,
+                    builtin,
                     info: OnceLock::new(),
                 }
             }
@@ -472,18 +477,12 @@ pub enum ItemKind<'vm> {
     },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
-        tag: AdtTag,
+        builtin: OnceLock<BuiltinAdt>,
     },
     Trait {
         assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
         builtin: OnceLock<BuiltinTrait>,
     },
-}
-
-#[derive(Copy, Clone, Persist)]
-pub enum AdtTag {
-    Box,
-    None,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
@@ -777,10 +776,10 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_adt(tag: AdtTag) -> Self {
+    pub fn new_adt() -> Self {
         Self::Adt {
             info: Default::default(),
-            tag,
+            builtin: Default::default(),
         }
     }
 
@@ -1046,12 +1045,19 @@ impl<'vm> Item<'vm> {
         info.set(new_info).ok();
     }
 
-    pub fn adt_tag(&self) -> AdtTag {
-        let ItemKind::Adt{tag,..} = &self.kind else {
+    pub fn adt_is_builtin(&self, check: BuiltinAdt) -> bool {
+        let ItemKind::Adt{builtin,..} = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        *tag
+        builtin.get().copied() == Some(check)
+    }
+
+    pub fn adt_set_builtin(&self, new_builtin: BuiltinAdt) {
+        let ItemKind::Adt{builtin,..} = &self.kind else {
+            panic!("item kind mismatch");
+        };
+        builtin.set(new_builtin).ok();
     }
 
     pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {

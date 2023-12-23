@@ -12,4 +12,9 @@ pub fn main() {
     let x: LogDrop = unsafe { std::mem::transmute("main 2") };
 
     std::mem::forget(LogDrop("main 3"));
+
+    let mut z = core::mem::ManuallyDrop::new(LogDrop("main 4"));
+    unsafe { core::mem::ManuallyDrop::drop(&mut z) }
+
+    let b = Box::new(LogDrop("main 5"));
 }

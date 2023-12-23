@@ -20,8 +20,8 @@ pub struct BytecodeCompiler<'vm, 'f> {
     in_func_subs: &'f SubList<'vm>,
     in_func: &'f IRFunction<'vm>,
     pub out_bc: Vec<Instr<'vm>>,
+    pub stack: CompilerStack<'vm>,
     vm: &'vm vm::VM<'vm>,
-    stack: CompilerStack<'vm>,
     locals: Vec<(u32, Local<'vm>)>,
     loops: Vec<LoopInfo<'vm>>,
     loop_breaks: Vec<BreakInfo>,
@@ -83,6 +83,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             slot: ret_slot,
             ty: out_ty,
             drop_id: None,
+            is_initialized: false,
         };
 
         let param_slots: Vec<_> = ir
@@ -435,13 +436,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 self.local_forget(*arg);
                             }
 
-                            compile_rust_intrinsic(
-                                extern_name,
-                                &func_ref.subs,
-                                args,
-                                dest,
-                                self,
-                            );
+                            compile_rust_intrinsic(extern_name, &func_ref.subs, args, dest, self);
 
                             self.local_init(dest);
 
@@ -665,6 +660,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             slot: Slot::new(0),
                             drop_id: None,
                             ty: ret_ty,
+                            is_initialized: false,
                         };
 
                         self.lower_expr(*value, Some(ret_local));
@@ -790,6 +786,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                             slot: src_slot,
                                             drop_id: None,
                                             ty: expr_ty,
+                                            is_initialized: true,
                                         }
                                     }
                                 }
@@ -999,6 +996,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             slot: field_slot,
                             ty: *elem_ty,
                             drop_id: None,
+                            is_initialized: false,
                         };
                         self.lower_expr(*field, Some(field_local));
                     }
@@ -1022,6 +1020,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             slot: dest.slot,
                             ty: elem_ty,
                             drop_id: None,
+                            is_initialized: false,
                         }),
                     );
 
@@ -1058,9 +1057,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
 
                     for (field_index, expr) in fields.iter() {
-                        //let offset = expr_layout.field_offsets.get(*variant)[*field_index as usize];
-                        //let field_slot = dst_slot.offset_by(offset as i32);
-                        let field_local = dest.get_field(*variant, *field_index, &self.stack);
+                        let mut field_local = dest.get_field(*variant, *field_index, &self.stack);
+                        field_local.is_initialized = false;
                         self.lower_expr(*expr, Some(field_local));
                     }
 
@@ -2353,10 +2351,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
         if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
             self.out_bc.push(Instr::LocalDropInit(bits));
-        } else if let Some(glue) = dst.ty.drop_info().glue() {
-            let slot_ref = self.stack.alloc_no_drop(dst.ty.ref_to(Mutability::Mut));
-            self.out_bc.push(Instr::SlotAddr(slot_ref, dst.slot));
-            self.out_bc.push(Instr::Call(slot_ref, glue.function()));
+        } else if dst.is_initialized {
+            if let Some(glue) = dst.ty.drop_info().glue() {
+                let slot_ref = self.stack.alloc_no_drop(dst.ty.ref_to(Mutability::Mut));
+                self.out_bc.push(Instr::SlotAddr(slot_ref, dst.slot));
+                self.out_bc.push(Instr::Call(slot_ref, glue.function()));
+            }
         }
 
         if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
@@ -2435,6 +2435,7 @@ impl<'vm> Place<'vm> {
                     slot: local.slot.offset_by(n),
                     drop_id: None,
                     ty: child_ty,
+                    is_initialized: local.is_initialized,
                 })
             }
             Place::Ptr(slot, offset, kind) => Place::Ptr(*slot, offset + n, *kind),
@@ -2521,7 +2522,12 @@ impl<'vm> CompilerStack<'vm> {
             DropInfo::None => None,
         };
 
-        Local { slot, ty, drop_id }
+        Local {
+            slot,
+            ty,
+            drop_id,
+            is_initialized: true,
+        }
     }
 
     pub fn alloc_no_drop(&mut self, ty: Type) -> Slot {
@@ -2666,6 +2672,10 @@ pub struct Local<'vm> {
     pub slot: Slot,
     ty: Type<'vm>,
     drop_id: Option<DropId>,
+    /// This flag indicates whether the local is initialized **IF** it lacks a drop flag.
+    /// This is set to false when constructing structs which either lack a drop flag (ManuallyDrop),
+    /// or are drop leafs themselves.
+    is_initialized: bool,
 }
 
 impl<'vm> Local<'vm> {
@@ -2675,6 +2685,7 @@ impl<'vm> Local<'vm> {
             slot: Slot::new(0),
             ty: void,
             drop_id: None,
+            is_initialized: false,
         }
     }
 
@@ -2718,6 +2729,7 @@ impl<'vm> Local<'vm> {
             slot: self.slot.offset_by(offset as i32),
             drop_id,
             ty: field_ty,
+            is_initialized: self.is_initialized,
         }
     }
 }

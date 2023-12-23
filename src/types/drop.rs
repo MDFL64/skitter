@@ -1,5 +1,6 @@
 use crate::{
     abi::POINTER_SIZE,
+    builtins::BuiltinAdt,
     bytecode_compiler::FunctionBytecode,
     items::{AdtInfo, Item},
     types::{SubList, Type},
@@ -160,6 +161,10 @@ impl<'vm> Type<'vm> {
                     env.drop_info().clone()
                 }
                 TypeKind::Adt(info) => {
+                    if info.item.adt_is_builtin(BuiltinAdt::ManuallyDrop) {
+                        return DropInfo::None;
+                    }
+
                     let adt_info = info.item.adt_info();
                     let drop_fn = self.1.find_drop(*self);
                     let offsets = &self.layout().field_offsets;
