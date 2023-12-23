@@ -1,3 +1,4 @@
+#[repr(transparent)]
 pub struct LogDrop(pub &'static str);
 
 impl Drop for LogDrop {

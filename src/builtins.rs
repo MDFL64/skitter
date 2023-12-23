@@ -4,7 +4,7 @@ use skitter_macro::Persist;
 
 use crate::{
     abi::POINTER_SIZE,
-    bytecode_compiler::{CompilerStack, Local, BytecodeCompiler},
+    bytecode_compiler::{BytecodeCompiler, CompilerStack, Local},
     bytecode_select,
     closure::FnTrait,
     crate_provider::TraitImpl,
@@ -344,19 +344,20 @@ impl BuiltinTrait {
 }
 
 /// Writes bytecode for a rust intrinsic. Should probably be integrated into the bytecode compiler more closely.
+/// NOTE: local init/moving is handled by the caller!
 pub fn compile_rust_intrinsic<'vm>(
     name: &str,
     subs: &SubList<'vm>,
-    
+
     args: Vec<Local<'vm>>,
     out: Local<'vm>,
 
-    compiler: &mut BytecodeCompiler<'vm,'_>
+    compiler: &mut BytecodeCompiler<'vm, '_>,
 ) {
     match name {
-        /*"transmute" | "transmute_unchecked" => {
+        "transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg = subs.list[0].assert_ty();
             let res = subs.list[1].assert_ty();
@@ -365,10 +366,12 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let min_align_ty = std::cmp::min_by_key(arg, res, |ty: &Type| ty.layout().align);
 
-            if let Some(copy) = bytecode_select::copy(out_slot, arg_slots[0], min_align_ty) {
-                out_bc.push(copy);
+            // do not use normal local handling
+            if let Some(copy) = bytecode_select::copy(out.slot, args[0].slot, min_align_ty) {
+                compiler.out_bc.push(copy);
             }
         }
+        /*
         "bswap" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 1);
@@ -926,7 +929,6 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
             out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
         }*/
-
         // special skitter-specific intrinsics
         "skitter_box_new" => {
             assert!(subs.list.len() == 1);
@@ -938,7 +940,9 @@ pub fn compile_rust_intrinsic<'vm>(
             let size = layout.assert_size();
             if size == 0 {
                 // dangling pointer
-                compiler.out_bc.push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out.slot));
+                compiler
+                    .out_bc
+                    .push(bytecode_select::literal(1, POINTER_SIZE.bytes(), out.slot));
             } else {
                 compiler.out_bc.push(Instr::Alloc {
                     out: out.slot,
@@ -946,7 +950,7 @@ pub fn compile_rust_intrinsic<'vm>(
                     align: layout.align,
                 });
                 compiler.local_move_to_ptr(out.slot, args[0], 0);
-                
+
                 //out_bc
                 //    .push(bytecode_select::copy_to_ptr(out_slot, arg_slots[0], arg_ty, 0).unwrap());
             }

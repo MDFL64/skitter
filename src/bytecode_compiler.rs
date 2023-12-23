@@ -263,11 +263,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             match self.expr_to_place(id) {
                 Place::Local(local_source) => {
                     if let Some(dest) = dest {
-                        if let Some(instr) =
-                            bytecode_select::copy(dest.slot, local_source.slot, expr_ty)
-                        {
-                            self.out_bc.push(instr);
-                        }
+                        self.local_move(dest, local_source);
 
                         dest
                     } else {
@@ -432,16 +428,22 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             // inline rust intrinsics
                             let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
-                            let arg_slots =
+                            let args: Vec<_> =
                                 args.iter().map(|arg| self.lower_expr(*arg, None)).collect();
+
+                            for arg in args.iter() {
+                                self.local_forget(*arg);
+                            }
 
                             compile_rust_intrinsic(
                                 extern_name,
                                 &func_ref.subs,
-                                arg_slots,
+                                args,
                                 dest,
-                                self
+                                self,
                             );
+
+                            self.local_init(dest);
 
                             dest
                         } else {
@@ -2330,7 +2332,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     /// Initializes a local by moving from a local.
     fn local_init_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
-        assert_eq!(dst.ty,src.ty);
+        assert_eq!(dst.ty, src.ty);
 
         if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
             self.out_bc.push(instr);
@@ -2347,7 +2349,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     /// Moves a local to another local. The destination local may or may not be initialized.
     fn local_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
-        assert_eq!(dst.ty,src.ty);
+        assert_eq!(dst.ty, src.ty);
 
         if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
             self.out_bc.push(Instr::LocalDropInit(bits));
