@@ -446,38 +446,38 @@ pub fn compile_rust_intrinsic<'vm>(
             } else {
                 panic!("non-trivial offset");
             }
-        }
+        }*/
         "min_align_of" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 0);
+            assert!(args.len() == 0);
 
             let arg_ty = subs.list[0].assert_ty();
 
             let res = arg_ty.layout().align;
 
-            out_bc.push(bytecode_select::literal(
+            compiler.out_bc.push(bytecode_select::literal(
                 res as _,
                 POINTER_SIZE.bytes(),
-                out_slot,
+                out.slot,
             ));
         }
         "size_of" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 0);
+            assert!(args.len() == 0);
 
             let arg_ty = subs.list[0].assert_ty();
 
             let res = arg_ty.layout().assert_size();
 
-            out_bc.push(bytecode_select::literal(
+            compiler.out_bc.push(bytecode_select::literal(
                 res as _,
                 POINTER_SIZE.bytes(),
-                out_slot,
+                out.slot,
             ));
         }
         "min_align_of_val" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
 
@@ -488,34 +488,34 @@ pub fn compile_rust_intrinsic<'vm>(
                 // everything else should be decidable at compile-time
                 let res = arg_ty.layout().align;
 
-                out_bc.push(bytecode_select::literal(
+                compiler.out_bc.push(bytecode_select::literal(
                     res as _,
                     POINTER_SIZE.bytes(),
-                    out_slot,
+                    out.slot,
                 ));
             }
         }
         "size_of_val" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
 
             if let Some(size) = arg_ty.layout().maybe_size {
-                out_bc.push(bytecode_select::literal(
+                compiler.out_bc.push(bytecode_select::literal(
                     size as _,
                     POINTER_SIZE.bytes(),
-                    out_slot,
+                    out.slot,
                 ));
             } else {
-                let arg_slot = arg_slots[0];
+                let arg_slot = args[0].slot;
 
                 let ptr_size = POINTER_SIZE.bytes();
 
-                let ty_usize = vm.common_types().usize;
+                let ty_usize = compiler.vm.common_types().usize;
 
                 let byte_slice_size = || {
-                    bytecode_select::copy(out_slot, arg_slot.offset_by(ptr_size as i32), ty_usize)
+                    bytecode_select::copy(out.slot, arg_slot.offset_by(ptr_size as i32), ty_usize)
                         .unwrap()
                 };
 
@@ -527,26 +527,26 @@ pub fn compile_rust_intrinsic<'vm>(
                         let elem_size = child_ty.layout().assert_size();
 
                         if elem_size == 1 {
-                            out_bc.push(byte_slice_size());
+                            compiler.out_bc.push(byte_slice_size());
                         } else {
-                            out_bc.push(bytecode_select::literal(
+                            compiler.out_bc.push(bytecode_select::literal(
                                 elem_size as _,
                                 ptr_size,
-                                out_slot,
+                                out.slot,
                             ));
-                            out_bc.push(mul_ctor(
-                                out_slot,
-                                out_slot,
+                            compiler.out_bc.push(mul_ctor(
+                                out.slot,
+                                out.slot,
                                 arg_slot.offset_by(ptr_size as i32),
                             ));
                         }
                     }
-                    TypeKind::StringSlice => out_bc.push(byte_slice_size()),
+                    TypeKind::StringSlice => compiler.out_bc.push(byte_slice_size()),
                     _ => panic!("todo unsized value size"),
                 }
             };
         }
-        "variant_count" => {
+        /*"variant_count" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 0);
 
@@ -597,15 +597,15 @@ pub fn compile_rust_intrinsic<'vm>(
                 )(out_slot, out_slot));
             }
         }
-        //""
+        */
         "const_eval_select" => {
             // we always select the runtime impl
             // it is unsound to make the two impls behave differently, so this should hopefully be okay
             // it might cause some tests to fail though?
             assert!(subs.list.len() == 4);
-            assert!(arg_slots.len() == 3);
+            assert!(args.len() == 3);
 
-            let source_slot = arg_slots[0];
+            let source_slot = args[0].slot;
             let args_ty = subs.list[0].assert_ty();
             let res_ty = subs.list[3].assert_ty();
             let func = subs.list[2].assert_ty().func_item().unwrap();
@@ -615,51 +615,52 @@ pub fn compile_rust_intrinsic<'vm>(
                 panic!("const_eval_select: bad args ty");
             };
 
-            stack.align_for_call();
-            let call_slot = stack.alloc(res_ty);
+            // what we're left with is a pretty normal function call setup
+            compiler.stack.align_for_call();
+            let call_slot = compiler.stack.alloc_no_drop(res_ty);
             for (arg_ty, arg_offset) in arg_tys
                 .iter()
                 .zip(args_ty.layout().field_offsets.assert_single())
             {
-                let arg_slot = stack.alloc(*arg_ty);
+                let arg_slot = compiler.stack.alloc_no_drop(*arg_ty);
 
                 if let Some(copy) = bytecode_select::copy(
                     arg_slot,
                     source_slot.offset_by(*arg_offset as i32),
                     *arg_ty,
                 ) {
-                    out_bc.push(copy);
+                    compiler.out_bc.push(copy);
                 }
             }
-            out_bc.push(Instr::Call(call_slot, func));
+            compiler.out_bc.push(Instr::Call(call_slot, func));
 
-            if let Some(copy) = bytecode_select::copy(out_slot, call_slot, res_ty) {
-                out_bc.push(copy);
+            if let Some(copy) = bytecode_select::copy(out.slot, call_slot, res_ty) {
+                compiler.out_bc.push(copy);
             }
         }
         "read_via_copy" | "volatile_load" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
-            let arg_slot = arg_slots[0];
+            let arg_slot = args[0].slot;
 
-            if let Some(copy) = bytecode_select::copy_from_ptr(out_slot, arg_slot, arg_ty, 0) {
-                out_bc.push(copy);
+            if let Some(copy) = bytecode_select::copy_from_ptr(out.slot, arg_slot, arg_ty, 0) {
+                compiler.out_bc.push(copy);
             }
         }
         "write_via_move" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
-            let ptr_slot = arg_slots[0];
-            let val_slot = arg_slots[1];
+            let ptr_slot = args[0].slot;
+            let val_slot = args[1].slot;
 
             if let Some(copy) = bytecode_select::copy_to_ptr(ptr_slot, val_slot, arg_ty, 0) {
-                out_bc.push(copy);
+                compiler.out_bc.push(copy);
             }
-        }
+        }/*
         "copy_nonoverlapping" => {
             // generally rust will check that the regions are not overlapping
             // no need to assert it here
@@ -686,39 +687,39 @@ pub fn compile_rust_intrinsic<'vm>(
                 out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], size_slot));
                 //panic!("non-trivial copy {}", arg_size);
             }
-        }
+        }*/
         "ctpop" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
-            let arg_slot = arg_slots[0];
+            let arg_slot = args[0].slot;
 
             match arg_ty.layout().assert_size() {
-                1 => out_bc.push(Instr::I8_PopCount(out_slot, arg_slot)),
-                2 => out_bc.push(Instr::I16_PopCount(out_slot, arg_slot)),
-                4 => out_bc.push(Instr::I32_PopCount(out_slot, arg_slot)),
-                8 => out_bc.push(Instr::I64_PopCount(out_slot, arg_slot)),
-                16 => out_bc.push(Instr::I128_PopCount(out_slot, arg_slot)),
+                1 => compiler.out_bc.push(Instr::I8_PopCount(out.slot, arg_slot)),
+                2 => compiler.out_bc.push(Instr::I16_PopCount(out.slot, arg_slot)),
+                4 => compiler.out_bc.push(Instr::I32_PopCount(out.slot, arg_slot)),
+                8 => compiler.out_bc.push(Instr::I64_PopCount(out.slot, arg_slot)),
+                16 => compiler.out_bc.push(Instr::I128_PopCount(out.slot, arg_slot)),
                 _ => panic!("can't ctpop {}", arg_ty),
             }
         }
         "cttz_nonzero" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
-            let arg_slot = arg_slots[0];
+            let arg_slot = args[0].slot;
 
             match arg_ty.layout().assert_size() {
-                1 => out_bc.push(Instr::I8_TrailingZeros(out_slot, arg_slot)),
-                2 => out_bc.push(Instr::I16_TrailingZeros(out_slot, arg_slot)),
-                4 => out_bc.push(Instr::I32_TrailingZeros(out_slot, arg_slot)),
-                8 => out_bc.push(Instr::I64_TrailingZeros(out_slot, arg_slot)),
-                16 => out_bc.push(Instr::I128_TrailingZeros(out_slot, arg_slot)),
+                1 => compiler.out_bc.push(Instr::I8_TrailingZeros(out.slot, arg_slot)),
+                2 => compiler.out_bc.push(Instr::I16_TrailingZeros(out.slot, arg_slot)),
+                4 => compiler.out_bc.push(Instr::I32_TrailingZeros(out.slot, arg_slot)),
+                8 => compiler.out_bc.push(Instr::I64_TrailingZeros(out.slot, arg_slot)),
+                16 => compiler.out_bc.push(Instr::I128_TrailingZeros(out.slot, arg_slot)),
                 _ => panic!("can't cttz {}", arg_ty),
             }
-        }
+        }/*
         "bitreverse" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 1);
@@ -792,20 +793,20 @@ pub fn compile_rust_intrinsic<'vm>(
             out_bc.push(Instr::Error(Box::new(
                 "caller_location not implemented".to_owned(),
             )));
-        }
+        }*/
         "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
         }
         "unlikely" => {
             assert!(subs.list.len() == 0);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
-            let ty_bool = vm.common_types().bool;
+            let ty_bool = compiler.vm.common_types().bool;
 
             // copying here isn't so great, ideally we could make the res slot optional like in the main compiler
-            let copy = bytecode_select::copy(out_slot, arg_slots[0], ty_bool).unwrap();
-            out_bc.push(copy);
-        }
+            let copy = bytecode_select::copy(out.slot, args[0].slot, ty_bool).unwrap();
+            compiler.out_bc.push(copy);
+        }/*
         "write_bytes" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 3);
@@ -860,15 +861,15 @@ pub fn compile_rust_intrinsic<'vm>(
             let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
             out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
             out_bc.push(bytecode_select::literal(0, 1, carry_slot));
-        }
+        }*/
         "unchecked_add" | "wrapping_add" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
-        }
+            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
+        }/*
         "unchecked_sub" | "wrapping_sub" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);
@@ -934,6 +935,27 @@ pub fn compile_rust_intrinsic<'vm>(
             assert!(arg_slots.len() == 2);
             out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
         }*/
+        // we redirect `std::ptr::drop_in_place` to this intrinsic
+        "drop_in_place" => {
+            assert!(subs.list.len() == 1);
+            assert!(args.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let ref_ty = arg_ty.ref_to(crate::types::Mutability::Mut);
+
+            if let Some(glue) = arg_ty.drop_info().glue() {
+                // arg is not guaranteed to be at top of stack, correct this
+                let call_slot = compiler
+                    .stack
+                    .alloc_no_drop(arg_ty.ref_to(crate::types::Mutability::Mut));
+                compiler
+                    .out_bc
+                    .push(bytecode_select::copy(call_slot, args[0].slot, ref_ty).unwrap());
+                compiler
+                    .out_bc
+                    .push(Instr::Call(call_slot, glue.function()));
+            }
+        }
         // special skitter-specific intrinsics
         "skitter_box_new" => {
             assert!(subs.list.len() == 1);
@@ -960,27 +982,6 @@ pub fn compile_rust_intrinsic<'vm>(
                     .push(bytecode_select::copy_to_ptr(out.slot, args[0].slot, arg_ty, 0).unwrap());
             }
         }
-        "skitter_ptr_drop" => {
-            assert!(subs.list.len() == 1);
-            assert!(args.len() == 1);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let ref_ty = arg_ty.ref_to(crate::types::Mutability::Mut);
-
-            if let Some(glue) = arg_ty.drop_info().glue() {
-                // arg is not guaranteed to be at top of stack, correct this
-                let call_slot = compiler
-                    .stack
-                    .alloc_no_drop(arg_ty.ref_to(crate::types::Mutability::Mut));
-                compiler
-                    .out_bc
-                    .push(bytecode_select::copy(call_slot, args[0].slot, ref_ty).unwrap());
-                compiler
-                    .out_bc
-                    .push(Instr::Call(call_slot, glue.function()));
-            }
-        }
-
         _ => {
             panic!("attempt compile intrinsic: {}{}", name, subs);
         }

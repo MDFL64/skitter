@@ -133,8 +133,8 @@ impl<'vm> RustCWorker<'vm> {
                 ..config::Options::default()
             },
             input: config::Input::File(worker_config.crate_path.source_path()),
-            crate_cfg: rustc_hash::FxHashSet::default(),
-            crate_check_cfg: config::CheckCfg::default(),
+            crate_cfg: Default::default(),
+            crate_check_cfg: Default::default(),
             // (Some(Mode::Std), "backtrace_in_libstd", None),
             output_dir: None,
             output_file: None,
@@ -146,6 +146,11 @@ impl<'vm> RustCWorker<'vm> {
             override_queries: None,
             make_codegen_backend: None,
             registry: rustc_errors::registry::Registry::new(&rustc_error_codes::DIAGNOSTICS),
+
+            expanded_args: Default::default(),
+            hash_untracked_state: None,
+            using_internal_features: Arc::new(false.into()),
+            ice_file: None,
         };
 
         std::thread::spawn(move || {
@@ -209,10 +214,7 @@ impl<'vm> CrateProvider<'vm> for RustCWorker<'vm> {
 
     fn item_by_path(&self, path: &ItemPath) -> Option<&'vm Item<'vm>> {
         let items = self.items();
-
-        let item_id = items.map_paths.get(path);
-
-        item_id.map(|item_id| items.items[item_id.index()].item)
+        items.item_by_path(path)
     }
 
     fn build_ir(&self, item_id: ItemId) -> Arc<IRFunction<'vm>> {
@@ -301,9 +303,6 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         let mut adt_ids = Vec::new();
         let mut impl_items = Vec::new();
 
-        let mut found_box_new = false;
-        let mut found_ptr_drop = false;
-
         for item_id in hir_items {
             let item = hir.item(item_id);
             let local_id = item.owner_id.def_id;
@@ -320,19 +319,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 // simple items, add to the index
                 HirItemKind::Fn(..) => {
                     let item_path = path_from_rustc(&hir.def_path(local_id), vm);
-
-                    // HACK: we need to treat Box::new as an intrinsic
-                    let kind = if worker_config.crate_path.is_core()
-                        && item_path.as_string() == "::ptr::drop_in_place"
-                    {
-                        found_ptr_drop = true;
-                        ItemKind::new_function_extern(
-                            FunctionAbi::RustIntrinsic,
-                            "skitter_ptr_drop".to_owned(),
-                        )
-                    } else {
-                        ItemKind::new_function()
-                    };
+                    let kind = ItemKind::new_function();
 
                     items.index_item(kind, item_path, local_id, vm);
                 }
@@ -454,19 +441,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                                     vm.alloc_path(&format!("{}::{}", base_path, item.ident)),
                                 );
 
-                                // HACK: we need to treat Box::new as an intrinsic
-                                let kind = if worker_config.crate_path.is_alloc()
-                                    && item_path.as_string() == "boxed::Box<T>::new"
-                                {
-                                    found_box_new = true;
-                                    ItemKind::new_function_extern(
-                                        FunctionAbi::RustIntrinsic,
-                                        "skitter_box_new".to_owned(),
-                                    )
-                                } else {
-                                    ItemKind::new_function()
-                                };
-
+                                let kind = ItemKind::new_function();
                                 let item_id = items.index_item(kind, item_path, local_id, vm);
 
                                 assoc_values.push((item_name, AssocValue::Item(item_id)));
@@ -652,28 +627,24 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                 let predicates = tcx.predicates_of(impl_item.did);
                 for (p, _) in predicates.predicates {
                     let p = p.kind().skip_binder();
-                    if let rustc_middle::ty::PredicateKind::Clause(p) = p {
-                        if let rustc_middle::ty::Clause::Trait(p) = p {
-                            if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
-                                let trait_bound = vm.types.def_from_rustc(
-                                    p.trait_ref.def_id,
-                                    p.trait_ref.substs,
-                                    &ctx,
-                                );
-                                bounds.push(BoundKind::Trait(trait_bound));
-                            }
-                        } else if let rustc_middle::ty::Clause::Projection(p) = p {
-                            let assoc_ty = vm.types.def_from_rustc(
-                                p.projection_ty.def_id,
-                                p.projection_ty.substs,
-                                &ctx,
-                            );
-                            if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
-                                let eq_ty = vm.types.type_from_rustc(ty, &ctx);
-                                bounds.push(BoundKind::Projection(assoc_ty, eq_ty));
-                            }
-                            // TODO CONSTS
+                    if let rustc_middle::ty::ClauseKind::Trait(p) = p {
+                        if p.polarity == rustc_middle::ty::ImplPolarity::Positive {
+                            let trait_bound =
+                                vm.types
+                                    .def_from_rustc(p.trait_ref.def_id, p.trait_ref.args, &ctx);
+                            bounds.push(BoundKind::Trait(trait_bound));
                         }
+                    } else if let rustc_middle::ty::ClauseKind::Projection(p) = p {
+                        let assoc_ty = vm.types.def_from_rustc(
+                            p.projection_ty.def_id,
+                            p.projection_ty.args,
+                            &ctx,
+                        );
+                        if let rustc_middle::ty::TermKind::Ty(ty) = p.term.unpack() {
+                            let eq_ty = vm.types.type_from_rustc(ty, &ctx);
+                            bounds.push(BoundKind::Projection(assoc_ty, eq_ty));
+                        }
+                        // TODO CONSTS
                     }
                 }
             }
@@ -700,7 +671,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
                         list: vec![Sub::Type(ty)],
                     }
                 }
-                ImplSubject::Trait(trait_ref) => vm.types.subs_from_rustc(trait_ref.substs, &ctx),
+                ImplSubject::Trait(trait_ref) => vm.types.subs_from_rustc(trait_ref.args, &ctx),
             };
 
             let key_ty = for_tys.list[0].assert_ty();
@@ -771,50 +742,67 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
         if worker_config.crate_path.is_core() {
             let lang_items = tcx.lang_items();
             {
-                let lang_trait = lang_items.sized_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::Sized);
+                let item = lang_items.sized_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::Sized);
             }
             {
-                let lang_trait = lang_items.tuple_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::Tuple);
+                let item = lang_items.tuple_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::Tuple);
             }
             {
-                let lang_trait = lang_items.discriminant_kind_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::DiscriminantKind);
+                let item = lang_items.discriminant_kind_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::DiscriminantKind);
             }
             {
-                let lang_trait = lang_items.fn_once_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::FnOnce);
+                let item = lang_items.fn_once_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::FnOnce);
             }
             {
-                let lang_trait = lang_items.fn_mut_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::FnMut);
+                let item = lang_items.fn_mut_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::FnMut);
             }
             {
-                let lang_trait = lang_items.fn_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::Fn);
+                let item = lang_items.fn_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::Fn);
             }
             {
-                let lang_trait = lang_items.pointee_trait().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.trait_set_builtin(BuiltinTrait::Pointee);
+                let item = lang_items.pointee_trait().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.trait_set_builtin(BuiltinTrait::Pointee);
             }
             {
-                let lang_trait = lang_items.manually_drop().unwrap();
-                let lang_trait = ctx.item_by_did(lang_trait).unwrap();
-                lang_trait.adt_set_builtin(BuiltinAdt::ManuallyDrop);
+                let item = lang_items.manually_drop().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.adt_set_builtin(BuiltinAdt::ManuallyDrop);
+            }
+            {
+                let item = lang_items.drop_in_place_fn().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+                item.set_extern(FunctionAbi::RustIntrinsic, "drop_in_place".to_owned());
             }
         }
-
         if worker_config.crate_path.is_alloc() {
-            if !found_box_new {
-                panic!("Box::new() was not found!");
+            let lang_items = tcx.lang_items();
+            let impls = ctx.items.impls.get().unwrap();
+            {
+                let item = lang_items.owned_box().unwrap();
+                let item = ctx.item_by_did(item).unwrap();
+            }
+            {
+                // Box::new is not a lang item, we need to go searching for it
+                let raw = impls.find_inherent_raw("::boxed::Box::new");
+                if let Some(AssocValue::Item(item_id)) = raw {
+                    let item = ctx.get_item(item_id).unwrap();
+                    item.set_extern(FunctionAbi::RustIntrinsic, "skitter_box_new".to_owned());
+                } else {
+                    panic!("failed to find builtin");
+                }
             }
         }
 
@@ -1016,5 +1004,11 @@ impl<'vm> RustCItems<'vm> {
         }
 
         item_id
+    }
+
+    fn item_by_path(&self, path: &ItemPath) -> Option<&'vm Item<'vm>> {
+        let item_id: Option<&ItemId> = self.map_paths.get(path);
+
+        item_id.map(|item_id| self.items[item_id.index()].item)
     }
 }

@@ -21,7 +21,7 @@ pub struct BytecodeCompiler<'vm, 'f> {
     in_func: &'f IRFunction<'vm>,
     pub out_bc: Vec<Instr<'vm>>,
     pub stack: CompilerStack<'vm>,
-    vm: &'vm vm::VM<'vm>,
+    pub vm: &'vm vm::VM<'vm>,
     locals: Vec<(u32, Local<'vm>)>,
     loops: Vec<LoopInfo<'vm>>,
     loop_breaks: Vec<BreakInfo>,
@@ -606,7 +606,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     // fix breaks
                     let break_indices: Vec<_> = self
                         .loop_breaks
-                        .drain_filter(|break_info| break_info.loop_id == *loop_id)
+                        .extract_if(|break_info| break_info.loop_id == *loop_id)
                         .map(|break_info| break_info.break_index)
                         .collect();
 
@@ -981,7 +981,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     dest
                 }
                 ExprKind::Array(fields) => {
-                    let TypeKind::Array(elem_ty,_) = expr_ty.kind() else {
+                    let TypeKind::Array(elem_ty, _) = expr_ty.kind() else {
                         panic!("bad array layout");
                     };
 
@@ -1070,7 +1070,11 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         let rest_source = self.lower_expr(*rest, None);
 
                         // YUCK: we need to get the exact types of all the struct's fields
-                        let TypeKind::Adt(ItemWithSubs{item,subs: adt_subs}) = expr_ty.kind() else {
+                        let TypeKind::Adt(ItemWithSubs {
+                            item,
+                            subs: adt_subs,
+                        }) = expr_ty.kind()
+                        else {
                             panic!("non-adt in adt-rest compile");
                         };
 
@@ -1939,8 +1943,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
                 // check type
                 {
-                    let TypeKind::Ref(slice_ty,_) = pat.ty.kind() else {
-                        panic!("string pattern on {}",pat.ty);
+                    let TypeKind::Ref(slice_ty, _) = pat.ty.kind() else {
+                        panic!("string pattern on {}", pat.ty);
                     };
 
                     match slice_ty.kind() {
@@ -2136,7 +2140,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         let len_req = start.len() + end.len();
                         let len_req_is_exact = mid.is_none();
 
-                        let Place::Ptr(ref_slot, ref_offset,ptr_kind) = source else {
+                        let Place::Ptr(ref_slot, ref_offset, ptr_kind) = source else {
                             panic!("attempt to match value slice");
                         };
                         assert!(ref_offset == 0);

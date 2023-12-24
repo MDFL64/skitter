@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 #![feature(rustc_private)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(lazy_cell)]
 
 extern crate rustc_abi;

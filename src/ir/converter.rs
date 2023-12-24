@@ -37,7 +37,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
         ir_kind: IRKind,
     ) -> IRFunction<'vm> {
         //println!("func = {:?}",func_id);
-        assert!(body.generator_kind.is_none());
+        assert!(body.coroutine_kind.is_none());
 
         let opaque_types = types
             .concrete_opaque_types
@@ -46,7 +46,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let (item, full_path) =
                     ctx.vm
                         .types
-                        .opaque_type_from_rustc(key.def_id.into(), key.substs, ctx);
+                        .opaque_type_from_rustc(key.def_id.into(), key.args, ctx);
 
                 let destination_ty = ctx.type_from_rustc(val.ty);
 
@@ -123,7 +123,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let arg = self.expr(arg);
 
                 if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
-                    let subs = self.types.node_substs(expr.hir_id);
+                    let subs = self.types.node_args(expr.hir_id);
                     let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                     let func_ty = self.ctx.vm.ty_func_def(func_item);
 
@@ -161,7 +161,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     hir::BinOpKind::Or => ExprKind::LogicOp(LogicOp::Or, lhs, rhs),
                     _ => {
                         if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
-                            let subs = self.types.node_substs(expr.hir_id);
+                            let subs = self.types.node_args(expr.hir_id);
                             let func_item =
                                 self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                             let func_ty = self.ctx.vm.ty_func_def(func_item);
@@ -188,7 +188,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 let rhs = self.expr(rhs);
 
                 if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
-                    let subs = self.types.node_substs(expr.hir_id);
+                    let subs = self.types.node_args(expr.hir_id);
                     let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                     let func_ty = self.ctx.vm.ty_func_def(func_item);
 
@@ -212,12 +212,12 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
 
                 ExprKind::Assign(lhs, rhs)
             }
-            hir::ExprKind::Index(lhs, index) => {
+            hir::ExprKind::Index(lhs, index, _) => {
                 let lhs = self.expr(lhs);
                 let index = self.expr(index);
 
                 if let Some(func_did) = self.types.type_dependent_def_id(expr.hir_id) {
-                    let subs = self.types.node_substs(expr.hir_id);
+                    let subs = self.types.node_args(expr.hir_id);
                     let func_item = self.ctx.vm.types.def_from_rustc(func_did, subs, &self.ctx);
                     let func_ty = self.ctx.vm.ty_func_def(func_item);
 
@@ -236,7 +236,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     let old_func = self.expr(func);
 
                     // assume this is a Fn* trait call
-                    let func_subs = self.types.node_substs(expr.hir_id);
+                    let func_subs = self.types.node_args(expr.hir_id);
                     let func_item = self
                         .ctx
                         .vm
@@ -276,7 +276,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             hir::ExprKind::MethodCall(_, lhs, args, _) => {
                 // We need to pull the actual method def from typeck results.
                 let method_did = self.types.type_dependent_def_id(expr.hir_id).unwrap();
-                let method_subs = self.types.node_substs(expr.hir_id);
+                let method_subs = self.types.node_args(expr.hir_id);
                 let method_item =
                     self.ctx
                         .vm
@@ -402,7 +402,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             }
             hir::ExprKind::Repeat(arg, _) => {
                 let arg = self.expr(arg);
-                let TypeKind::Array(_,size) = ty.kind() else {
+                let TypeKind::Array(_, size) = ty.kind() else {
                     panic!("bad type for repeated array")
                 };
                 ExprKind::ArrayRepeat(arg, size.clone())
@@ -431,7 +431,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                             DefKind::Const
                             | DefKind::AssocConst
                             | DefKind::Ctor(_, CtorKind::Const) => {
-                                let subs = self.types.node_substs(expr.hir_id);
+                                let subs = self.types.node_args(expr.hir_id);
                                 let const_item =
                                     self.ctx.vm.types.def_from_rustc(did, subs, &self.ctx);
                                 ExprKind::NamedConst(const_item)
@@ -540,6 +540,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                 ExprKind::Tuple(capture_exprs)
             }
             hir::ExprKind::InlineAsm(..) => ExprKind::Error("inline asm".to_owned()),
+            hir::ExprKind::OffsetOf(..) => ExprKind::Error("offset of".to_owned()),
             _ => panic!("todo expr kind {:?}", expr.kind),
         };
 
@@ -602,7 +603,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
                     });
                 }
                 Adjust::Pointer(ptr_cast) => {
-                    use rustc_middle::ty::adjustment::PointerCast as PC;
+                    use rustc_middle::ty::adjustment::PointerCoercion as PC;
                     let ptr_cast: PointerCast = match ptr_cast {
                         PC::ReifyFnPointer => PointerCast::ReifyFnPointer,
                         PC::UnsafeFnPointer => PointerCast::UnsafeFnPointer,
@@ -1056,7 +1057,7 @@ impl<'vm, 'tcx, 'a> IRFunctionConverter<'vm, 'tcx, 'a> {
             Res::Def(DefKind::TyAlias, _) | Res::SelfTyAlias { .. } => VariantIndex::new(0),
 
             Res::Def(_, def_id) => {
-                let rustc_middle::ty::TyKind::Adt(adt_def,_) = rs_ty.kind() else {
+                let rustc_middle::ty::TyKind::Adt(adt_def, _) = rs_ty.kind() else {
                     panic!("attempt to convert struct without adt");
                 };
                 VariantIndex::new(adt_def.variant_index_with_id(*def_id).as_u32())

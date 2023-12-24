@@ -450,10 +450,14 @@ impl<'vm> VM<'vm> {
         map_vtables
             .entry((trait_item, for_tys.clone()))
             .or_insert_with(|| {
-                let TraitImplResult::Static(impl_result) = trait_item
-                    .find_trait_impl(&for_tys) else {
-                        panic!("cannot build vtable from trait {} for {}",trait_item.path.as_string(),primary_ty);
-                    };
+                let TraitImplResult::Static(impl_result) = trait_item.find_trait_impl(&for_tys)
+                else {
+                    panic!(
+                        "cannot build vtable from trait {} for {}",
+                        trait_item.path.as_string(),
+                        primary_ty
+                    );
+                };
 
                 let impl_crate = self.crate_provider(impl_result.crate_id);
 

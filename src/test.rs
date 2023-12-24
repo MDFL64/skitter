@@ -282,7 +282,7 @@ fn run_test(
                 let err_start = skitter_err.find(search_str);
 
                 let skitter_err = if let Some(err_start) = err_start {
-                    skitter_err[err_start..].lines().nth(0)
+                    skitter_err[err_start..].lines().nth(1)
                 } else {
                     skitter_err.lines().last()
                 };
