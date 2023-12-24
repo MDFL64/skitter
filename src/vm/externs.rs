@@ -24,6 +24,7 @@ pub fn get_extern_fn(item: &Item) -> Option<for<'vm> unsafe fn(*mut u8, &'vm VM<
                 (FunctionAbi::Rust, "__rust_alloc") => builtin_alloc_zeroed,
                 (FunctionAbi::Rust, "__rust_alloc_zeroed") => builtin_alloc_zeroed,
                 (FunctionAbi::Rust, "__rust_realloc") => builtin_realloc,
+                (FunctionAbi::Rust, "__rust_dealloc") => builtin_free,
 
                 (FunctionAbi::Rust, "panic_impl") => builtin_panic,
                 _ => panic!("todo extern? {:?}", item_extern),
@@ -107,9 +108,19 @@ unsafe fn builtin_realloc<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
     let align: usize = read_stack(stack, Slot::new(ptr_size * 3));
     let new_size: usize = read_stack(stack, Slot::new(ptr_size * 4));
 
-    let res = vm.realloc(ptr, old_size, align, new_size);
+    let res = vm.realloc_bytes(ptr, old_size, align, new_size);
 
     write_stack(stack, Slot::new(0), res);
+}
+
+unsafe fn builtin_free<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+    let ptr_size = POINTER_SIZE.bytes();
+
+    let ptr: *mut u8 = read_stack(stack, Slot::new(0));
+    let size: usize = read_stack(stack, Slot::new(ptr_size));
+    let align: usize = read_stack(stack, Slot::new(ptr_size * 2));
+
+    vm.free_bytes(ptr, size, align);
 }
 
 unsafe fn builtin_panic<'vm>(_stack: *mut u8, _vm: &'vm VM<'vm>) {

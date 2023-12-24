@@ -552,7 +552,7 @@ impl<'vm> VM<'vm> {
         std::alloc::alloc_zeroed(layout)
     }
 
-    pub unsafe fn realloc(
+    pub unsafe fn realloc_bytes(
         &'vm self,
         old: *mut u8,
         old_size: usize,
@@ -562,6 +562,11 @@ impl<'vm> VM<'vm> {
         //println!("realloc {:?} {} / {} -> {}",old,align,old_size,new_size);
         let layout = std::alloc::Layout::from_size_align_unchecked(old_size, align);
         std::alloc::realloc(old, layout, new_size)
+    }
+
+    pub unsafe fn free_bytes(&'vm self, ptr: *mut u8, size: usize, align: usize) {
+        let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
+        std::alloc::dealloc(ptr, layout)
     }
 }
 
