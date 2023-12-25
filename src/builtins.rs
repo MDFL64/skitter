@@ -31,6 +31,7 @@ pub enum BuiltinTrait {
 
 #[derive(Copy, Clone, Debug, Persist, PartialEq, Eq)]
 pub enum BuiltinAdt {
+    Box,
     ManuallyDrop,
 }
 

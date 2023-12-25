@@ -793,6 +793,7 @@ impl<'vm, 'tcx> RustCContext<'vm, 'tcx> {
             {
                 let item = lang_items.owned_box().unwrap();
                 let item = ctx.item_by_did(item).unwrap();
+                item.adt_set_builtin(BuiltinAdt::Box);
             }
             {
                 // Box::new is not a lang item, we need to go searching for it

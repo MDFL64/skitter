@@ -2,8 +2,9 @@ use crate::{
     abi::POINTER_SIZE,
     builtins::BuiltinAdt,
     bytecode_compiler::FunctionBytecode,
+    bytecode_select,
     items::{AdtInfo, Item},
-    types::{SubList, Type},
+    types::{Mutability, SubList, Type},
     variants::{VariantIndex, Variants},
     vm::{
         instr::{Instr, Slot},
@@ -57,6 +58,7 @@ impl<'vm> DropInfo<'vm> {
         field_offsets: &Variants<Vec<u32>>,
         subs: &SubList<'vm>,
         adt_info: Option<&AdtInfo>,
+        boxed_ty: Option<Type<'vm>>,
     ) -> Self {
         let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
 
@@ -86,7 +88,7 @@ impl<'vm> DropInfo<'vm> {
                 assert!(adt_info.is_struct());
             }
 
-            let glue = DropGlue::new(vm, drop_fn, &fields);
+            let glue = DropGlue::new(vm, drop_fn, &fields, boxed_ty);
 
             if drop_fn.is_some() {
                 DropInfo::Leaf(glue)
@@ -154,6 +156,7 @@ impl<'vm> Type<'vm> {
                         offsets,
                         &SubList::empty(),
                         None,
+                        None,
                     )
                 }
                 TypeKind::Closure(closure, subs) => {
@@ -164,6 +167,12 @@ impl<'vm> Type<'vm> {
                     if info.item.adt_is_builtin(BuiltinAdt::ManuallyDrop) {
                         return DropInfo::None;
                     }
+
+                    let boxed_ty = if info.item.adt_is_builtin(BuiltinAdt::Box) {
+                        Some(info.subs.list[0].assert_ty())
+                    } else {
+                        None
+                    };
 
                     let adt_info = info.item.adt_info();
                     let drop_fn = self.1.find_drop(*self);
@@ -176,6 +185,7 @@ impl<'vm> Type<'vm> {
                         offsets,
                         &info.subs,
                         Some(adt_info),
+                        boxed_ty,
                     )
                 }
                 _ => panic!("drop info: {:?}", self),
@@ -189,12 +199,13 @@ impl<'vm> DropGlue<'vm> {
         vm: &'vm VM<'vm>,
         drop_fn: Option<&'vm Function<'vm>>,
         fields: &[DropField<'vm>],
+        boxed_ty: Option<Type<'vm>>,
     ) -> Self {
         assert!(drop_fn.is_some() || fields.len() > 0);
 
         // we go straight to bytecode here for several reasons:
         // 1. the code required may depend on the drop info of generics, trying to generate generic IR would probably not go well
-        // 2. handling drops in functions may involve generating similar bytecode, there may be some opportunity for re-use
+        // 2. handling drops in functions may involve generating similar bytecode (currently it does not) there may be some opportunity for re-use
         // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
 
         let self_slot = Slot::new(0);
@@ -203,6 +214,18 @@ impl<'vm> DropGlue<'vm> {
         let member_slot = Slot::new(POINTER_SIZE.bytes() * 2);
 
         let mut code = Vec::new();
+
+        // box drops require some special handling
+        if let Some(boxed_ty) = boxed_ty {
+            if let Some(boxed_ty_glue) = boxed_ty.drop_info().glue() {
+                let ref_ty = boxed_ty.ref_to(Mutability::Mut);
+                code.push(
+                    bytecode_select::copy_from_ptr(member_slot, self_slot, ref_ty, 0).unwrap(),
+                );
+                code.push(Instr::Call(member_slot, boxed_ty_glue.function()));
+            }
+        }
+
         if let Some(drop_fn) = drop_fn {
             code.push(Instr::Call(self_slot, drop_fn));
         }
