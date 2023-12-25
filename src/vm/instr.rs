@@ -373,6 +373,7 @@ pub enum Instr<'vm> {
     I32_U_SatAdd(Slot, Slot, Slot),
     I64_U_SatAdd(Slot, Slot, Slot),
     I128_U_SatAdd(Slot, Slot, Slot),
+
     I8_S_SatSub(Slot, Slot, Slot),
     I16_S_SatSub(Slot, Slot, Slot),
     I32_S_SatSub(Slot, Slot, Slot),
@@ -383,6 +384,17 @@ pub enum Instr<'vm> {
     I32_U_SatSub(Slot, Slot, Slot),
     I64_U_SatSub(Slot, Slot, Slot),
     I128_U_SatSub(Slot, Slot, Slot),
+
+    I8_S_OverflowingAdd(Slot, Slot, Slot),
+    I16_S_OverflowingAdd(Slot, Slot, Slot),
+    I32_S_OverflowingAdd(Slot, Slot, Slot),
+    I64_S_OverflowingAdd(Slot, Slot, Slot),
+    I128_S_OverflowingAdd(Slot, Slot, Slot),
+    I8_U_OverflowingAdd(Slot, Slot, Slot),
+    I16_U_OverflowingAdd(Slot, Slot, Slot),
+    I32_U_OverflowingAdd(Slot, Slot, Slot),
+    I64_U_OverflowingAdd(Slot, Slot, Slot),
+    I128_U_OverflowingAdd(Slot, Slot, Slot),
 
     I8_PopCount(Slot, Slot),
     I16_PopCount(Slot, Slot),

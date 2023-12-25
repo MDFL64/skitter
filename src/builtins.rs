@@ -1,3 +1,4 @@
+use paste::paste;
 use std::sync::Arc;
 
 use skitter_macro::Persist;
@@ -348,6 +349,8 @@ impl BuiltinTrait {
     }
 }
 
+// I8_S_CheckedAdd
+
 /// Writes bytecode for a rust intrinsic. Should probably be integrated into the bytecode compiler more closely.
 /// NOTE: local init/moving is handled by the caller!
 pub fn compile_rust_intrinsic<'vm>(
@@ -359,6 +362,38 @@ pub fn compile_rust_intrinsic<'vm>(
 
     compiler: &mut BytecodeCompiler<'vm, '_>,
 ) {
+    macro_rules! select_binary_signed {
+        ($instr_name:ident) => {
+            {
+                assert!(subs.list.len() == 1);
+                assert!(args.len() == 2);
+
+                let arg_ty = subs.list[0].assert_ty();
+                let arg1 = args[0].slot;
+                let arg2 = args[1].slot;
+
+                paste! {
+                    match (arg_ty.layout().assert_size(), arg_ty.sign()) {
+
+                        (1, IntSign::Unsigned) => compiler.out_bc.push( Instr:: [< I8_U_ $instr_name>] (out.slot, arg1, arg2)),
+                        (2, IntSign::Unsigned) => compiler.out_bc.push( Instr:: [< I16_U_ $instr_name>] (out.slot, arg1, arg2)),
+                        (4, IntSign::Unsigned) => compiler.out_bc.push( Instr:: [< I32_U_ $instr_name>] (out.slot, arg1, arg2)),
+                        (8, IntSign::Unsigned) => compiler.out_bc.push( Instr:: [< I64_U_ $instr_name>] (out.slot, arg1, arg2)),
+                        (16, IntSign::Unsigned) => compiler.out_bc.push( Instr:: [< I128_U_ $instr_name>] (out.slot, arg1, arg2)),
+
+                        (1, IntSign::Signed) => compiler.out_bc.push( Instr:: [< I8_S_ $instr_name>] (out.slot, arg1, arg2)),
+                        (2, IntSign::Signed) => compiler.out_bc.push( Instr:: [< I16_S_ $instr_name>] (out.slot, arg1, arg2)),
+                        (4, IntSign::Signed) => compiler.out_bc.push( Instr:: [< I32_S_ $instr_name>] (out.slot, arg1, arg2)),
+                        (8, IntSign::Signed) => compiler.out_bc.push( Instr:: [< I64_S_ $instr_name>] (out.slot, arg1, arg2)),
+                        (16, IntSign::Signed) => compiler.out_bc.push( Instr:: [< I128_S_ $instr_name>] (out.slot, arg1, arg2)),
+
+                        _ => panic!("can't {} {}", stringify!(instr_name), arg_ty),
+                    }
+                }
+            }
+        }
+    }
+
     match name {
         "transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
@@ -392,10 +427,10 @@ pub fn compile_rust_intrinsic<'vm>(
                     arg_slot.offset_by((size - i - 1) as i32),
                 ));
             }
-        }
+        }*/
         "offset" => {
             assert!(subs.list.len() == 2);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let ptr_ty = subs.list[0].assert_ty();
             let offset_ty = subs.list[1].assert_ty();
@@ -412,41 +447,41 @@ pub fn compile_rust_intrinsic<'vm>(
             if elem_size == 1 {
                 let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
 
-                out_bc.push(offset_ctor(out_slot, arg_slots[0], arg_slots[1]));
+                compiler.out_bc.push(offset_ctor(out.slot, args[0].slot, args[1].slot));
             } else {
                 // out = size
-                out_bc.push(bytecode_select::literal(
+                compiler.out_bc.push(bytecode_select::literal(
                     elem_size as _,
                     POINTER_SIZE.bytes(),
-                    out_slot,
+                    out.slot,
                 ));
 
                 // out = size * n
                 let (mul_ctor, _) = bytecode_select::binary(BinaryOp::Mul, offset_ty);
-                out_bc.push(mul_ctor(out_slot, out_slot, arg_slots[1]));
+                compiler.out_bc.push(mul_ctor(out.slot, out.slot, args[1].slot));
 
                 // out = base + size * n
                 let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
-                out_bc.push(offset_ctor(out_slot, out_slot, arg_slots[0]));
+                compiler.out_bc.push(offset_ctor(out.slot, out.slot, args[0].slot));
             }
         }
         "ptr_offset_from_unsigned" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let ty = subs.list[0].assert_ty();
             let size = ty.layout().assert_size();
 
-            let usize_ty = vm.common_types().usize;
+            let usize_ty = compiler.vm.common_types().usize;
 
             let (sub_ctor, _) = bytecode_select::binary(BinaryOp::Sub, usize_ty);
 
             if size == 1 {
-                out_bc.push(sub_ctor(out_slot, arg_slots[0], arg_slots[1]));
+                compiler.out_bc.push(sub_ctor(out.slot, args[0].slot, args[1].slot));
             } else {
                 panic!("non-trivial offset");
             }
-        }*/
+        }
         "min_align_of" => {
             assert!(subs.list.len() == 1);
             assert!(args.len() == 0);
@@ -769,7 +804,12 @@ pub fn compile_rust_intrinsic<'vm>(
                 16 => out_bc.push(Instr::I128_RotateRight(out_slot, arg1, arg2)),
                 _ => panic!("can't ctpop {}", arg_ty),
             }
-        }
+        }*/
+
+        //""
+        "add_with_overflow" => select_binary_signed!(OverflowingAdd),
+
+        /*
         "saturating_add" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);
@@ -869,23 +909,23 @@ pub fn compile_rust_intrinsic<'vm>(
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
             compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
-        }/*
+        }
         "unchecked_sub" | "wrapping_sub" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_mul" | "wrapping_mul" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
-        }
+            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
+        }/*
         "exact_div" => {
             assert!(subs.list.len() == 1);
             assert!(arg_slots.len() == 2);

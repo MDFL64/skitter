@@ -252,6 +252,19 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.saturating_add(b)",
         source,
     );
+
+    write_binary(
+        &format!("{}_S_OverflowingAdd", big),
+        signed,
+        "a.overflowing_add(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingAdd", big),
+        unsigned,
+        "a.overflowing_add(b)",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {

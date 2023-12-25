@@ -27,6 +27,7 @@ ahash = "0.8.3"
 #mimalloc = { version = "0.1.37", default-features = false }
 
 skitter-macro = { path = "./crates/skitter-macro" }
+paste = "1.0.14"
 
 [profile.release]
 debug = true
