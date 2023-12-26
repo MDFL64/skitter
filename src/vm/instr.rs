@@ -292,6 +292,13 @@ pub enum Instr<'vm> {
     MemCopy(Slot, Slot, Slot),
     MemCompare(Slot, Slot, Slot),
 
+    WriteBytes {
+        size: u16,
+        dst: Slot,
+        val: Slot,
+        count: Slot,
+    },
+
     ArrayRepeat {
         base: Slot,
         size: u32,
@@ -355,14 +362,6 @@ pub enum Instr<'vm> {
         align: u32,
     },
 
-    // RUST INTRINSICS
-    WriteBytes {
-        size: u16,
-        dst: Slot,
-        val: Slot,
-        count: Slot,
-    },
-
     I8_S_SatAdd(Slot, Slot, Slot),
     I16_S_SatAdd(Slot, Slot, Slot),
     I32_S_SatAdd(Slot, Slot, Slot),
@@ -395,6 +394,28 @@ pub enum Instr<'vm> {
     I32_U_OverflowingAdd(Slot, Slot, Slot),
     I64_U_OverflowingAdd(Slot, Slot, Slot),
     I128_U_OverflowingAdd(Slot, Slot, Slot),
+
+    I8_S_OverflowingSub(Slot, Slot, Slot),
+    I16_S_OverflowingSub(Slot, Slot, Slot),
+    I32_S_OverflowingSub(Slot, Slot, Slot),
+    I64_S_OverflowingSub(Slot, Slot, Slot),
+    I128_S_OverflowingSub(Slot, Slot, Slot),
+    I8_U_OverflowingSub(Slot, Slot, Slot),
+    I16_U_OverflowingSub(Slot, Slot, Slot),
+    I32_U_OverflowingSub(Slot, Slot, Slot),
+    I64_U_OverflowingSub(Slot, Slot, Slot),
+    I128_U_OverflowingSub(Slot, Slot, Slot),
+
+    I8_S_OverflowingMul(Slot, Slot, Slot),
+    I16_S_OverflowingMul(Slot, Slot, Slot),
+    I32_S_OverflowingMul(Slot, Slot, Slot),
+    I64_S_OverflowingMul(Slot, Slot, Slot),
+    I128_S_OverflowingMul(Slot, Slot, Slot),
+    I8_U_OverflowingMul(Slot, Slot, Slot),
+    I16_U_OverflowingMul(Slot, Slot, Slot),
+    I32_U_OverflowingMul(Slot, Slot, Slot),
+    I64_U_OverflowingMul(Slot, Slot, Slot),
+    I128_U_OverflowingMul(Slot, Slot, Slot),
 
     I8_PopCount(Slot, Slot),
     I16_PopCount(Slot, Slot),

@@ -265,6 +265,32 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.overflowing_add(b)",
         source,
     );
+
+    write_binary(
+        &format!("{}_S_OverflowingSub", big),
+        signed,
+        "a.overflowing_sub(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingSub", big),
+        unsigned,
+        "a.overflowing_sub(b)",
+        source,
+    );
+
+    write_binary(
+        &format!("{}_S_OverflowingMul", big),
+        signed,
+        "a.overflowing_mul(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingMul", big),
+        unsigned,
+        "a.overflowing_mul(b)",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {

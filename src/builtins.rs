@@ -395,6 +395,54 @@ pub fn compile_rust_intrinsic<'vm>(
         }
     }
 
+    macro_rules! select_binary_int {
+        ($instr_name:ident) => {
+            {
+                assert!(subs.list.len() == 1);
+                assert!(args.len() == 2);
+
+                let arg_ty = subs.list[0].assert_ty();
+                let arg1 = args[0].slot;
+                let arg2 = args[1].slot;
+
+                paste! {
+                    match arg_ty.layout().assert_size() {
+
+                        1 => compiler.out_bc.push( Instr:: [< I8_ $instr_name>] (out.slot, arg1, arg2)),
+                        2 => compiler.out_bc.push( Instr:: [< I16_ $instr_name>] (out.slot, arg1, arg2)),
+                        4 => compiler.out_bc.push( Instr:: [< I32_ $instr_name>] (out.slot, arg1, arg2)),
+                        8 => compiler.out_bc.push( Instr:: [< I64_ $instr_name>] (out.slot, arg1, arg2)),
+                        16 => compiler.out_bc.push( Instr:: [< I128_ $instr_name>] (out.slot, arg1, arg2)),
+
+                        _ => panic!("can't {} {}", stringify!(instr_name), arg_ty),
+                    }
+                }
+            }
+        }
+    }
+
+    macro_rules! select_unary_int {
+        ($instr_name:ident) => {{
+            assert!(subs.list.len() == 1);
+            assert!(args.len() == 1);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let arg = args[0].slot;
+
+            paste! {
+                match arg_ty.layout().assert_size() {
+                    1 => compiler.out_bc.push( Instr:: [< I8_ $instr_name>] (out.slot, arg)),
+                    2 => compiler.out_bc.push( Instr:: [< I16_ $instr_name>] (out.slot, arg)),
+                    4 => compiler.out_bc.push( Instr:: [< I32_ $instr_name>] (out.slot, arg)),
+                    8 => compiler.out_bc.push( Instr:: [< I64_ $instr_name>] (out.slot, arg)),
+                    16 => compiler.out_bc.push( Instr:: [< I128_ $instr_name>] (out.slot, arg)),
+
+                    _ => panic!("can't {} {}", stringify!(instr_name), arg_ty),
+                }
+            }
+        }};
+    }
+
     match name {
         "transmute" | "transmute_unchecked" => {
             assert!(subs.list.len() == 2);
@@ -412,23 +460,22 @@ pub fn compile_rust_intrinsic<'vm>(
                 compiler.out_bc.push(copy);
             }
         }
-        /*
         "bswap" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_res = subs.list[0].assert_ty();
             let size = arg_res.layout().assert_size();
 
-            let arg_slot = arg_slots[0];
+            let arg = args[0];
 
             for i in 0..size {
-                out_bc.push(Instr::MovSS1(
-                    out_slot.offset_by(i as i32),
-                    arg_slot.offset_by((size - i - 1) as i32),
+                compiler.out_bc.push(Instr::MovSS1(
+                    out.slot.offset_by(i as i32),
+                    arg.slot.offset_by((size - i - 1) as i32),
                 ));
             }
-        }*/
+        }
         "offset" => {
             assert!(subs.list.len() == 2);
             assert!(args.len() == 2);
@@ -448,7 +495,9 @@ pub fn compile_rust_intrinsic<'vm>(
             if elem_size == 1 {
                 let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
 
-                compiler.out_bc.push(offset_ctor(out.slot, args[0].slot, args[1].slot));
+                compiler
+                    .out_bc
+                    .push(offset_ctor(out.slot, args[0].slot, args[1].slot));
             } else {
                 // out = size
                 compiler.out_bc.push(bytecode_select::literal(
@@ -459,11 +508,15 @@ pub fn compile_rust_intrinsic<'vm>(
 
                 // out = size * n
                 let (mul_ctor, _) = bytecode_select::binary(BinaryOp::Mul, offset_ty);
-                compiler.out_bc.push(mul_ctor(out.slot, out.slot, args[1].slot));
+                compiler
+                    .out_bc
+                    .push(mul_ctor(out.slot, out.slot, args[1].slot));
 
                 // out = base + size * n
                 let (offset_ctor, _) = bytecode_select::binary(BinaryOp::Add, offset_ty);
-                compiler.out_bc.push(offset_ctor(out.slot, out.slot, args[0].slot));
+                compiler
+                    .out_bc
+                    .push(offset_ctor(out.slot, out.slot, args[0].slot));
             }
         }
         "ptr_offset_from_unsigned" => {
@@ -477,10 +530,25 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let (sub_ctor, _) = bytecode_select::binary(BinaryOp::Sub, usize_ty);
 
-            if size == 1 {
-                compiler.out_bc.push(sub_ctor(out.slot, args[0].slot, args[1].slot));
-            } else {
-                panic!("non-trivial offset");
+            compiler
+                .out_bc
+                .push(sub_ctor(out.slot, args[0].slot, args[1].slot));
+
+            assert!(size > 0);
+
+            if size != 1 {
+                let divisor_slot = compiler.stack.alloc_no_drop(usize_ty);
+
+                compiler.out_bc.push(bytecode_select::literal(
+                    size as _,
+                    POINTER_SIZE.bytes(),
+                    divisor_slot,
+                ));
+
+                let (div_ctor, _) = bytecode_select::binary(BinaryOp::Div, usize_ty);
+                compiler
+                    .out_bc
+                    .push(div_ctor(out.slot, out.slot, divisor_slot));
             }
         }
         "min_align_of" => {
@@ -582,9 +650,9 @@ pub fn compile_rust_intrinsic<'vm>(
                 }
             };
         }
-        /*"variant_count" => {
+        "variant_count" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 0);
+            assert!(args.len() == 0);
 
             let arg_ty = subs.list[0].assert_ty();
 
@@ -593,15 +661,15 @@ pub fn compile_rust_intrinsic<'vm>(
 
             // we should maybe panic if not checking an enum, but this is probably okay
 
-            out_bc.push(bytecode_select::literal(
+            compiler.out_bc.push(bytecode_select::literal(
                 res as _,
                 POINTER_SIZE.bytes(),
-                out_slot,
+                out.slot,
             ));
         }
         "discriminant_value" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
+            assert!(args.len() == 1);
 
             let arg_ty = subs.list[0].assert_ty();
             let enum_info = arg_ty
@@ -616,10 +684,10 @@ pub fn compile_rust_intrinsic<'vm>(
                 panic!("internal layout may not be larger than external");
             }
 
-            out_bc.push(
+            compiler.out_bc.push(
                 bytecode_select::copy_from_ptr(
-                    out_slot,
-                    arg_slots[0],
+                    out.slot,
+                    args[0].slot,
                     enum_info.discriminant_internal,
                     0,
                 )
@@ -627,13 +695,13 @@ pub fn compile_rust_intrinsic<'vm>(
             );
 
             if enum_info.discriminant_external != enum_info.discriminant_internal {
-                out_bc.push(bytecode_select::cast(
+                compiler.out_bc.push(bytecode_select::cast(
                     enum_info.discriminant_internal,
                     enum_info.discriminant_external,
-                )(out_slot, out_slot));
+                )(out.slot, out.slot));
             }
         }
-        */
+
         "const_eval_select" => {
             // we always select the runtime impl
             // it is unsound to make the two impls behave differently, so this should hopefully be okay
@@ -696,34 +764,56 @@ pub fn compile_rust_intrinsic<'vm>(
             if let Some(copy) = bytecode_select::copy_to_ptr(ptr_slot, val_slot, arg_ty, 0) {
                 compiler.out_bc.push(copy);
             }
-        }/*
+        }
         "copy_nonoverlapping" => {
             // generally rust will check that the regions are not overlapping
             // no need to assert it here
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 3);
+            assert!(args.len() == 3);
 
             let arg_ty = subs.list[0].assert_ty();
             let arg_size = arg_ty.layout().assert_size();
 
             if arg_size == 1 {
-                out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], arg_slots[2]));
+                compiler
+                    .out_bc
+                    .push(Instr::MemCopy(args[0].slot, args[1].slot, args[2].slot));
             } else {
-                let usize_ty = vm.common_types().usize;
-                let size_slot = stack.alloc(usize_ty);
+                let usize_ty = compiler.vm.common_types().usize;
+                let size_slot = compiler.stack.alloc_no_drop(usize_ty);
 
                 let (mul_op, _) = bytecode_select::binary(BinaryOp::Mul, usize_ty);
 
-                out_bc.push(bytecode_select::literal(
+                compiler.out_bc.push(bytecode_select::literal(
                     arg_size as _,
                     usize_ty.layout().assert_size(),
                     size_slot,
                 ));
-                out_bc.push(mul_op(size_slot, size_slot, arg_slots[2]));
-                out_bc.push(Instr::MemCopy(arg_slots[0], arg_slots[1], size_slot));
+                compiler
+                    .out_bc
+                    .push(mul_op(size_slot, size_slot, args[2].slot));
+                compiler
+                    .out_bc
+                    .push(Instr::MemCopy(args[0].slot, args[1].slot, size_slot));
                 //panic!("non-trivial copy {}", arg_size);
             }
-        }*/
+        }
+        "write_bytes" => {
+            assert!(subs.list.len() == 1);
+            assert!(args.len() == 3);
+
+            let arg_ty = subs.list[0].assert_ty();
+            let size = arg_ty.layout().assert_size();
+            // todo it might be cleaner to multiply the size in bytecode, instead of having a limit attached to the instruction
+            let small_size: u16 = size.try_into().expect("size too large!");
+
+            compiler.out_bc.push(Instr::WriteBytes {
+                size: small_size,
+                dst: args[0].slot,
+                val: args[1].slot,
+                count: args[2].slot,
+            });
+        }
         "ctpop" => {
             assert!(subs.list.len() == 1);
             assert!(args.len() == 1);
@@ -733,10 +823,18 @@ pub fn compile_rust_intrinsic<'vm>(
 
             match arg_ty.layout().assert_size() {
                 1 => compiler.out_bc.push(Instr::I8_PopCount(out.slot, arg_slot)),
-                2 => compiler.out_bc.push(Instr::I16_PopCount(out.slot, arg_slot)),
-                4 => compiler.out_bc.push(Instr::I32_PopCount(out.slot, arg_slot)),
-                8 => compiler.out_bc.push(Instr::I64_PopCount(out.slot, arg_slot)),
-                16 => compiler.out_bc.push(Instr::I128_PopCount(out.slot, arg_slot)),
+                2 => compiler
+                    .out_bc
+                    .push(Instr::I16_PopCount(out.slot, arg_slot)),
+                4 => compiler
+                    .out_bc
+                    .push(Instr::I32_PopCount(out.slot, arg_slot)),
+                8 => compiler
+                    .out_bc
+                    .push(Instr::I64_PopCount(out.slot, arg_slot)),
+                16 => compiler
+                    .out_bc
+                    .push(Instr::I128_PopCount(out.slot, arg_slot)),
                 _ => panic!("can't ctpop {}", arg_ty),
             }
         }
@@ -748,92 +846,51 @@ pub fn compile_rust_intrinsic<'vm>(
             let arg_slot = args[0].slot;
 
             match arg_ty.layout().assert_size() {
-                1 => compiler.out_bc.push(Instr::I8_TrailingZeros(out.slot, arg_slot)),
-                2 => compiler.out_bc.push(Instr::I16_TrailingZeros(out.slot, arg_slot)),
-                4 => compiler.out_bc.push(Instr::I32_TrailingZeros(out.slot, arg_slot)),
-                8 => compiler.out_bc.push(Instr::I64_TrailingZeros(out.slot, arg_slot)),
-                16 => compiler.out_bc.push(Instr::I128_TrailingZeros(out.slot, arg_slot)),
+                1 => compiler
+                    .out_bc
+                    .push(Instr::I8_TrailingZeros(out.slot, arg_slot)),
+                2 => compiler
+                    .out_bc
+                    .push(Instr::I16_TrailingZeros(out.slot, arg_slot)),
+                4 => compiler
+                    .out_bc
+                    .push(Instr::I32_TrailingZeros(out.slot, arg_slot)),
+                8 => compiler
+                    .out_bc
+                    .push(Instr::I64_TrailingZeros(out.slot, arg_slot)),
+                16 => compiler
+                    .out_bc
+                    .push(Instr::I128_TrailingZeros(out.slot, arg_slot)),
                 _ => panic!("can't cttz {}", arg_ty),
             }
-        }/*
-        "bitreverse" => {
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 1);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let arg_slot = arg_slots[0];
-
-            match arg_ty.layout().assert_size() {
-                1 => out_bc.push(Instr::I8_ReverseBits(out_slot, arg_slot)),
-                2 => out_bc.push(Instr::I16_ReverseBits(out_slot, arg_slot)),
-                4 => out_bc.push(Instr::I32_ReverseBits(out_slot, arg_slot)),
-                8 => out_bc.push(Instr::I64_ReverseBits(out_slot, arg_slot)),
-                16 => out_bc.push(Instr::I128_ReverseBits(out_slot, arg_slot)),
-                _ => panic!("can't ctpop {}", arg_ty),
-            }
         }
-        "rotate_left" => {
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+        "bitreverse" => select_unary_int!(ReverseBits),
 
-            let arg_ty = subs.list[0].assert_ty();
-            let arg1 = arg_slots[0];
-            let arg2 = arg_slots[1];
-
-            match arg_ty.layout().assert_size() {
-                1 => out_bc.push(Instr::I8_RotateLeft(out_slot, arg1, arg2)),
-                2 => out_bc.push(Instr::I16_RotateLeft(out_slot, arg1, arg2)),
-                4 => out_bc.push(Instr::I32_RotateLeft(out_slot, arg1, arg2)),
-                8 => out_bc.push(Instr::I64_RotateLeft(out_slot, arg1, arg2)),
-                16 => out_bc.push(Instr::I128_RotateLeft(out_slot, arg1, arg2)),
-                _ => panic!("can't ctpop {}", arg_ty),
-            }
-        }
-        "rotate_right" => {
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let arg1 = arg_slots[0];
-            let arg2 = arg_slots[1];
-
-            match arg_ty.layout().assert_size() {
-                1 => out_bc.push(Instr::I8_RotateRight(out_slot, arg1, arg2)),
-                2 => out_bc.push(Instr::I16_RotateRight(out_slot, arg1, arg2)),
-                4 => out_bc.push(Instr::I32_RotateRight(out_slot, arg1, arg2)),
-                8 => out_bc.push(Instr::I64_RotateRight(out_slot, arg1, arg2)),
-                16 => out_bc.push(Instr::I128_RotateRight(out_slot, arg1, arg2)),
-                _ => panic!("can't ctpop {}", arg_ty),
-            }
-        }*/
+        "rotate_left" => select_binary_int!(RotateLeft),
+        "rotate_right" => select_binary_int!(RotateRight),
 
         //""
         "add_with_overflow" => select_binary_signed!(OverflowingAdd),
+        "sub_with_overflow" => select_binary_signed!(OverflowingSub),
 
-        /*
-        "saturating_add" => {
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+        "mul_with_overflow" => select_binary_signed!(OverflowingMul),
 
-            let arg_ty = subs.list[0].assert_ty();
-            let arg1 = arg_slots[0];
-            let arg2 = arg_slots[1];
+        "saturating_add" => select_binary_signed!(SatAdd),
 
-            match (arg_ty.layout().assert_size(), arg_ty.sign()) {
-                (8, IntSign::Unsigned) => out_bc.push(Instr::I64_U_SatAdd(out_slot, arg1, arg2)),
-                _ => panic!("can't saturating_add {}", arg_ty),
-            }
-        }
         "abort" => {
-            out_bc.push(Instr::Error(Box::new("abort".to_owned())));
+            compiler
+                .out_bc
+                .push(Instr::Error(Box::new("abort".to_owned())));
         }
         "unreachable" => {
-            out_bc.push(Instr::Error(Box::new("unreachable".to_owned())));
-        }
+            compiler
+                .out_bc
+                .push(Instr::Error(Box::new("unreachable".to_owned())));
+        } /*
         "caller_location" => {
-            out_bc.push(Instr::Error(Box::new(
-                "caller_location not implemented".to_owned(),
-            )));
+        out_bc.push(Instr::Error(Box::new(
+        "caller_location not implemented".to_owned(),
+        )));
         }*/
         "assume" | "assert_zero_valid" | "assert_inhabited" => {
             // do nothing yeehaw
@@ -847,69 +904,16 @@ pub fn compile_rust_intrinsic<'vm>(
             // copying here isn't so great, ideally we could make the res slot optional like in the main compiler
             let copy = bytecode_select::copy(out.slot, args[0].slot, ty_bool).unwrap();
             compiler.out_bc.push(copy);
-        }/*
-        "write_bytes" => {
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 3);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let size = arg_ty.layout().assert_size();
-            // todo it might be cleaner to multiply the size in bytecode, instead of having a limit attached to the instruction
-            let small_size: u16 = size.try_into().expect("size too large!");
-
-            out_bc.push(Instr::WriteBytes {
-                size: small_size,
-                dst: arg_slots[0],
-                val: arg_slots[1],
-                count: arg_slots[2],
-            });
         }
-        // ugh
-        "add_with_overflow" => {
-            // TODO make this actually work -- I'd rather not add more arithmetic instructions
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
-
-            let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
-            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
-            // signed: same signs on inputs, differ from output
-            // unsigned: (a + b < a)
-        }
-        "sub_with_overflow" => {
-            // TODO make this actually work -- I'd rather not add more arithmetic instructions
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
-
-            let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
-            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
-        }
-        "mul_with_overflow" => {
-            // TODO make this actually work -- I'd rather not add more arithmetic instructions
-            assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
-
-            let arg_ty = subs.list[0].assert_ty();
-            let carry_slot = out_slot.offset_by(arg_ty.layout().assert_size() as i32);
-
-            let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
-            out_bc.push(bytecode_select::literal(0, 1, carry_slot));
-        }*/
         "unchecked_add" | "wrapping_add" => {
             assert!(subs.list.len() == 1);
             assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Add, arg_ty);
-            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_sub" | "wrapping_sub" => {
             assert!(subs.list.len() == 1);
@@ -917,7 +921,9 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Sub, arg_ty);
-            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_mul" | "wrapping_mul" => {
             assert!(subs.list.len() == 1);
@@ -925,57 +931,75 @@ pub fn compile_rust_intrinsic<'vm>(
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Mul, arg_ty);
-            compiler.out_bc.push(ctor(out.slot, args[0].slot, args[1].slot));
-        }/*
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
+        }
         "exact_div" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Div, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_rem" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::Rem, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_shl" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::ShiftL, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         "unchecked_shr" => {
             assert!(subs.list.len() == 1);
-            assert!(arg_slots.len() == 2);
+            assert!(args.len() == 2);
 
             let arg_ty = subs.list[0].assert_ty();
             let (ctor, _) = bytecode_select::binary(BinaryOp::ShiftR, arg_ty);
-            out_bc.push(ctor(out_slot, arg_slots[0], arg_slots[1]));
+            compiler
+                .out_bc
+                .push(ctor(out.slot, args[0].slot, args[1].slot));
         }
         // icky float intrinsics which aren't generic
         "minnumf32" => {
-            assert!(arg_slots.len() == 2);
-            out_bc.push(Instr::F32_Min(out_slot, arg_slots[0], arg_slots[1]));
+            assert!(args.len() == 2);
+            compiler
+                .out_bc
+                .push(Instr::F32_Min(out.slot, args[0].slot, args[1].slot));
         }
         "maxnumf32" => {
-            assert!(arg_slots.len() == 2);
-            out_bc.push(Instr::F32_Max(out_slot, arg_slots[0], arg_slots[1]));
+            assert!(args.len() == 2);
+            compiler
+                .out_bc
+                .push(Instr::F32_Max(out.slot, args[0].slot, args[1].slot));
         }
         "minnumf64" => {
-            assert!(arg_slots.len() == 2);
-            out_bc.push(Instr::F64_Min(out_slot, arg_slots[0], arg_slots[1]));
+            assert!(args.len() == 2);
+            compiler
+                .out_bc
+                .push(Instr::F64_Min(out.slot, args[0].slot, args[1].slot));
         }
         "maxnumf64" => {
-            assert!(arg_slots.len() == 2);
-            out_bc.push(Instr::F64_Max(out_slot, arg_slots[0], arg_slots[1]));
-        }*/
+            assert!(args.len() == 2);
+            compiler
+                .out_bc
+                .push(Instr::F64_Max(out.slot, args[0].slot, args[1].slot));
+        }
         // we redirect `std::ptr::drop_in_place` to this intrinsic
         "drop_in_place" => {
             assert!(subs.list.len() == 1);

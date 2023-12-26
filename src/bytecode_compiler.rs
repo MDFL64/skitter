@@ -26,6 +26,10 @@ pub struct BytecodeCompiler<'vm, 'f> {
     loops: Vec<LoopInfo<'vm>>,
     loop_breaks: Vec<BreakInfo>,
     closure: Option<ClosureInfo<'vm>>,
+
+    local_void: Local<'vm>,
+    local_never: Local<'vm>,
+    local_result: Local<'vm>,
 }
 
 struct ClosureInfo<'vm> {
@@ -72,19 +76,16 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             loops: Vec::new(),
             loop_breaks: Vec::new(),
             closure: None,
+
+            local_void: Local::new_dummy(vm.common_types().void),
+            local_never: Local::new_dummy(vm.common_types().never),
+            local_result: Local::new_dummy(vm.common_types().unknown),
         };
 
         let out_ty = compiler.apply_subs(ir.sig.output);
-
-        let ret_slot = compiler.stack.alloc_no_drop(out_ty);
-        assert_eq!(ret_slot.index(), 0);
-
-        let local_ret = Local {
-            slot: ret_slot,
-            ty: out_ty,
-            drop_id: None,
-            is_initialized: false,
-        };
+        compiler.local_result.ty = out_ty;
+        let res_slot = compiler.stack.alloc_no_drop(out_ty);
+        assert_eq!(res_slot, compiler.local_result.slot);
 
         let param_slots: Vec<_> = ir
             .params
@@ -119,7 +120,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             compiler.local_init(slot);
         }
 
-        compiler.lower_expr(ir.root_expr, Some(local_ret));
+        compiler.lower_expr(ir.root_expr, Some(compiler.local_result));
 
         compiler.out_bc.push(Instr::Return);
 
@@ -145,8 +146,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         if vm.cli_args.verbose {
             println!("compiling promoted const");
         }
-        // NOTE: Currently we don't create an outer scope, so we possibly miss calling destructors for const values.
-        // Unsure whether this will be a problem.
 
         let mut compiler = BytecodeCompiler {
             in_func_subs: subs,
@@ -158,6 +157,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             loops: Vec::new(),
             loop_breaks: Vec::new(),
             closure: None,
+
+            local_void: Local::new_dummy(vm.common_types().void),
+            local_never: Local::new_dummy(vm.common_types().never),
+            local_result: Local::new_dummy(vm.common_types().unknown),
         };
 
         let place = compiler.expr_to_place(root_expr);
@@ -215,7 +218,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
             if let Some(expr) = block.result {
                 self.stack.alloc(self.expr_ty(expr))
             } else {
-                Local::void(self.vm)
+                self.local_void
             }
         });
 
@@ -297,7 +300,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     ));
                     dest
                 }
-                ExprKind::LiteralVoid => dest.unwrap_or_else(|| Local::void(self.vm)),
+                ExprKind::LiteralVoid => dest.unwrap_or_else(|| self.local_void),
                 ExprKind::LiteralBytes(bytes) => {
                     let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
 
@@ -381,8 +384,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
 
-                    // the destination is (), just return a dummy value
-                    dest.unwrap_or_else(|| Local::void(self.vm))
+                    dest.unwrap_or_else(|| self.local_void)
                 }
                 ExprKind::AssignOp(op, lhs, rhs) => {
                     let rhs_local = self.lower_expr(*rhs, None);
@@ -417,8 +419,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         }
                     }
 
-                    // the destination is (), just return a dummy value
-                    dest.unwrap_or_else(|| Local::void(self.vm))
+                    dest.unwrap_or_else(|| self.local_void)
                 }
                 ExprKind::Call { func, args } => {
                     let ty = self.expr_ty(*func);
@@ -594,7 +595,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     });
                     let loop_count = self.loops.len();
 
-                    self.lower_block(body, Some(Local::void(self.vm)));
+                    self.lower_block(body, Some(self.local_void));
 
                     assert_eq!(loop_count, self.loops.len());
                     self.loops.pop();
@@ -634,8 +635,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         break_index,
                     });
 
-                    // the destination is (), just return a dummy value
-                    dest.unwrap_or_else(|| Local::void(self.vm))
+                    dest.unwrap_or_else(|| self.local_never)
                 }
                 ExprKind::Continue { loop_id } => {
                     let loop_start = self
@@ -648,8 +648,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     let offset = self.get_jump_offset(loop_start); // + 1;
                     self.out_bc.push(Instr::Jump(offset));
 
-                    // the destination is (), just return a dummy value
-                    dest.unwrap_or_else(|| Local::void(self.vm))
+                    dest.unwrap_or_else(|| self.local_never)
                 }
                 ExprKind::Return(value) => {
                     if let Some(value) = value {
@@ -667,8 +666,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     }
                     self.out_bc.push(Instr::Return);
 
-                    // the destination is (), just return a dummy value
-                    dest.unwrap_or_else(|| Local::void(self.vm))
+                    dest.unwrap_or_else(|| self.local_never)
                 }
                 ExprKind::Ref(arg, ref_mutability) => {
                     let arg_ty = self.expr_ty(*arg);
@@ -2351,7 +2349,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     /// Moves a local to another local. The destination local may or may not be initialized.
     fn local_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
-        assert_eq!(dst.ty, src.ty);
+        if let TypeKind::Never = src.ty.kind() {
+            return;
+        }
 
         if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
             self.out_bc.push(Instr::LocalDropInit(bits));
@@ -2683,11 +2683,10 @@ pub struct Local<'vm> {
 }
 
 impl<'vm> Local<'vm> {
-    pub fn void(vm: &'vm VM<'vm>) -> Self {
-        let void = vm.common_types().void;
-        Self {
+    pub fn new_dummy(ty: Type<'vm>) -> Self {
+        Local {
             slot: Slot::new(0),
-            ty: void,
+            ty,
             drop_id: None,
             is_initialized: false,
         }
