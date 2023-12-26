@@ -369,11 +369,23 @@ where
     T: Persist<'vm>,
 {
     fn persist_write(&self, writer: &mut PersistWriter<'vm>) {
-
+        match self.get() {
+            Option::None => {
+                writer.write_byte(0);
+            }
+            Option::Some(val) => {
+                writer.write_byte(1);
+                val.persist_write(writer);
+            }
+        }
     }
 
     fn persist_read(reader: &mut PersistReader<'vm>) -> Self {
-        Self::new()
+        if let Some(x) = Option::<T>::persist_read(reader) {
+            OnceLock::from(x)
+        } else {
+            OnceLock::new()
+        }
     }
 }
 
@@ -486,5 +498,33 @@ where
         let a = A::persist_read(reader);
         let b = B::persist_read(reader);
         (a, b)
+    }
+}
+
+#[derive(Default)]
+pub struct NoPersist<T>(T);
+
+impl<'vm, T> Persist<'vm> for NoPersist<T>
+where
+    T: Default,
+{
+    fn persist_write(&self, _writer: &mut PersistWriter<'vm>) {}
+
+    fn persist_read(_reader: &mut PersistReader<'vm>) -> Self {
+        Self(T::default())
+    }
+}
+
+impl<T> std::ops::Deref for NoPersist<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for NoPersist<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

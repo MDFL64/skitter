@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 #![feature(rustc_private)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(lazy_cell)]
 
 extern crate rustc_abi;
@@ -129,7 +129,7 @@ fn run(args: &cli::CliArgs) {
 
     let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
 
-    let thread = vm.make_thread();
+    let mut thread = vm.make_thread();
     thread.call(&main_fn, 0);
 }
 

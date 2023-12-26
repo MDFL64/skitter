@@ -1,10 +1,27 @@
 use crate::{
-    crate_provider::TraitImplResult,
-    items::{AssocValue, Item, ItemPath},
-    types::{Sub, SubList, Type},
+    abi::POINTER_SIZE,
+    builtins::BuiltinAdt,
+    bytecode_compiler::FunctionBytecode,
+    bytecode_select,
+    items::{AdtInfo, Item},
+    types::{Mutability, SubList, Type},
+    variants::{VariantIndex, Variants},
+    vm::{
+        instr::{Instr, Slot},
+        Function, FunctionSource, VM,
+    },
 };
 
 use super::TypeKind;
+
+// TODO, this is just a function. This function:
+// 1. Calls drop, if applicable.
+// 2. Drops all fields, if applicable.
+#[derive(Clone, Copy)]
+pub struct DropGlue<'vm>(&'vm Function<'vm>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DropBit(u32);
 
 // Jargon:
 // Drop "glue" refers to all the code required to drop a type, which may include a Drop impl and code to drop fields.
@@ -15,78 +32,99 @@ use super::TypeKind;
 
 /// Contains some metadata about drops, which is used both to compile functions, and to
 /// generate drop "glue". Glue is stored separately in the type.
-pub struct DropInfo<'vm> {
-    /// Marks this type as a drop "leaf" even if it lacks an impl or fields.
-    /// Used for:
-    /// - Arrays
-    is_special_leaf: bool,
-
-    drop_impl: Option<i32>,
-    fields: Vec<DropField<Type<'vm>>>,
+#[derive(Clone)]
+pub enum DropInfo<'vm> {
+    None,
+    Leaf(DropGlue<'vm>),
+    Branch {
+        glue: DropGlue<'vm>,
+        fields: Vec<DropField<'vm>>,
+    },
 }
 
-pub struct DropField<T> {
-    variant: u32,
-    field: u32,
-    ty: T,
+#[derive(Clone, Debug)]
+pub struct DropField<'vm> {
+    pub variant: VariantIndex,
+    pub field: u32,
+    pub offset: u32,
+    pub ty: Type<'vm>,
 }
 
 impl<'vm> DropInfo<'vm> {
-    fn empty() -> Self {
-        Self {
-            is_special_leaf: false,
-            drop_impl: None,
-            fields: vec![],
+    fn new(
+        vm: &'vm VM<'vm>,
+        drop_fn: Option<&'vm Item<'vm>>,
+        field_types: &[Vec<Type<'vm>>],
+        field_offsets: &Variants<Vec<u32>>,
+        subs: &SubList<'vm>,
+        adt_info: Option<&AdtInfo>,
+        boxed_ty: Option<Type<'vm>>,
+    ) -> Self {
+        let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
+
+        let mut fields = Vec::new();
+
+        for (variant, field_tys) in field_types.iter().enumerate() {
+            let variant = VariantIndex::new(variant as u32);
+
+            for (field_index, ty) in field_tys.iter().enumerate() {
+                let ty = ty.sub(subs);
+                if ty.drop_info().is_drop() {
+                    let offset = field_offsets.get(variant)[field_index as usize];
+                    fields.push(DropField {
+                        variant,
+                        field: field_index as u32,
+                        offset,
+                        ty,
+                    })
+                }
+            }
+        }
+
+        if fields.len() > 0 || drop_fn.is_some() {
+            if let Some(adt_info) = adt_info {
+                // TODO SKIP UNIONS
+                // TODO PASS *ENUM* DISCRIMINANTS TO DropGlue::new
+                assert!(adt_info.is_struct());
+            }
+
+            let glue = DropGlue::new(vm, drop_fn, &fields, boxed_ty);
+
+            if drop_fn.is_some() {
+                DropInfo::Leaf(glue)
+            } else {
+                DropInfo::Branch { glue, fields }
+            }
+        } else {
+            DropInfo::None
         }
     }
 
-    fn special_leaf() -> Self {
-        Self {
-            is_special_leaf: true,
-            drop_impl: None,
-            fields: vec![],
-        }
+    /// Returns true if ANY drop-related actions are required.
+    pub fn is_drop(&self) -> bool {
+        !self.is_none()
     }
 
-    // kill me
     pub fn is_none(&self) -> bool {
-        true
+        match self {
+            Self::None => true,
+            _ => false,
+        }
     }
-}
 
-fn get_drop_impl<'vm>(ty: Type<'vm>) -> Option<&'vm Item<'vm>> {
-    let vm = ty.1;
-
-    let core_id = *vm.core_crate.get().expect("no core crate");
-    let core_provider = vm.crate_provider(core_id);
-    let drop_trait = core_provider
-        .item_by_path(&ItemPath::for_type("::ops::drop::Drop"))
-        .expect("no drop trait");
-
-    let drop_impl = drop_trait.find_trait_impl(&SubList {
-        list: vec![Sub::Type(ty)],
-    });
-
-    match drop_impl {
-        TraitImplResult::Dynamic => {
-            panic!("dyn drop, is this even valid?");
+    pub fn glue(&self) -> Option<&DropGlue<'vm>> {
+        match self {
+            Self::Leaf(glue) => Some(glue),
+            Self::Branch { glue, fields: _ } => Some(glue),
+            Self::None => None,
         }
-        TraitImplResult::Static(drop_impl) => {
-            let val = drop_impl.assoc_values[0].as_ref().unwrap();
-            let AssocValue::Item(item_id) = val else {
-                panic!("drop impl is not an item");
-            };
-
-            let provider = vm.crate_provider(drop_impl.crate_id);
-            let item = provider.item_by_id(*item_id);
-            Some(item)
-        }
-        TraitImplResult::None => None,
     }
 }
 
 impl<'vm> Type<'vm> {
     pub fn drop_info(&self) -> &DropInfo<'vm> {
+        let vm = self.1;
+
         self.0.drop_info.get_or_init(|| {
             // gather fields, bail for types we can't drop
             match self.kind() {
@@ -98,32 +136,138 @@ impl<'vm> Type<'vm> {
                 | TypeKind::Ptr(..)
                 | TypeKind::FunctionPointer(..)
                 | TypeKind::FunctionDef(..)
-                | TypeKind::Never => return DropInfo::empty(),
+                | TypeKind::Never => DropInfo::None,
 
                 TypeKind::Array(child, _) => {
-                    return if !child.drop_info().is_none() {
-                        // drop array of T
-                        DropInfo::special_leaf()
+                    if child.drop_info().is_drop() {
+                        panic!("array drop");
                     } else {
-                        DropInfo::empty()
-                    };
+                        DropInfo::None
+                    }
                 }
 
-                TypeKind::Tuple(..) => {
-                    // todo check fields
-                    DropInfo::empty()
+                TypeKind::Tuple(fields) => {
+                    let offsets = &self.layout().field_offsets;
+
+                    DropInfo::new(
+                        vm,
+                        None,
+                        std::slice::from_ref(fields),
+                        offsets,
+                        &SubList::empty(),
+                        None,
+                        None,
+                    )
                 }
                 TypeKind::Closure(closure, subs) => {
-                    // todo use captures
-                    DropInfo::empty()
+                    let env = closure.env(subs);
+                    env.drop_info().clone()
                 }
-                TypeKind::Adt(..) => {
-                    get_drop_impl(*self);
-                    // todo check fields
-                    DropInfo::empty()
+                TypeKind::Adt(info) => {
+                    if info.item.adt_is_builtin(BuiltinAdt::ManuallyDrop) {
+                        return DropInfo::None;
+                    }
+
+                    let boxed_ty = if info.item.adt_is_builtin(BuiltinAdt::Box) {
+                        Some(info.subs.list[0].assert_ty())
+                    } else {
+                        None
+                    };
+
+                    let adt_info = info.item.adt_info();
+                    let drop_fn = self.1.find_drop(*self);
+                    let offsets = &self.layout().field_offsets;
+
+                    DropInfo::new(
+                        vm,
+                        drop_fn,
+                        adt_info.variant_fields.as_slice(),
+                        offsets,
+                        &info.subs,
+                        Some(adt_info),
+                        boxed_ty,
+                    )
                 }
                 _ => panic!("drop info: {:?}", self),
             }
         })
+    }
+}
+
+impl<'vm> DropGlue<'vm> {
+    pub fn new(
+        vm: &'vm VM<'vm>,
+        drop_fn: Option<&'vm Function<'vm>>,
+        fields: &[DropField<'vm>],
+        boxed_ty: Option<Type<'vm>>,
+    ) -> Self {
+        assert!(drop_fn.is_some() || fields.len() > 0);
+
+        // we go straight to bytecode here for several reasons:
+        // 1. the code required may depend on the drop info of generics, trying to generate generic IR would probably not go well
+        // 2. handling drops in functions may involve generating similar bytecode (currently it does not) there may be some opportunity for re-use
+        // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
+
+        let self_slot = Slot::new(0);
+        // temporary slot used to store field offsets
+        // use POINTER_SIZE * 2 in case this type is unsized
+        let member_slot = Slot::new(POINTER_SIZE.bytes() * 2);
+
+        let mut code = Vec::new();
+
+        // box drops require some special handling
+        if let Some(boxed_ty) = boxed_ty {
+            if let Some(boxed_ty_glue) = boxed_ty.drop_info().glue() {
+                let ref_ty = boxed_ty.ref_to(Mutability::Mut);
+                code.push(
+                    bytecode_select::copy_from_ptr(member_slot, self_slot, ref_ty, 0).unwrap(),
+                );
+                code.push(Instr::Call(member_slot, boxed_ty_glue.function()));
+            }
+        }
+
+        if let Some(drop_fn) = drop_fn {
+            code.push(Instr::Call(self_slot, drop_fn));
+        }
+
+        for field in fields {
+            assert!(field.variant == VariantIndex::new(0));
+            code.push(Instr::PointerOffset2(
+                member_slot,
+                self_slot,
+                field.offset as i32,
+            ));
+
+            let field_glue = field
+                .ty
+                .drop_info()
+                .glue()
+                .expect("drop field missing glue");
+            code.push(Instr::Call(member_slot, field_glue.function()));
+        }
+        code.push(Instr::Return);
+
+        let bc = FunctionBytecode {
+            code,
+            drops: Vec::new(),
+        };
+
+        let bc = vm.alloc_bytecode(bc);
+
+        Self(vm.alloc_function(FunctionSource::RawBytecode(bc), SubList::empty()))
+    }
+
+    pub fn function(&self) -> &'vm Function<'vm> {
+        self.0
+    }
+}
+
+impl DropBit {
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn index(&self) -> u32 {
+        self.0
     }
 }

@@ -24,6 +24,8 @@ pub struct CommonTypes<'vm> {
 
     pub f32: Type<'vm>,
     pub f64: Type<'vm>,
+
+    pub void: Type<'vm>,
 }
 
 impl<'vm> CommonTypes<'vm> {
@@ -75,6 +77,8 @@ impl<'vm> CommonTypes<'vm> {
 
             f32: vm.types.intern(TypeKind::Float(FloatWidth::F32), vm),
             f64: vm.types.intern(TypeKind::Float(FloatWidth::F64), vm),
+
+            void: vm.types.intern(TypeKind::Tuple(vec![]), vm),
         }
     }
 }

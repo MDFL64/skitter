@@ -1,11 +1,11 @@
+use crate::types::DropBit;
+
 use super::vm::Function;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slot(u32);
 
 impl Slot {
-    pub const DUMMY: Self = Self(0);
-
     const SUB_OFFSET: u32 = 1_000_000_000;
 
     pub fn new(id: u32) -> Self {
@@ -292,6 +292,13 @@ pub enum Instr<'vm> {
     MemCopy(Slot, Slot, Slot),
     MemCompare(Slot, Slot, Slot),
 
+    WriteBytes {
+        size: u16,
+        dst: Slot,
+        val: Slot,
+        count: Slot,
+    },
+
     ArrayRepeat {
         base: Slot,
         size: u32,
@@ -337,6 +344,12 @@ pub enum Instr<'vm> {
 
     VTableFunc(Slot, Slot, u32),
 
+    LocalInit((DropBit, DropBit)),
+    LocalMove((DropBit, DropBit)),
+    LocalDrop((DropBit, DropBit)),
+    /// Fused drop-init, drops values but leaves their flags initialized.
+    LocalDropInit((DropBit, DropBit)),
+
     Return,
     Error(Box<String>),
     Skipped,
@@ -349,14 +362,6 @@ pub enum Instr<'vm> {
         align: u32,
     },
 
-    // RUST INTRINSICS
-    WriteBytes {
-        size: u16,
-        dst: Slot,
-        val: Slot,
-        count: Slot,
-    },
-
     I8_S_SatAdd(Slot, Slot, Slot),
     I16_S_SatAdd(Slot, Slot, Slot),
     I32_S_SatAdd(Slot, Slot, Slot),
@@ -367,6 +372,7 @@ pub enum Instr<'vm> {
     I32_U_SatAdd(Slot, Slot, Slot),
     I64_U_SatAdd(Slot, Slot, Slot),
     I128_U_SatAdd(Slot, Slot, Slot),
+
     I8_S_SatSub(Slot, Slot, Slot),
     I16_S_SatSub(Slot, Slot, Slot),
     I32_S_SatSub(Slot, Slot, Slot),
@@ -377,6 +383,39 @@ pub enum Instr<'vm> {
     I32_U_SatSub(Slot, Slot, Slot),
     I64_U_SatSub(Slot, Slot, Slot),
     I128_U_SatSub(Slot, Slot, Slot),
+
+    I8_S_OverflowingAdd(Slot, Slot, Slot),
+    I16_S_OverflowingAdd(Slot, Slot, Slot),
+    I32_S_OverflowingAdd(Slot, Slot, Slot),
+    I64_S_OverflowingAdd(Slot, Slot, Slot),
+    I128_S_OverflowingAdd(Slot, Slot, Slot),
+    I8_U_OverflowingAdd(Slot, Slot, Slot),
+    I16_U_OverflowingAdd(Slot, Slot, Slot),
+    I32_U_OverflowingAdd(Slot, Slot, Slot),
+    I64_U_OverflowingAdd(Slot, Slot, Slot),
+    I128_U_OverflowingAdd(Slot, Slot, Slot),
+
+    I8_S_OverflowingSub(Slot, Slot, Slot),
+    I16_S_OverflowingSub(Slot, Slot, Slot),
+    I32_S_OverflowingSub(Slot, Slot, Slot),
+    I64_S_OverflowingSub(Slot, Slot, Slot),
+    I128_S_OverflowingSub(Slot, Slot, Slot),
+    I8_U_OverflowingSub(Slot, Slot, Slot),
+    I16_U_OverflowingSub(Slot, Slot, Slot),
+    I32_U_OverflowingSub(Slot, Slot, Slot),
+    I64_U_OverflowingSub(Slot, Slot, Slot),
+    I128_U_OverflowingSub(Slot, Slot, Slot),
+
+    I8_S_OverflowingMul(Slot, Slot, Slot),
+    I16_S_OverflowingMul(Slot, Slot, Slot),
+    I32_S_OverflowingMul(Slot, Slot, Slot),
+    I64_S_OverflowingMul(Slot, Slot, Slot),
+    I128_S_OverflowingMul(Slot, Slot, Slot),
+    I8_U_OverflowingMul(Slot, Slot, Slot),
+    I16_U_OverflowingMul(Slot, Slot, Slot),
+    I32_U_OverflowingMul(Slot, Slot, Slot),
+    I64_U_OverflowingMul(Slot, Slot, Slot),
+    I128_U_OverflowingMul(Slot, Slot, Slot),
 
     I8_PopCount(Slot, Slot),
     I16_PopCount(Slot, Slot),

@@ -110,16 +110,17 @@ impl<'vm> TypeContext<'vm> {
             }
             TyKind::Alias(alias_kind, alias_ty) => match alias_kind {
                 AliasKind::Projection => {
-                    let item_with_subs = self.def_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
+                    let item_with_subs = self.def_from_rustc(alias_ty.def_id, alias_ty.args, ctx);
                     TypeKind::AssociatedType(item_with_subs)
                 }
                 AliasKind::Opaque => {
                     let (parent_item, sub_id) =
-                        self.opaque_type_from_rustc(alias_ty.def_id, alias_ty.substs, ctx);
+                        self.opaque_type_from_rustc(alias_ty.def_id, alias_ty.args, ctx);
 
                     TypeKind::Opaque(parent_item, sub_id)
                 }
                 AliasKind::Inherent => panic!("inherent alias?"),
+                AliasKind::Weak => panic!("weak alias?"),
             },
             TyKind::Foreign(did) => {
                 let def_path = ctx.tcx.def_path(*did);
@@ -146,7 +147,7 @@ impl<'vm> TypeContext<'vm> {
                                 panic!("multiple primary traits on dyn");
                             }
 
-                            let item = self.def_from_rustc(trait_ref.def_id, trait_ref.substs, ctx);
+                            let item = self.def_from_rustc(trait_ref.def_id, trait_ref.args, ctx);
 
                             primary_trait = Some(item);
                         }

@@ -1,7 +1,7 @@
 use crate::{
     abi::POINTER_SIZE,
     types::{IntWidth, Type, TypeKind},
-    variants::{Discriminant, Variants},
+    variants::Variants,
 };
 
 use super::{FloatWidth, ItemWithSubs};

@@ -252,6 +252,45 @@ fn write_int_ops(signed: &str, unsigned: &str, source: &mut String) {
         "a.saturating_add(b)",
         source,
     );
+
+    write_binary(
+        &format!("{}_S_OverflowingAdd", big),
+        signed,
+        "a.overflowing_add(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingAdd", big),
+        unsigned,
+        "a.overflowing_add(b)",
+        source,
+    );
+
+    write_binary(
+        &format!("{}_S_OverflowingSub", big),
+        signed,
+        "a.overflowing_sub(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingSub", big),
+        unsigned,
+        "a.overflowing_sub(b)",
+        source,
+    );
+
+    write_binary(
+        &format!("{}_S_OverflowingMul", big),
+        signed,
+        "a.overflowing_mul(b)",
+        source,
+    );
+    write_binary(
+        &format!("{}_U_OverflowingMul", big),
+        unsigned,
+        "a.overflowing_mul(b)",
+        source,
+    );
 }
 
 fn write_float_ops(ty: &str, source: &mut String) {
@@ -521,6 +560,26 @@ fn write_exec_match() {
     Instr::Alloc{out,size,align} => {
         let res = self.vm.alloc_bytes(*size as usize,*align as usize);
         write_stack(stack, *out, res);
+    }
+    Instr::LocalInit((start,end)) => {
+        for i in start.index()..=end.index() {
+            self.local_init(drops_base, i);
+        }
+    }
+    Instr::LocalMove((start,end)) => {
+        for i in start.index()..=end.index() {
+            self.local_move(drops_base, i);
+        }
+    }
+    Instr::LocalDrop((start,end)) => {
+        for i in (start.index()..=end.index()).rev() {
+            self.local_drop(drops_base, i, &func.drops, stack);
+        }
+    }
+    Instr::LocalDropInit((start,end)) => {
+        for i in (start.index()..=end.index()).rev() {
+            self.local_drop_init(drops_base, i, &func.drops, stack);
+        }
     }
     _ => panic!("NYI {:?}",instr)
 }"#,

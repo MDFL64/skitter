@@ -3,6 +3,7 @@ use colosseum::sync::Arena;
 
 use crate::abi::align;
 use crate::bytecode_compiler::BytecodeCompiler;
+use crate::bytecode_compiler::FunctionBytecode;
 use crate::cache_provider::CacheProvider;
 use crate::cli::CliArgs;
 use crate::closure::Closure;
@@ -13,9 +14,11 @@ use crate::ir::IRFunction;
 use crate::items::AssocValue;
 use crate::items::CrateId;
 use crate::items::Item;
+use crate::items::ItemPath;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
 use crate::types::CommonTypes;
+use crate::types::DropGlue;
 use crate::types::ItemWithSubs;
 use crate::types::Sub;
 use crate::types::SubList;
@@ -53,13 +56,15 @@ pub struct VM<'vm> {
     arena_items: Arena<Item<'vm>>,
     arena_functions: Arena<Function<'vm>>,
     arena_closures: Arena<Closure<'vm>>,
-    arena_bytecode: Arena<Vec<Instr<'vm>>>,
+    arena_bytecode: Arena<FunctionBytecode<'vm>>,
     arena_constants: Arena<Vec<u8>>,
     arena_paths: Arena<String>,
     arena_vtables: Arena<VTable<'vm>>,
 
     map_paths: Mutex<AHashSet<&'vm str>>,
     map_vtables: Mutex<AHashMap<(&'vm Item<'vm>, SubList<'vm>), &'vm VTable<'vm>>>,
+
+    drop_trait: OnceLock<&'vm Item<'vm>>,
 }
 
 static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
@@ -67,10 +72,11 @@ static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
 pub struct VMThread<'vm> {
     vm: &'vm VM<'vm>,
     stack: Vec<u128>,
+    drop_flags: Vec<u8>,
 }
 
 impl<'vm> VMThread<'vm> {
-    pub fn call(&self, func: &Function<'vm>, stack_offset: u32) {
+    pub fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
         let native = func.get_native();
 
         if self.vm.cli_args.debug_trace_calls && !native.is_some() {
@@ -136,17 +142,29 @@ impl<'vm> VMThread<'vm> {
         }
     }
 
-    pub fn run_bytecode(&self, bc: &[Instr<'vm>], stack_offset: u32) {
+    pub fn run_bytecode(&mut self, func: &FunctionBytecode<'vm>, stack_offset: u32) {
+        let drops_base = self.drop_flags.len();
+        if func.drops.len() > 0 {
+            let bytes = (func.drops.len() - 1) / 8 + 1;
+            self.drop_flags.resize(drops_base + bytes, 0);
+        }
+
         unsafe {
             let mut pc = 0;
             let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
 
             loop {
-                let instr = &bc[pc];
+                let instr = &func.code[pc];
                 include!(concat!(env!("OUT_DIR"), "/exec_match.rs"));
                 pc += 1;
             }
+
+            for i in (0..func.drops.len()).rev() {
+                self.local_drop(drops_base, i as u32, &func.drops, stack);
+            }
         }
+
+        self.drop_flags.truncate(drops_base);
     }
 
     pub fn copy_result(&self, offset: usize, size: usize) -> Vec<u8> {
@@ -157,6 +175,88 @@ impl<'vm> VMThread<'vm> {
 
     pub fn copy_ptr(&self, slot: Slot) -> usize {
         unsafe { read_stack(self.stack.as_ptr() as _, slot) }
+    }
+
+    fn local_init(&mut self, base: usize, n: u32) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            panic!("drop flag was initialized twice");
+        }
+
+        *byte |= mask;
+    }
+
+    fn local_move(&mut self, base: usize, n: u32) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) == 0 {
+            panic!("attempt to clear uninitialized drop flag");
+        }
+
+        *byte ^= mask;
+    }
+
+    unsafe fn local_drop(
+        &mut self,
+        base: usize,
+        n: u32,
+        drops: &[(Slot, DropGlue<'vm>)],
+        stack: *mut u8,
+    ) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            *byte ^= mask;
+
+            let (slot, glue) = drops[n as usize];
+
+            let slot_ptr = stack.add(slot.index());
+
+            let mut drop_thread = self.vm.make_thread();
+            write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
+
+            drop_thread.call(glue.function(), 0);
+        }
+    }
+
+    unsafe fn local_drop_init(
+        &mut self,
+        base: usize,
+        n: u32,
+        drops: &[(Slot, DropGlue<'vm>)],
+        stack: *mut u8,
+    ) {
+        let offset = (n >> 8) as usize;
+        let byte = &mut self.drop_flags[base + offset];
+
+        let bit = n & 7;
+        let mask = 1u8 << (bit as u8);
+
+        if (*byte & mask) != 0 {
+            let (slot, glue) = drops[n as usize];
+
+            let slot_ptr = stack.add(slot.index());
+
+            let mut drop_thread = self.vm.make_thread();
+            write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
+
+            drop_thread.call(glue.function(), 0);
+        } else {
+            *byte |= mask;
+        }
     }
 }
 
@@ -196,6 +296,8 @@ impl<'vm> VM<'vm> {
 
             map_paths: Default::default(),
             map_vtables: Default::default(),
+
+            drop_trait: Default::default(),
         }
     }
 
@@ -209,7 +311,11 @@ impl<'vm> VM<'vm> {
             // 1M stack
             stack_pool.pop().unwrap_or_else(|| vec![0; 65536])
         };
-        VMThread { vm: self, stack }
+        VMThread {
+            vm: self,
+            stack,
+            drop_flags: Vec::new(),
+        }
     }
 
     /// Attempts to build a cache provider for the given crate, then falls back to rustc if that fails.
@@ -297,7 +403,7 @@ impl<'vm> VM<'vm> {
         self.arena_items.alloc(item)
     }
 
-    pub fn alloc_bytecode(&'vm self, bc: Vec<Instr<'vm>>) -> &'vm Vec<Instr<'vm>> {
+    pub fn alloc_bytecode(&'vm self, bc: FunctionBytecode<'vm>) -> &'vm FunctionBytecode<'vm> {
         self.arena_bytecode.alloc(bc)
     }
 
@@ -344,10 +450,14 @@ impl<'vm> VM<'vm> {
         map_vtables
             .entry((trait_item, for_tys.clone()))
             .or_insert_with(|| {
-                let TraitImplResult::Static(impl_result) = trait_item
-                    .find_trait_impl(&for_tys) else {
-                        panic!("cannot build vtable from trait {} for {}",trait_item.path.as_string(),primary_ty);
-                    };
+                let TraitImplResult::Static(impl_result) = trait_item.find_trait_impl(&for_tys)
+                else {
+                    panic!(
+                        "cannot build vtable from trait {} for {}",
+                        trait_item.path.as_string(),
+                        primary_ty
+                    );
+                };
 
                 let impl_crate = self.crate_provider(impl_result.crate_id);
 
@@ -382,6 +492,38 @@ impl<'vm> VM<'vm> {
             })
     }
 
+    pub fn find_drop(&self, ty: Type<'vm>) -> Option<&'vm Item<'vm>> {
+        let drop_trait = self.drop_trait.get_or_init(|| {
+            let core_id = *self.core_crate.get().expect("no core crate");
+            let core_provider = self.crate_provider(core_id);
+
+            core_provider
+                .item_by_path(&ItemPath::for_type("::ops::drop::Drop"))
+                .expect("no drop trait")
+        });
+
+        let drop_impl = drop_trait.find_trait_impl(&SubList {
+            list: vec![Sub::Type(ty)],
+        });
+
+        match drop_impl {
+            TraitImplResult::Dynamic => {
+                panic!("dyn drop, is this even valid?");
+            }
+            TraitImplResult::Static(drop_impl) => {
+                let val = drop_impl.assoc_values[0].as_ref().unwrap();
+                let AssocValue::Item(item_id) = val else {
+                    panic!("drop impl is not an item");
+                };
+
+                let provider = self.crate_provider(drop_impl.crate_id);
+                let item = provider.item_by_id(*item_id);
+                Some(item)
+            }
+            TraitImplResult::None => None,
+        }
+    }
+
     pub fn common_types(&'vm self) -> &CommonTypes<'vm> {
         self.common_types.get_or_init(|| CommonTypes::new(self))
     }
@@ -410,7 +552,7 @@ impl<'vm> VM<'vm> {
         std::alloc::alloc_zeroed(layout)
     }
 
-    pub unsafe fn realloc(
+    pub unsafe fn realloc_bytes(
         &'vm self,
         old: *mut u8,
         old_size: usize,
@@ -421,12 +563,18 @@ impl<'vm> VM<'vm> {
         let layout = std::alloc::Layout::from_size_align_unchecked(old_size, align);
         std::alloc::realloc(old, layout, new_size)
     }
+
+    pub unsafe fn free_bytes(&'vm self, ptr: *mut u8, size: usize, align: usize) {
+        let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
+        std::alloc::dealloc(ptr, layout)
+    }
 }
 
 #[derive(Copy, Clone)]
 pub enum FunctionSource<'vm> {
     Item(&'vm Item<'vm>),
     Closure(&'vm Closure<'vm>),
+    RawBytecode(&'vm FunctionBytecode<'vm>),
 }
 
 impl<'vm> FunctionSource<'vm> {
@@ -434,6 +582,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.vm,
             Self::Closure(closure) => closure.vm,
+            Self::RawBytecode(_) => panic!("raw bytecode has no vm"),
         }
     }
 
@@ -441,6 +590,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.ir(subs),
             Self::Closure(closure) => (closure.ir_base(), Cow::Borrowed(subs)),
+            Self::RawBytecode(_) => panic!("raw bytecode has no ir"),
         }
     }
 
@@ -448,6 +598,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.path.as_string(),
             Self::Closure(_) => "[closure]",
+            Self::RawBytecode(..) => "[raw bytecode, probably drop glue]",
         }
     }
 }
@@ -458,7 +609,7 @@ pub struct Function<'vm> {
     subs: SubList<'vm>,
     /// Store a void pointer because function pointers can't be stored by AtomicPtr(?)
     native: AtomicPtr<std::ffi::c_void>,
-    bytecode: AtomicPtr<Vec<Instr<'vm>>>,
+    bytecode: AtomicPtr<FunctionBytecode<'vm>>,
 }
 
 impl<'vm> Function<'vm> {
@@ -471,7 +622,7 @@ impl<'vm> Function<'vm> {
         }
     }
 
-    pub fn get_bytecode(&self) -> Option<&'vm Vec<Instr<'vm>>> {
+    pub fn get_bytecode(&self) -> Option<&'vm FunctionBytecode<'vm>> {
         let raw = self.bytecode.load(Ordering::Acquire);
         if raw.is_null() {
             None
@@ -485,24 +636,28 @@ impl<'vm> Function<'vm> {
             .store(unsafe { std::mem::transmute(native) }, Ordering::Release);
     }
 
-    pub fn set_bytecode(&self, bc: &'vm Vec<Instr>) {
+    pub fn set_bytecode(&self, bc: &'vm FunctionBytecode<'vm>) {
         self.bytecode.store(bc as *const _ as _, Ordering::Release);
     }
 
-    fn bytecode(&self) -> &'vm [Instr<'vm>] {
+    fn bytecode(&self) -> &'vm FunctionBytecode<'vm> {
         loop {
             if let Some(bc) = self.get_bytecode() {
                 return bc;
             }
 
-            let vm = self.source.vm();
-            let (ir, new_subs) = self.source.ir(&self.subs);
-            let path = self.source.debug_name();
+            let bc = if let FunctionSource::RawBytecode(bc) = self.source {
+                bc
+            } else {
+                let vm = self.source.vm();
+                let (ir, new_subs) = self.source.ir(&self.subs);
+                let path = self.source.debug_name();
 
-            let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
-            let bc_ref = vm.alloc_bytecode(bc);
+                let bc = BytecodeCompiler::compile(vm, &ir, &new_subs, path, &self.subs);
+                vm.alloc_bytecode(bc)
+            };
 
-            self.set_bytecode(bc_ref);
+            self.set_bytecode(bc);
         }
     }
 }

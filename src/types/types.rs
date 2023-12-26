@@ -411,7 +411,7 @@ impl<'vm> Type<'vm> {
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
-        let TypeKind::Adt(ItemWithSubs{item,..}) = self.kind() else {
+        let TypeKind::Adt(ItemWithSubs { item, .. }) = self.kind() else {
             panic!("adt_info: not an adt");
         };
         let info = item.adt_info();

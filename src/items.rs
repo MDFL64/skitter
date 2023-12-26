@@ -5,14 +5,14 @@ use std::{
 };
 
 use crate::{
-    builtins::BuiltinTrait,
+    builtins::{BuiltinAdt, BuiltinTrait},
     bytecode_compiler::BytecodeCompiler,
     closure::{Closure, ClosureRef},
     crate_provider::TraitImplResult,
     impls::find_trait_impl_crate,
     ir::{glue_builder::glue_for_ctor, IRFunction, IRKind},
     lazy_collections::{LazyItem, LazyKey},
-    persist::{Persist, PersistReader, PersistWriter},
+    persist::{NoPersist, Persist, PersistReader, PersistWriter},
     rustc_worker::RustCContext,
     types::{ItemWithSubs, SubList, Type, TypeKind},
     variants::{Discriminant, VariantIndex, Variants},
@@ -285,9 +285,9 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 writer.write_byte('y' as u8);
                 virtual_info.persist_write(writer);
             }
-            ItemKind::Adt { info, tag } => {
+            ItemKind::Adt { info, builtin } => {
                 writer.write_byte('a' as u8);
-                tag.persist_write(writer);
+                builtin.get().copied().persist_write(writer);
 
                 let adt_block = {
                     let mut writer = writer.new_child_writer();
@@ -321,7 +321,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
             'f' => {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for = Persist::persist_read(reader);
-                let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
+                let extern_name = Persist::persist_read(reader);
 
                 let kind = ItemKind::Function {
                     ir: Default::default(),
@@ -354,15 +354,20 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 kind
             }
             'a' => {
-                let tag = Persist::persist_read(reader);
+                let builtin = if let Some(builtin) = Option::<BuiltinAdt>::persist_read(reader) {
+                    OnceLock::from(builtin)
+                } else {
+                    OnceLock::new()
+                };
+
                 ir = reader.read_byte_slice();
                 ItemKind::Adt {
-                    tag,
+                    builtin,
                     info: OnceLock::new(),
                 }
             }
             's' => {
-                let extern_name = Option::<(FunctionAbi, String)>::persist_read(reader);
+                let extern_name = Persist::persist_read(reader);
 
                 ir = reader.read_byte_slice();
                 ItemKind::Static {
@@ -447,7 +452,7 @@ pub enum ItemKind<'vm> {
         mono_instances: Mutex<AHashMap<SubList<'vm>, &'vm Function<'vm>>>,
         virtual_info: Option<VirtualInfo>,
         ctor_for: Option<(ItemId, VariantIndex)>,
-        extern_name: Option<(FunctionAbi, String)>,
+        extern_name: OnceLock<(FunctionAbi, String)>,
         closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     /// Constants operate very similarly to functions, but are evaluated
@@ -464,7 +469,7 @@ pub enum ItemKind<'vm> {
     Static {
         ir: Mutex<Option<Arc<IRFunction<'vm>>>>,
         value_ptr: OnceLock<usize>,
-        extern_name: Option<(FunctionAbi, String)>,
+        extern_name: OnceLock<(FunctionAbi, String)>,
         closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
     },
     AssociatedType {
@@ -472,18 +477,12 @@ pub enum ItemKind<'vm> {
     },
     Adt {
         info: OnceLock<AdtInfo<'vm>>,
-        tag: AdtTag,
+        builtin: OnceLock<BuiltinAdt>,
     },
     Trait {
         assoc_value_map: OnceLock<AHashMap<ItemPath<'vm>, u32>>,
         builtin: OnceLock<BuiltinTrait>,
     },
-}
-
-#[derive(Copy, Clone, Persist)]
-pub enum AdtTag {
-    Box,
-    None,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Persist)]
@@ -532,7 +531,7 @@ pub struct EnumInfo<'vm> {
 pub struct AdtInfo<'vm> {
     pub kind: AdtKind<'vm>,
     pub variant_fields: Variants<Vec<Type<'vm>>>,
-    variant_discriminants: OnceLock<Variants<Discriminant>>,
+    variant_discriminants: NoPersist<OnceLock<Variants<Discriminant>>>,
     pub variant_discriminant_sources: Variants<DiscriminantSource<'vm>>,
 }
 
@@ -552,29 +551,33 @@ impl<'vm> AdtInfo<'vm> {
         Self {
             kind,
             variant_fields,
-            variant_discriminants: OnceLock::new(),
-            variant_discriminant_sources
+            variant_discriminants: Default::default(),
+            variant_discriminant_sources,
         }
     }
 
     pub fn variant_discriminants(&self, vm: &'vm VM<'vm>) -> &Variants<Discriminant> {
         self.variant_discriminants.get_or_init(|| {
             let mut next = Discriminant::ZERO;
-            let discs = self.variant_discriminant_sources.iter().map(|(_,source)| {
-                let disc = match source {
-                    DiscriminantSource::Explicit(e) => {
-                        let (bytes,ty) = e.const_eval(vm, &SubList{list: vec!()});
+            let discs = self
+                .variant_discriminant_sources
+                .iter()
+                .map(|(_, source)| {
+                    let disc = match source {
+                        DiscriminantSource::Explicit(e) => {
+                            let (bytes, ty) = e.const_eval(vm, &SubList { list: vec![] });
 
-                        Discriminant::from_bytes(&bytes,ty)
-                    }
-                    DiscriminantSource::Next => next,
-                    DiscriminantSource::None => panic!("no discriminant")
-                };
+                            Discriminant::from_bytes(&bytes, ty)
+                        }
+                        DiscriminantSource::Next => next,
+                        DiscriminantSource::None => panic!("no discriminant"),
+                    };
 
-                next = disc.next();
+                    next = disc.next();
 
-                disc
-            }).collect();
+                    disc
+                })
+                .collect();
 
             Variants::new(discs)
         })
@@ -608,11 +611,15 @@ impl<'vm> AdtInfo<'vm> {
         }
     }
 
-    pub fn index_for_discriminant(&self, vm: &'vm VM<'vm>, disc: Discriminant) -> Option<VariantIndex> {
+    pub fn index_for_discriminant(
+        &self,
+        vm: &'vm VM<'vm>,
+        disc: Discriminant,
+    ) -> Option<VariantIndex> {
         self.variant_discriminants(vm)
             .iter()
             .find(|(_, d)| disc == **d)
-            .map(|(i, d)| i)
+            .map(|(i, _)| i)
     }
 }
 
@@ -667,7 +674,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_instances: Default::default(),
             virtual_info: None,
-            extern_name: None,
+            extern_name: OnceLock::new(),
             ctor_for: None,
             closures: Default::default(),
         }
@@ -681,7 +688,7 @@ impl<'vm> ItemKind<'vm> {
                 trait_id,
                 member_index,
             }),
-            extern_name: None,
+            extern_name: OnceLock::new(),
             ctor_for: None,
             closures: Default::default(),
         }
@@ -692,7 +699,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_instances: Default::default(),
             virtual_info: None,
-            extern_name: Some((abi, name)),
+            extern_name: (abi, name).into(),
             ctor_for: None,
             closures: Default::default(),
         }
@@ -703,7 +710,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             mono_instances: Default::default(),
             virtual_info: None,
-            extern_name: None,
+            extern_name: Default::default(),
             ctor_for: Some((adt_id, variant)),
             closures: Default::default(),
         }
@@ -747,7 +754,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             value_ptr: Default::default(),
             closures: Default::default(),
-            extern_name: None,
+            extern_name: OnceLock::new(),
         }
     }
 
@@ -756,7 +763,7 @@ impl<'vm> ItemKind<'vm> {
             ir: Default::default(),
             value_ptr: Default::default(),
             closures: Default::default(),
-            extern_name: Some((abi, name)),
+            extern_name: (abi, name).into(),
         }
     }
 
@@ -769,10 +776,10 @@ impl<'vm> ItemKind<'vm> {
         }
     }
 
-    pub fn new_adt(tag: AdtTag) -> Self {
+    pub fn new_adt() -> Self {
         Self::Adt {
             info: Default::default(),
-            tag,
+            builtin: Default::default(),
         }
     }
 
@@ -803,7 +810,7 @@ impl<'vm> ItemKind<'vm> {
 impl<'vm> Item<'vm> {
     /// Get a monomorphic VM function from a function item.
     pub fn func_mono(&'vm self, subs: &SubList<'vm>) -> &'vm Function<'vm> {
-        let ItemKind::Function{mono_instances,..} = &self.kind else {
+        let ItemKind::Function { mono_instances, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -835,7 +842,7 @@ impl<'vm> Item<'vm> {
 
     // returns a vtable index if the item and subs pair should produce a virtual call
     pub fn is_function_dyn(&self, subs: &SubList<'vm>) -> Option<u32> {
-        let ItemKind::Function{virtual_info,..} = &self.kind else {
+        let ItemKind::Function { virtual_info, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -851,10 +858,19 @@ impl<'vm> Item<'vm> {
         None
     }
 
-    pub fn get_extern(&self) -> &Option<(FunctionAbi, String)> {
+    pub fn get_extern(&self) -> Option<&(FunctionAbi, String)> {
         match &self.kind {
             ItemKind::Function { extern_name, .. } | ItemKind::Static { extern_name, .. } => {
-                extern_name
+                extern_name.get()
+            }
+            _ => panic!("item kind mismatch"),
+        }
+    }
+
+    pub fn set_extern(&self, abi: FunctionAbi, name: String) {
+        match &self.kind {
+            ItemKind::Function { extern_name, .. } | ItemKind::Static { extern_name, .. } => {
+                extern_name.set((abi, name)).unwrap();
             }
             _ => panic!("item kind mismatch"),
         }
@@ -938,7 +954,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn const_value(&self, subs: &SubList<'vm>) -> &'vm [u8] {
-        let ItemKind::Constant{mono_values,..} = &self.kind else {
+        let ItemKind::Constant { mono_values, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -949,7 +965,7 @@ impl<'vm> Item<'vm> {
             let bc =
                 BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
-            let eval_thread = self.vm.make_thread();
+            let mut eval_thread = self.vm.make_thread();
             eval_thread.run_bytecode(&bc, 0);
             let ty = ir.sig.output; // todo sub?
 
@@ -962,7 +978,7 @@ impl<'vm> Item<'vm> {
 
     // unlike with constants, we should probably ALWAYS be allocating here, even for small values
     pub fn static_value(&self, subs: &SubList<'vm>) -> *mut u8 {
-        let ItemKind::Static{value_ptr, ..} = &self.kind else {
+        let ItemKind::Static { value_ptr, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -974,7 +990,7 @@ impl<'vm> Item<'vm> {
             let bc =
                 BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
-            let eval_thread = self.vm.make_thread();
+            let mut eval_thread = self.vm.make_thread();
             eval_thread.run_bytecode(&bc, 0);
             let ty = ir.sig.output; // todo sub?
 
@@ -1014,7 +1030,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn adt_info(&self) -> &AdtInfo<'vm> {
-        let ItemKind::Adt{info,..} = &self.kind else {
+        let ItemKind::Adt { info, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -1031,30 +1047,40 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn set_adt_info(&self, new_info: AdtInfo<'vm>) {
-        let ItemKind::Adt{info,..} = &self.kind else {
+        let ItemKind::Adt { info, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
         info.set(new_info).ok();
     }
 
-    pub fn adt_tag(&self) -> AdtTag {
-        let ItemKind::Adt{tag,..} = &self.kind else {
+    pub fn adt_is_builtin(&self, check: BuiltinAdt) -> bool {
+        let ItemKind::Adt { builtin, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
-        *tag
+        builtin.get().copied() == Some(check)
+    }
+
+    pub fn adt_set_builtin(&self, new_builtin: BuiltinAdt) {
+        let ItemKind::Adt { builtin, .. } = &self.kind else {
+            panic!("item kind mismatch");
+        };
+        builtin.set(new_builtin).ok();
     }
 
     pub fn trait_set_builtin(&self, new_builtin: BuiltinTrait) {
-        let ItemKind::Trait{builtin,..} = &self.kind else {
+        let ItemKind::Trait { builtin, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
         builtin.set(new_builtin).ok();
     }
 
     pub fn trait_set_assoc_value_map(&self, new_map: AHashMap<ItemPath<'vm>, u32>) {
-        let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
+        let ItemKind::Trait {
+            assoc_value_map, ..
+        } = &self.kind
+        else {
             panic!("item kind mismatch");
         };
         assoc_value_map.set(new_map).ok();
@@ -1064,7 +1090,10 @@ impl<'vm> Item<'vm> {
         &self,
         pairs: &[(ItemPath, AssocValue<'vm>)],
     ) -> Vec<Option<AssocValue<'vm>>> {
-        let ItemKind::Trait{assoc_value_map,..} = &self.kind else {
+        let ItemKind::Trait {
+            assoc_value_map, ..
+        } = &self.kind
+        else {
             panic!("item kind mismatch");
         };
 
@@ -1084,7 +1113,7 @@ impl<'vm> Item<'vm> {
     }
 
     pub fn resolve_associated_ty(&self, subs: &SubList<'vm>) -> Type<'vm> {
-        let ItemKind::AssociatedType{virtual_info} = &self.kind else {
+        let ItemKind::AssociatedType { virtual_info } = &self.kind else {
             panic!("item kind mismatch");
         };
 
@@ -1157,7 +1186,7 @@ impl<'vm> Item<'vm> {
 
     /// Find a trait implementation for a given list of types.
     pub fn find_trait_impl(&self, for_tys: &SubList<'vm>) -> TraitImplResult<'vm> {
-        let ItemKind::Trait{builtin,..} = &self.kind else {
+        let ItemKind::Trait { builtin, .. } = &self.kind else {
             panic!("item kind mismatch");
         };
 
