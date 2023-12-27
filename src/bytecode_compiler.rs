@@ -1,4 +1,4 @@
-use crate::abi::POINTER_SIZE;
+use crate::abi::{CALL_ALIGN, POINTER_SIZE};
 use crate::builtins::compile_rust_intrinsic;
 use crate::bytecode_select;
 use crate::closure::FnTrait;
@@ -1000,6 +1000,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         };
                         self.lower_expr(*field, Some(field_local));
                     }
+
+                    // init the array's own drop flag
+                    self.local_init_leaf(dest);
 
                     dest
                 }
@@ -2560,7 +2563,7 @@ impl<'vm> CompilerStack<'vm> {
     }
 
     pub fn align_for_call(&mut self) -> Slot {
-        self.align(16);
+        self.align(CALL_ALIGN);
         Slot::new(self.top)
     }
 

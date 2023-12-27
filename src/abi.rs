@@ -18,6 +18,8 @@ impl PointerSize {
     }
 }
 
+pub const CALL_ALIGN: u32 = 16;
+
 const _: () = {
     if std::mem::size_of::<crate::vm::instr::Instr>() != 16 {
         panic!("bad Instr size");

@@ -556,7 +556,7 @@ fn write_exec_match() {
     Instr::Return => break,
     Instr::Skipped => panic!("encountered skipped instruction, this should never happen"),
     Instr::Error(msg) => panic!("interpreter error: {}",msg),
-    Instr::Debug(_) => (),
+    Instr::Debug(msg) => println!("interpreter debug: {}",msg),
     Instr::Alloc{out,size,align} => {
         let res = self.vm.alloc_bytes(*size as usize,*align as usize);
         write_stack(stack, *out, res);

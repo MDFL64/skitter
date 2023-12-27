@@ -186,21 +186,26 @@ impl<'vm> VMThread<'vm> {
     }
 
     fn local_init(&mut self, base: usize, n: u32) {
-        let offset = (n >> 8) as usize;
+        let offset = (n / 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
         let bit = n & 7;
         let mask = 1u8 << (bit as u8);
 
         if (*byte & mask) != 0 {
-            panic!("drop flag was initialized twice");
+            println!("{} {}", base, offset);
+            for b in self.drop_flags.iter() {
+                print!("{:b}:", *b);
+            }
+            println!();
+            panic!("drop flag was initialized twice ({})", n);
         }
 
         *byte |= mask;
     }
 
     fn local_move(&mut self, base: usize, n: u32) {
-        let offset = (n >> 8) as usize;
+        let offset = (n / 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
         let bit = n & 7;
@@ -220,7 +225,7 @@ impl<'vm> VMThread<'vm> {
         drops: &[(Slot, DropGlue<'vm>)],
         stack: *mut u8,
     ) {
-        let offset = (n >> 8) as usize;
+        let offset = (n / 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
         let bit = n & 7;
@@ -247,7 +252,7 @@ impl<'vm> VMThread<'vm> {
         drops: &[(Slot, DropGlue<'vm>)],
         stack: *mut u8,
     ) {
-        let offset = (n >> 8) as usize;
+        let offset = (n / 8) as usize;
         let byte = &mut self.drop_flags[base + offset];
 
         let bit = n & 7;

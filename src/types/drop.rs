@@ -3,6 +3,7 @@ use crate::{
     builtins::BuiltinAdt,
     bytecode_compiler::FunctionBytecode,
     bytecode_select,
+    ir::BinaryOp,
     items::{AdtInfo, Item},
     types::{Mutability, SubList, Type},
     variants::{VariantIndex, Variants},
@@ -139,9 +140,10 @@ impl<'vm> Type<'vm> {
                 | TypeKind::FunctionDef(..)
                 | TypeKind::Never => DropInfo::None,
 
-                TypeKind::Array(child, _) => {
+                TypeKind::Array(child, len) => {
                     if child.drop_info().is_drop() {
-                        panic!("array drop");
+                        let len = len.get_value() as u32;
+                        DropInfo::Leaf(DropGlue::for_array(vm, *child, len))
                     } else {
                         DropInfo::None
                     }
@@ -223,6 +225,7 @@ impl<'vm> DropGlue<'vm> {
         // temporary slot used to store field offsets
         // use POINTER_SIZE * 2 in case this type is unsized
         let member_slot = Slot::new(POINTER_SIZE.bytes() * 2);
+        assert!(member_slot.has_call_align());
 
         let mut code = Vec::new();
 
@@ -266,6 +269,70 @@ impl<'vm> DropGlue<'vm> {
         let bc = vm.alloc_bytecode(bc);
 
         let name = vm.alloc_path(&format!("<drop {}>", debug_name));
+
+        Self(vm.alloc_function(FunctionSource::RawBytecode(bc, name), SubList::empty()))
+    }
+
+    pub fn for_array(vm: &'vm VM<'vm>, elem_ty: Type<'vm>, len: u32) -> Self {
+        // TODO: make this dual purpose, compute len from slice len if omitted
+        let self_slot = Slot::new(0);
+        let i_slot = Slot::new(POINTER_SIZE.bytes() * 2);
+        let inc_slot = Slot::new(POINTER_SIZE.bytes() * 3);
+        let max_slot = Slot::new(POINTER_SIZE.bytes() * 4);
+        let test_slot = Slot::new(POINTER_SIZE.bytes() * 5);
+        let elem_slot = Slot::new(POINTER_SIZE.bytes() * 6);
+        assert!(elem_slot.has_call_align());
+
+        let elem_glue = elem_ty
+            .drop_info()
+            .glue()
+            .expect("array element missing glue");
+        let elem_size = elem_ty.layout().assert_size();
+
+        let usize_ty = vm.common_types().usize;
+
+        let mut code = Vec::new();
+        code.push(bytecode_select::literal(0, POINTER_SIZE.bytes(), i_slot));
+        code.push(bytecode_select::literal(
+            elem_size as _,
+            POINTER_SIZE.bytes(),
+            inc_slot,
+        ));
+        code.push(bytecode_select::literal(
+            (elem_size * len) as _,
+            POINTER_SIZE.bytes(),
+            max_slot,
+        ));
+        // loop body
+        code.push(bytecode_select::binary(BinaryOp::Lt, usize_ty).0(
+            test_slot, i_slot, max_slot,
+        ));
+        let loop_top = code.len();
+        code.push(Instr::Skipped);
+
+        let add = bytecode_select::binary(BinaryOp::Add, usize_ty).0;
+
+        code.push(add(elem_slot, self_slot, i_slot));
+
+        code.push(Instr::Call(elem_slot, elem_glue.function()));
+
+        code.push(add(i_slot, i_slot, inc_slot));
+
+        let loop_end = code.len();
+        let distance = (loop_end - loop_top + 1) as i32;
+        code.push(Instr::Jump(-distance));
+        code[loop_top] = Instr::JumpF(distance, test_slot);
+
+        code.push(Instr::Return);
+
+        let bc = FunctionBytecode {
+            code,
+            drops: Vec::new(),
+        };
+
+        let bc = vm.alloc_bytecode(bc);
+
+        let name = vm.alloc_path("<drop array>");
 
         Self(vm.alloc_function(FunctionSource::RawBytecode(bc, name), SubList::empty()))
     }

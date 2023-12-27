@@ -1,4 +1,4 @@
-use crate::types::DropBit;
+use crate::{abi::CALL_ALIGN, types::DropBit};
 
 use super::vm::Function;
 
@@ -31,6 +31,10 @@ impl Slot {
 
     pub fn offset_by(&self, offset: i32) -> Self {
         Self((self.0 as i32 + offset) as u32)
+    }
+
+    pub fn has_call_align(&self) -> bool {
+        self.0 % CALL_ALIGN == 0
     }
 }
 
