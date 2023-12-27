@@ -59,6 +59,7 @@ impl<'vm> DropInfo<'vm> {
         subs: &SubList<'vm>,
         adt_info: Option<&AdtInfo>,
         boxed_ty: Option<Type<'vm>>,
+        debug_name: &str,
     ) -> Self {
         let drop_fn = drop_fn.map(|drop_fn| drop_fn.func_mono(subs));
 
@@ -88,7 +89,7 @@ impl<'vm> DropInfo<'vm> {
                 assert!(adt_info.is_struct());
             }
 
-            let glue = DropGlue::new(vm, drop_fn, &fields, boxed_ty);
+            let glue = DropGlue::new(vm, drop_fn, &fields, boxed_ty, debug_name);
 
             if drop_fn.is_some() {
                 DropInfo::Leaf(glue)
@@ -145,6 +146,13 @@ impl<'vm> Type<'vm> {
                         DropInfo::None
                     }
                 }
+                TypeKind::Slice(child) => {
+                    if child.drop_info().is_drop() {
+                        panic!("slice drop");
+                    } else {
+                        DropInfo::None
+                    }
+                }
 
                 TypeKind::Tuple(fields) => {
                     let offsets = &self.layout().field_offsets;
@@ -157,6 +165,7 @@ impl<'vm> Type<'vm> {
                         &SubList::empty(),
                         None,
                         None,
+                        "tuple",
                     )
                 }
                 TypeKind::Closure(closure, subs) => {
@@ -186,6 +195,7 @@ impl<'vm> Type<'vm> {
                         &info.subs,
                         Some(adt_info),
                         boxed_ty,
+                        info.item.path.as_string(),
                     )
                 }
                 _ => panic!("drop info: {:?}", self),
@@ -200,6 +210,7 @@ impl<'vm> DropGlue<'vm> {
         drop_fn: Option<&'vm Function<'vm>>,
         fields: &[DropField<'vm>],
         boxed_ty: Option<Type<'vm>>,
+        debug_name: &str,
     ) -> Self {
         assert!(drop_fn.is_some() || fields.len() > 0);
 
@@ -254,7 +265,9 @@ impl<'vm> DropGlue<'vm> {
 
         let bc = vm.alloc_bytecode(bc);
 
-        Self(vm.alloc_function(FunctionSource::RawBytecode(bc), SubList::empty()))
+        let name = vm.alloc_path(&format!("<drop {}>", debug_name));
+
+        Self(vm.alloc_function(FunctionSource::RawBytecode(bc, name), SubList::empty()))
     }
 
     pub fn function(&self) -> &'vm Function<'vm> {

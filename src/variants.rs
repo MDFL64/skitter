@@ -20,7 +20,6 @@ impl VariantIndex {
 
 #[derive(Copy, Clone, Eq, PartialEq, Persist, Debug)]
 pub enum Discriminant {
-    None,
     Value(i128),
     NonZero,
 }
@@ -56,7 +55,6 @@ impl Discriminant {
 
     pub fn next(&self) -> Self {
         match self {
-            Self::None => panic!("attempt to get next for no discriminant"),
             Self::NonZero => panic!("attempt to get next for non-zero"),
             Self::Value(x) => Self::Value(*x + 1),
         }

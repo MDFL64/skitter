@@ -893,7 +893,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                             };*/
 
                             let dest = dest.unwrap_or_else(|| self.stack.alloc(expr_ty));
-
                             let source = self.lower_expr(*source, None);
 
                             // copy base
@@ -911,6 +910,9 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                                 ptr_size,
                                 dest.slot.offset_by(ptr_size as i32),
                             ));
+
+                            self.local_forget(source);
+                            self.local_drop_init(dest);
 
                             dest
                         }
@@ -2397,6 +2399,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
     fn local_init(&mut self, local: Local<'vm>) {
         if let Some(bits) = self.stack.drop_bits(local.drop_id) {
             self.out_bc.push(Instr::LocalInit(bits));
+        }
+    }
+
+    fn local_drop_init(&mut self, local: Local<'vm>) {
+        if let Some(bits) = self.stack.drop_bits(local.drop_id) {
+            self.out_bc.push(Instr::LocalDropInit(bits));
         }
     }
 

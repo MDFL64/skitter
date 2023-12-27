@@ -79,17 +79,8 @@ impl<'vm> VMThread<'vm> {
     pub fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
         let native = func.get_native();
 
-        if self.vm.cli_args.debug_trace_calls && !native.is_some() {
+        if self.vm.cli_args.debug_trace_calls {
             let mut call_depth = TRACE_CALL_DEPTH.lock().unwrap();
-
-            let (ir, inner_subs) = func.source.ir(&func.subs);
-
-            let ret_ty = ir.sig.output.sub(&inner_subs);
-
-            let mut arg_offset = ret_ty.layout().assert_size();
-
-            let arg_ptr = unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
-
             for _ in 0..*call_depth {
                 print!("  ");
             }
@@ -97,15 +88,28 @@ impl<'vm> VMThread<'vm> {
 
             print!("CALL {}( ", func.source.debug_name());
 
-            for (i, arg_ty) in ir.sig.inputs.iter().enumerate() {
-                let arg_ty = arg_ty.sub(&inner_subs);
-                let arg_layout = arg_ty.layout();
-                if i != 0 {
-                    print!(" , ");
+            if func.source.has_ir() && !native.is_some() {
+                let (ir, inner_subs) = func.source.ir(&func.subs);
+
+                let ret_ty = ir.sig.output.sub(&inner_subs);
+
+                let mut arg_offset = ret_ty.layout().assert_size();
+
+                let arg_ptr =
+                    unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
+
+                for (i, arg_ty) in ir.sig.inputs.iter().enumerate() {
+                    let arg_ty = arg_ty.sub(&inner_subs);
+                    let arg_layout = arg_ty.layout();
+                    if i != 0 {
+                        print!(" , ");
+                    }
+                    arg_offset = align(arg_offset, arg_layout.align);
+                    unsafe { print_value(arg_ty, arg_ptr.offset(arg_offset as isize), 0) }
+                    arg_offset += arg_layout.assert_size();
                 }
-                arg_offset = align(arg_offset, arg_layout.align);
-                unsafe { print_value(arg_ty, arg_ptr.offset(arg_offset as isize), 0) }
-                arg_offset += arg_layout.assert_size();
+            } else {
+                print!("[?]");
             }
             println!(" )");
         }
@@ -115,29 +119,33 @@ impl<'vm> VMThread<'vm> {
                 let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
                 native(stack);
             }
-            return;
+        } else {
+            // fetch bytecode
+            let bc = func.bytecode();
+            self.run_bytecode(bc, stack_offset);
         }
 
-        // fetch bytecode
-        let bc = func.bytecode();
-        self.run_bytecode(bc, stack_offset);
-
-        if self.vm.cli_args.debug_trace_calls && !native.is_some() {
+        if self.vm.cli_args.debug_trace_calls {
             let mut call_depth = TRACE_CALL_DEPTH.lock().unwrap();
-
-            let (ir, inner_subs) = func.source.ir(&func.subs);
-
-            let ret_ty = ir.sig.output.sub(&inner_subs);
-
-            let ret_ptr = unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
-
             *call_depth -= 1;
             for _ in 0..*call_depth {
                 print!("  ");
             }
 
             print!("RET  {} -> ", func.source.debug_name());
-            unsafe { print_value(ret_ty, ret_ptr, 0) }
+
+            if func.source.has_ir() && !native.is_some() {
+                let (ir, inner_subs) = func.source.ir(&func.subs);
+
+                let ret_ty = ir.sig.output.sub(&inner_subs);
+
+                let ret_ptr =
+                    unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
+
+                unsafe { print_value(ret_ty, ret_ptr, 0) }
+            } else {
+                print!("[?]");
+            }
             println!();
         }
     }
@@ -574,7 +582,7 @@ impl<'vm> VM<'vm> {
 pub enum FunctionSource<'vm> {
     Item(&'vm Item<'vm>),
     Closure(&'vm Closure<'vm>),
-    RawBytecode(&'vm FunctionBytecode<'vm>),
+    RawBytecode(&'vm FunctionBytecode<'vm>, &'vm str),
 }
 
 impl<'vm> FunctionSource<'vm> {
@@ -582,7 +590,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.vm,
             Self::Closure(closure) => closure.vm,
-            Self::RawBytecode(_) => panic!("raw bytecode has no vm"),
+            Self::RawBytecode(..) => panic!("raw bytecode has no vm"),
         }
     }
 
@@ -590,7 +598,7 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.ir(subs),
             Self::Closure(closure) => (closure.ir_base(), Cow::Borrowed(subs)),
-            Self::RawBytecode(_) => panic!("raw bytecode has no ir"),
+            Self::RawBytecode(..) => panic!("raw bytecode has no ir"),
         }
     }
 
@@ -598,7 +606,14 @@ impl<'vm> FunctionSource<'vm> {
         match self {
             Self::Item(item) => item.path.as_string(),
             Self::Closure(_) => "[closure]",
-            Self::RawBytecode(..) => "[raw bytecode, probably drop glue]",
+            Self::RawBytecode(_, name) => name,
+        }
+    }
+
+    pub fn has_ir(&self) -> bool {
+        match self {
+            Self::Item(..) | Self::Closure(..) => true,
+            Self::RawBytecode(..) => false,
         }
     }
 }
@@ -646,7 +661,7 @@ impl<'vm> Function<'vm> {
                 return bc;
             }
 
-            let bc = if let FunctionSource::RawBytecode(bc) = self.source {
+            let bc = if let FunctionSource::RawBytecode(bc, _) = self.source {
                 bc
             } else {
                 let vm = self.source.vm();
