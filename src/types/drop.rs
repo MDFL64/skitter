@@ -143,14 +143,14 @@ impl<'vm> Type<'vm> {
                 TypeKind::Array(child, len) => {
                     if child.drop_info().is_drop() {
                         let len = len.get_value() as u32;
-                        DropInfo::Leaf(DropGlue::for_array(vm, *child, len))
+                        DropInfo::Leaf(DropGlue::for_array(vm, *child, Some(len)))
                     } else {
                         DropInfo::None
                     }
                 }
                 TypeKind::Slice(child) => {
                     if child.drop_info().is_drop() {
-                        panic!("slice drop");
+                        DropInfo::Leaf(DropGlue::for_array(vm, *child, None))
                     } else {
                         DropInfo::None
                     }
@@ -273,9 +273,11 @@ impl<'vm> DropGlue<'vm> {
         Self(vm.alloc_function(FunctionSource::RawBytecode(bc, name), SubList::empty()))
     }
 
-    pub fn for_array(vm: &'vm VM<'vm>, elem_ty: Type<'vm>, len: u32) -> Self {
+    /// Builds drop glue for an array **OR** a slice, depending on whether the len is provided.
+    pub fn for_array(vm: &'vm VM<'vm>, elem_ty: Type<'vm>, len: Option<u32>) -> Self {
         // TODO: make this dual purpose, compute len from slice len if omitted
         let self_slot = Slot::new(0);
+        let self_meta_slot = Slot::new(POINTER_SIZE.bytes() * 1);
         let i_slot = Slot::new(POINTER_SIZE.bytes() * 2);
         let inc_slot = Slot::new(POINTER_SIZE.bytes() * 3);
         let max_slot = Slot::new(POINTER_SIZE.bytes() * 4);
@@ -298,11 +300,17 @@ impl<'vm> DropGlue<'vm> {
             POINTER_SIZE.bytes(),
             inc_slot,
         ));
-        code.push(bytecode_select::literal(
-            (elem_size * len) as _,
-            POINTER_SIZE.bytes(),
-            max_slot,
-        ));
+        if let Some(len) = len {
+            code.push(bytecode_select::literal(
+                (elem_size * len) as _,
+                POINTER_SIZE.bytes(),
+                max_slot,
+            ));
+        } else {
+            let (mul, _) = bytecode_select::binary(BinaryOp::Mul, usize_ty);
+            code.push(mul(max_slot, inc_slot, self_meta_slot));
+        }
+
         // loop body
         code.push(bytecode_select::binary(BinaryOp::Lt, usize_ty).0(
             test_slot, i_slot, max_slot,
@@ -310,7 +318,7 @@ impl<'vm> DropGlue<'vm> {
         let loop_top = code.len();
         code.push(Instr::Skipped);
 
-        let add = bytecode_select::binary(BinaryOp::Add, usize_ty).0;
+        let (add, _) = bytecode_select::binary(BinaryOp::Add, usize_ty);
 
         code.push(add(elem_slot, self_slot, i_slot));
 

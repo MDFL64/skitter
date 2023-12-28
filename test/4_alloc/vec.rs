@@ -1,4 +1,7 @@
 mod _builtin;
+mod _log_drop;
+
+use _log_drop::LogDrop;
 
 pub fn main() {
     {
@@ -22,5 +25,12 @@ pub fn main() {
 
         let bs = data.into_boxed_slice();
         _builtin::print_int(bs.len() as _);
+    }
+    {
+        let mut data = vec!(LogDrop("A"),LogDrop("B"),LogDrop("C"),LogDrop("D"),LogDrop("E"));
+        data.push(LogDrop("F"));
+        _builtin::print_int(data.len() as _);
+        /*data.pop();
+        _builtin::print_int(data.len() as _);*/
     }
 }
