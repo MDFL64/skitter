@@ -371,9 +371,10 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     dest
                 }
                 ExprKind::Assign(lhs, rhs) => {
+                    // RHS is evaluated first, this is consistent with rustc
+                    // sadly this probably requires extra copies
+                    // TODO optimize the trivial cases?
                     let rhs_local = self.lower_expr(*rhs, None);
-
-                    let assign_ty = self.expr_ty(*lhs);
 
                     match self.expr_to_place(*lhs) {
                         Place::Local(lhs_local) => {
@@ -1591,7 +1592,12 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         if !can_alias || sub_pattern.is_some() {
                             let ty = self.apply_subs(pat.ty);
                             let var = self.find_or_alloc_local(*local_id, ty);
-                            self.local_init_move(var, source);
+
+                            if let Some(instr) = bytecode_select::copy(var.slot, source.slot, ty) {
+                                self.out_bc.push(instr);
+                            }
+                            self.local_init(var);
+                            self.local_forget(source);
                         } else {
                             self.assert_local_undef(*local_id);
                             self.locals.push((*local_id, source));
@@ -1602,13 +1608,14 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                         // copy value from pointer
                         let ty = self.apply_subs(pat.ty);
                         let var = self.find_or_alloc_local(*local_id, ty);
-                        assert!(var.drop_id.is_none());
 
                         if let Some(instr) =
                             bytecode_select::copy_from_ptr(var.slot, ref_slot, ty, ref_offset)
                         {
                             self.out_bc.push(instr);
                         }
+                        self.local_init(var);
+                        // do we need to worry about the source???
                     }
                     (BindingMode::Ref, Place::Local(source)) => {
                         // ref to local
@@ -2333,23 +2340,6 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
 
     fn get_jump_offset(&mut self, other: usize) -> i32 {
         other as i32 - self.out_bc.len() as i32
-    }
-
-    /// Initializes a local by moving from a local.
-    fn local_init_move(&mut self, dst: Local<'vm>, src: Local<'vm>) {
-        assert_eq!(dst.ty, src.ty);
-
-        if let Some(instr) = bytecode_select::copy(dst.slot, src.slot, dst.ty) {
-            self.out_bc.push(instr);
-        }
-
-        if let Some(bits) = self.stack.drop_bits(src.drop_id) {
-            self.out_bc.push(Instr::LocalMove(bits));
-        }
-
-        if let Some(bits) = self.stack.drop_bits(dst.drop_id) {
-            self.out_bc.push(Instr::LocalInit(bits));
-        }
     }
 
     /// Moves a local to another local. The destination local may or may not be initialized.

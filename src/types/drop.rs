@@ -4,9 +4,9 @@ use crate::{
     bytecode_compiler::FunctionBytecode,
     bytecode_select,
     ir::BinaryOp,
-    items::{AdtInfo, Item},
+    items::{AdtInfo, AdtKind, Item},
     types::{Mutability, SubList, Type},
-    variants::{VariantIndex, Variants},
+    variants::{Discriminant, VariantIndex, Variants},
     vm::{
         instr::{Instr, Slot},
         Function, FunctionSource, VM,
@@ -58,7 +58,7 @@ impl<'vm> DropInfo<'vm> {
         field_types: &[Vec<Type<'vm>>],
         field_offsets: &Variants<Vec<u32>>,
         subs: &SubList<'vm>,
-        adt_info: Option<&AdtInfo>,
+        adt_info: Option<&AdtInfo<'vm>>,
         boxed_ty: Option<Type<'vm>>,
         debug_name: &str,
     ) -> Self {
@@ -84,13 +84,24 @@ impl<'vm> DropInfo<'vm> {
         }
 
         if fields.len() > 0 || drop_fn.is_some() {
-            if let Some(adt_info) = adt_info {
-                // TODO SKIP UNIONS
-                // TODO PASS *ENUM* DISCRIMINANTS TO DropGlue::new
-                assert!(adt_info.is_struct());
-            }
+            let disc_info = if let Some(adt_info) = adt_info {
+                match &adt_info.kind {
+                    AdtKind::Enum(enum_info) => {
+                        let disc_ty = enum_info.discriminant_internal;
+                        let discs = adt_info.variant_discriminants(vm);
+                        Some((disc_ty, discs))
+                    }
+                    AdtKind::Struct => None,
+                    AdtKind::Union => {
+                        // unions are skipped
+                        return DropInfo::None;
+                    }
+                }
+            } else {
+                None
+            };
 
-            let glue = DropGlue::new(vm, drop_fn, &fields, boxed_ty, debug_name);
+            let glue = DropGlue::new(vm, drop_fn, &fields, disc_info, boxed_ty, debug_name);
 
             if drop_fn.is_some() {
                 DropInfo::Leaf(glue)
@@ -211,6 +222,7 @@ impl<'vm> DropGlue<'vm> {
         vm: &'vm VM<'vm>,
         drop_fn: Option<&'vm Function<'vm>>,
         fields: &[DropField<'vm>],
+        disc_info: Option<(Type<'vm>, &Variants<Discriminant>)>,
         boxed_ty: Option<Type<'vm>>,
         debug_name: &str,
     ) -> Self {
@@ -222,9 +234,10 @@ impl<'vm> DropGlue<'vm> {
         // 3. performance -- i vaguely remember hearing that dealing with drop glue is expensive in rustc (i may be wrong but this makes sense)
 
         let self_slot = Slot::new(0);
-        // temporary slot used to store field offsets
-        // use POINTER_SIZE * 2 in case this type is unsized
-        let member_slot = Slot::new(POINTER_SIZE.bytes() * 2);
+        // slot used to store enum discriminants
+        let disc_slot = Slot::new(16);
+        // slot used to store field offsets and other temporaries
+        let member_slot = Slot::new(32);
         assert!(member_slot.has_call_align());
 
         let mut code = Vec::new();
@@ -244,20 +257,77 @@ impl<'vm> DropGlue<'vm> {
             code.push(Instr::Call(self_slot, drop_fn));
         }
 
-        for field in fields {
-            assert!(field.variant == VariantIndex::new(0));
-            code.push(Instr::PointerOffset2(
-                member_slot,
-                self_slot,
-                field.offset as i32,
-            ));
+        if let Some((disc_ty, disc_values)) = disc_info {
+            // load discriminant
+            code.push(bytecode_select::copy_from_ptr(disc_slot, self_slot, disc_ty, 0).unwrap());
 
-            let field_glue = field
-                .ty
-                .drop_info()
-                .glue()
-                .expect("drop field missing glue");
-            code.push(Instr::Call(member_slot, field_glue.function()));
+            let (eq, _) = bytecode_select::binary(BinaryOp::Eq, disc_ty);
+            let mut last_variant = None;
+            let mut last_jump = None;
+
+            for field in fields {
+                if last_variant != Some(field.variant) {
+                    last_variant = Some(field.variant);
+
+                    // finish previous case
+                    if let Some(last_jump) = last_jump {
+                        code.push(Instr::Return);
+                        let dist = code.len() - last_jump;
+                        code[last_jump] = Instr::JumpF(dist as i32, member_slot);
+                    }
+
+                    // start next case
+                    let disc_value = disc_values
+                        .get(field.variant)
+                        .value()
+                        .expect("todo nonzero discriminant");
+
+                    code.push(bytecode_select::literal(
+                        disc_value,
+                        disc_ty.layout().assert_size(),
+                        member_slot,
+                    ));
+                    code.push(eq(member_slot, member_slot, disc_slot));
+                    last_jump = Some(code.len());
+                    code.push(Instr::Skipped);
+                }
+
+                code.push(Instr::PointerOffset2(
+                    member_slot,
+                    self_slot,
+                    field.offset as i32,
+                ));
+
+                let field_glue = field
+                    .ty
+                    .drop_info()
+                    .glue()
+                    .expect("drop field missing glue");
+                code.push(Instr::Call(member_slot, field_glue.function()));
+            }
+
+            // finish previous case
+            if let Some(last_jump) = last_jump {
+                code.push(Instr::Return);
+                let dist = code.len() - last_jump;
+                code[last_jump] = Instr::JumpF(dist as i32, member_slot);
+            }
+        } else {
+            for field in fields {
+                assert!(field.variant == VariantIndex::new(0));
+                code.push(Instr::PointerOffset2(
+                    member_slot,
+                    self_slot,
+                    field.offset as i32,
+                ));
+
+                let field_glue = field
+                    .ty
+                    .drop_info()
+                    .glue()
+                    .expect("drop field missing glue");
+                code.push(Instr::Call(member_slot, field_glue.function()));
+            }
         }
         code.push(Instr::Return);
 
@@ -275,7 +345,6 @@ impl<'vm> DropGlue<'vm> {
 
     /// Builds drop glue for an array **OR** a slice, depending on whether the len is provided.
     pub fn for_array(vm: &'vm VM<'vm>, elem_ty: Type<'vm>, len: Option<u32>) -> Self {
-        // TODO: make this dual purpose, compute len from slice len if omitted
         let self_slot = Slot::new(0);
         let self_meta_slot = Slot::new(POINTER_SIZE.bytes() * 1);
         let i_slot = Slot::new(POINTER_SIZE.bytes() * 2);
