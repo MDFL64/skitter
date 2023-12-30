@@ -282,6 +282,8 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
                     {
                         self.out_bc.push(instr);
                     }
+                    // for copying from droppable consts:
+                    self.local_drop_init(dest);
 
                     dest
                 }

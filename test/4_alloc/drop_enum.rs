@@ -9,12 +9,6 @@ enum OptionDrop {
     None
 }
 
-impl Drop for OptionDrop {
-    fn drop(&mut self) {
-        _builtin::print_raw("dropping option\n");
-    }
-}
-
 pub fn main() {
     {
         let a = OptionDrop::None;
