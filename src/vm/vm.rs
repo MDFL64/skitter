@@ -70,7 +70,7 @@ pub struct VM<'vm> {
 static TRACE_CALL_DEPTH: Mutex<usize> = Mutex::new(0);
 
 pub struct VMThread<'vm> {
-    vm: &'vm VM<'vm>,
+    pub vm: &'vm VM<'vm>,
     stack: Vec<u128>,
     drop_flags: Vec<u8>,
 }
@@ -117,7 +117,7 @@ impl<'vm> VMThread<'vm> {
         if let Some(native) = native {
             unsafe {
                 let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
-                native(stack);
+                native(stack, self);
             }
         } else {
             // fetch bytecode
@@ -632,8 +632,10 @@ pub struct Function<'vm> {
     bytecode: AtomicPtr<FunctionBytecode<'vm>>,
 }
 
+pub type NativeFunc = unsafe extern "C" fn(*mut u8, &VMThread);
+
 impl<'vm> Function<'vm> {
-    pub fn get_native(&self) -> Option<unsafe fn(*mut u8)> {
+    pub fn get_native(&self) -> Option<NativeFunc> {
         let raw = self.native.load(Ordering::Acquire);
         if raw.is_null() {
             None
@@ -651,7 +653,7 @@ impl<'vm> Function<'vm> {
         }
     }
 
-    pub fn set_native(&self, native: unsafe fn(*mut u8, &'vm VM<'vm>)) {
+    pub fn set_native(&self, native: NativeFunc) {
         self.native
             .store(unsafe { std::mem::transmute(native) }, Ordering::Release);
     }

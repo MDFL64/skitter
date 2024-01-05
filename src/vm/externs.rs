@@ -1,11 +1,11 @@
-use super::{read_stack, write_stack};
+use super::{read_stack, write_stack, vm::{NativeFunc, VMThread}};
 use crate::{
     abi::POINTER_SIZE,
     items::{FunctionAbi, Item},
     vm::{instr::Slot, VM},
 };
 
-pub fn get_extern_fn(item: &Item) -> Option<for<'vm> unsafe fn(*mut u8, &'vm VM<'vm>)> {
+pub fn get_extern_fn<'vm>(item: &Item<'vm>) -> Option<NativeFunc> {
     let path = item.path.as_string();
     if path.starts_with("::_builtin::") {
         // hack for skitter builtins, should be removed at some point in the future
@@ -48,59 +48,59 @@ pub fn get_extern_static(item: &Item) -> Option<*mut u8> {
     }
 }
 
-unsafe fn builtin_print_int(stack: *mut u8, _vm: &VM) {
+unsafe extern "C" fn builtin_print_int<'vm>(stack: *mut u8, _thread: &VMThread<'vm>) {
     let x: i128 = read_stack(stack, Slot::new(0));
     println!("{}", x);
 }
 
-unsafe fn builtin_print_uint<'vm>(stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_print_uint<'vm>(stack: *mut u8, _thread: &VMThread<'vm>) {
     let x: u128 = read_stack(stack, Slot::new(0));
     println!("{}", x);
 }
 
-unsafe fn builtin_print_float<'vm>(stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_print_float<'vm>(stack: *mut u8, _thread: &VMThread) {
     let x: f64 = read_stack(stack, Slot::new(0));
     println!("{}", x);
 }
 
-unsafe fn builtin_print_bool<'vm>(stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_print_bool<'vm>(stack: *mut u8, _thread: &VMThread) {
     let x: bool = read_stack(stack, Slot::new(0));
     println!("{}", x);
 }
 
-unsafe fn builtin_print_char<'vm>(stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_print_char<'vm>(stack: *mut u8, _thread: &VMThread) {
     let x: char = read_stack(stack, Slot::new(0));
     println!("{}", x);
 }
 
-unsafe fn builtin_print_raw<'vm>(stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_print_raw<'vm>(stack: *mut u8, _thread: &VMThread) {
     let x: &str = read_stack(stack, Slot::new(0));
     print!("{}", x);
 }
 
 static BUILTIN_ALLOC_DUMMY: u8 = 0;
 
-unsafe fn builtin_alloc<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_alloc<'vm>(stack: *mut u8, thread: &VMThread) {
     let ptr_size = POINTER_SIZE.bytes();
     let size: usize = read_stack(stack, Slot::new(ptr_size));
     let align: usize = read_stack(stack, Slot::new(ptr_size * 2));
 
-    let res = vm.alloc_bytes(size, align);
+    let res = thread.vm.alloc_bytes(size, align);
 
     write_stack(stack, Slot::new(0), res);
 }
 
-unsafe fn builtin_alloc_zeroed<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_alloc_zeroed<'vm>(stack: *mut u8, thread: &VMThread) {
     let ptr_size = POINTER_SIZE.bytes();
     let size: usize = read_stack(stack, Slot::new(ptr_size));
     let align: usize = read_stack(stack, Slot::new(ptr_size * 2));
 
-    let res = vm.alloc_bytes_zeroed(size, align);
+    let res = thread.vm.alloc_bytes_zeroed(size, align);
 
     write_stack(stack, Slot::new(0), res);
 }
 
-unsafe fn builtin_realloc<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_realloc<'vm>(stack: *mut u8, thread: &VMThread) {
     let ptr_size = POINTER_SIZE.bytes();
 
     let ptr: *mut u8 = read_stack(stack, Slot::new(ptr_size));
@@ -108,21 +108,21 @@ unsafe fn builtin_realloc<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
     let align: usize = read_stack(stack, Slot::new(ptr_size * 3));
     let new_size: usize = read_stack(stack, Slot::new(ptr_size * 4));
 
-    let res = vm.realloc_bytes(ptr, old_size, align, new_size);
+    let res = thread.vm.realloc_bytes(ptr, old_size, align, new_size);
 
     write_stack(stack, Slot::new(0), res);
 }
 
-unsafe fn builtin_free<'vm>(stack: *mut u8, vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_free<'vm>(stack: *mut u8, thread: &VMThread) {
     let ptr_size = POINTER_SIZE.bytes();
 
     let ptr: *mut u8 = read_stack(stack, Slot::new(0));
     let size: usize = read_stack(stack, Slot::new(ptr_size));
     let align: usize = read_stack(stack, Slot::new(ptr_size * 2));
 
-    vm.free_bytes(ptr, size, align);
+    thread.vm.free_bytes(ptr, size, align);
 }
 
-unsafe fn builtin_panic<'vm>(_stack: *mut u8, _vm: &'vm VM<'vm>) {
+unsafe extern "C" fn builtin_panic<'vm>(_stack: *mut u8, _thread: &VMThread) {
     panic!("skitter panic?");
 }
