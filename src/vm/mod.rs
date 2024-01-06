@@ -2,7 +2,7 @@ mod externs;
 pub mod instr;
 mod vm;
 
-pub use vm::{Function, FunctionSource, VM};
+pub use vm::{Function, FunctionSource, VM, VMThread, NativeFunc};
 
 use self::instr::Slot;
 

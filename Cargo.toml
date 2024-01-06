@@ -16,6 +16,7 @@ rustc_private = true
 
 [dependencies]
 
+# For filenames.
 md5 = "0.7.0"
 base64 = "0.21.2"
 
@@ -23,11 +24,18 @@ colored = "2.0.4"
 clap = { version = "4.2.4", features = ["derive"] }
 colosseum = "0.2.2"
 
+# Faster hashmaps
 ahash = "0.8.3"
+
+# Does not actually seem to help.
 #mimalloc = { version = "0.1.37", default-features = false }
 
+# Macros
 skitter-macro = { path = "./crates/skitter-macro" }
 paste = "1.0.14"
+
+# simple JIT
+dynasmrt = "2.0.0"
 
 [profile.release]
 debug = true

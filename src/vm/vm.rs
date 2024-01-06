@@ -17,6 +17,7 @@ use crate::items::Item;
 use crate::items::ItemPath;
 use crate::rustc_worker::RustCWorker;
 use crate::rustc_worker::RustCWorkerConfig;
+use crate::simple_jit;
 use crate::types::CommonTypes;
 use crate::types::DropGlue;
 use crate::types::ItemWithSubs;
@@ -76,8 +77,14 @@ pub struct VMThread<'vm> {
 }
 
 impl<'vm> VMThread<'vm> {
-    pub fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
-        let native = func.get_native();
+    pub extern "C" fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
+
+        let native = if self.vm.cli_args.jit {
+            let res = func.compile_native();
+            Some(res.expect("compile failed"))
+        } else {
+            func.get_native()
+        };
 
         if self.vm.cli_args.debug_trace_calls {
             let mut call_depth = TRACE_CALL_DEPTH.lock().unwrap();
@@ -660,6 +667,18 @@ impl<'vm> Function<'vm> {
 
     pub fn set_bytecode(&self, bc: &'vm FunctionBytecode<'vm>) {
         self.bytecode.store(bc as *const _ as _, Ordering::Release);
+    }
+
+    fn compile_native(&self) -> Result<NativeFunc,String> {
+        if let Some(native) = self.get_native() {
+            Ok(native)
+        } else {
+            let res = simple_jit::compile(self.bytecode());
+            if let Ok(native) = res {
+                self.set_native(native);
+            }
+            res
+        }
     }
 
     fn bytecode(&self) -> &'vm FunctionBytecode<'vm> {

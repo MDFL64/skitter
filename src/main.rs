@@ -38,6 +38,7 @@ mod persist;
 mod persist_header;
 mod profiler;
 mod rustc_worker;
+mod simple_jit;
 mod test;
 mod types;
 mod value_debug;

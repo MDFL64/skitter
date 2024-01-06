@@ -25,6 +25,10 @@ pub struct CliArgs {
     #[clap(long)]
     pub save: bool,
 
+    /// Compile bytecode to machine code.
+    #[clap(long, short)]
+    pub jit: bool,
+
     /// Continue the same action in a loop, forever, or until an error is encountered.
     #[clap(long)]
     pub debug_repeat: bool,
