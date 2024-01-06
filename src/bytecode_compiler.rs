@@ -13,7 +13,6 @@ use crate::types::{
 };
 use crate::variants::VariantIndex;
 use crate::vm::instr::Instr;
-use crate::vm::VM;
 use crate::vm::{self, instr::Slot};
 
 pub struct BytecodeCompiler<'vm, 'f> {
@@ -181,7 +180,7 @@ impl<'vm, 'f> BytecodeCompiler<'vm, 'f> {
         };
 
         let mut const_thread = vm.make_thread();
-        const_thread.run_bytecode(&bc, 0);
+        const_thread.run_bytecode_root(&bc);
 
         match place {
             Place::Local(local) => {

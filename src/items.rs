@@ -966,7 +966,7 @@ impl<'vm> Item<'vm> {
                 BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
             let mut eval_thread = self.vm.make_thread();
-            eval_thread.run_bytecode(&bc, 0);
+            eval_thread.run_bytecode_root(&bc);
             let ty = ir.sig.output; // todo sub?
 
             let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);
@@ -991,7 +991,7 @@ impl<'vm> Item<'vm> {
                 BytecodeCompiler::compile(self.vm, &ir, &new_subs, self.path.as_string(), subs);
 
             let mut eval_thread = self.vm.make_thread();
-            eval_thread.run_bytecode(&bc, 0);
+            eval_thread.run_bytecode_root(&bc);
             let ty = ir.sig.output; // todo sub?
 
             let eval_bytes = eval_thread.copy_result(0, ty.layout().assert_size() as usize);

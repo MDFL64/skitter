@@ -94,6 +94,10 @@ fn run(args: &cli::CliArgs) {
         if args.debug_local_impls {
             global_args.push(OsString::from("--debug-local-impls"));
         }
+        if args.jit {
+            global_args.push(OsString::from("--jit"));
+        }
+
         test::test(file_name, global_args);
     }
 
@@ -131,7 +135,7 @@ fn run(args: &cli::CliArgs) {
     let main_fn = main_item.func_mono(&SubList { list: Vec::new() });
 
     let mut thread = vm.make_thread();
-    thread.call(&main_fn, 0);
+    thread.call_root(&main_fn);
 }
 
 fn get_lib(vm: &'static VM, name: &str) -> ExternCrate {

@@ -133,7 +133,7 @@ impl<'vm> IRFunction<'vm> {
         let bc = BytecodeCompiler::compile(vm, self, subs, "<const block>", subs);
 
         let mut eval_thread = vm.make_thread();
-        eval_thread.run_bytecode(&bc, 0);
+        eval_thread.run_bytecode_root(&bc);
 
         let ty = self.sig.output; // todo sub?
 

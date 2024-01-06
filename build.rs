@@ -461,12 +461,12 @@ fn write_exec_match() {
             continue;
         }
     }
-    Instr::Call(base,func) => {
-        self.call(func,stack_offset + base.index() as u32);
+    Instr::Call(frame,func) => {
+        self.call(func,stack.add(frame.index()));
     }
     Instr::CallPtr{ frame, func_ptr } => {
         let func: &Function = read_stack(stack, *func_ptr);
-        self.call(func,stack_offset + frame.index() as u32);
+        self.call(func,stack.add(frame.index()));
     }
     Instr::VTableFunc(out,arg,index) => {
         let vtable: &VTable = read_stack(stack, *arg);

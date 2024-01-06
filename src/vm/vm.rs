@@ -77,11 +77,20 @@ pub struct VMThread<'vm> {
 }
 
 impl<'vm> VMThread<'vm> {
-    pub extern "C" fn call(&mut self, func: &Function<'vm>, stack_offset: u32) {
+    pub fn call_root(&mut self, func: &Function<'vm>) {
+        let stack_ptr = self.stack.as_ptr() as *mut u8;
+        self.call(func, stack_ptr);
+    }
 
+    pub fn run_bytecode_root(&mut self, func: &FunctionBytecode<'vm>) {
+        let stack_ptr = self.stack.as_ptr() as *mut u8;
+        self.run_bytecode(func, stack_ptr);
+    }
+
+    pub extern "C" fn call(&mut self, func: &Function<'vm>, stack_ptr: *mut u8) {
         let native = if self.vm.cli_args.jit {
             let res = func.compile_native();
-            Some(res.expect("compile failed"))
+            Some(res.expect("jit failed"))
         } else {
             func.get_native()
         };
@@ -102,9 +111,6 @@ impl<'vm> VMThread<'vm> {
 
                 let mut arg_offset = ret_ty.layout().assert_size();
 
-                let arg_ptr =
-                    unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
-
                 for (i, arg_ty) in ir.sig.inputs.iter().enumerate() {
                     let arg_ty = arg_ty.sub(&inner_subs);
                     let arg_layout = arg_ty.layout();
@@ -112,7 +118,7 @@ impl<'vm> VMThread<'vm> {
                         print!(" , ");
                     }
                     arg_offset = align(arg_offset, arg_layout.align);
-                    unsafe { print_value(arg_ty, arg_ptr.offset(arg_offset as isize), 0) }
+                    unsafe { print_value(arg_ty, stack_ptr.offset(arg_offset as isize), 0) }
                     arg_offset += arg_layout.assert_size();
                 }
             } else {
@@ -123,13 +129,12 @@ impl<'vm> VMThread<'vm> {
 
         if let Some(native) = native {
             unsafe {
-                let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
-                native(stack, self);
+                native(stack_ptr, self);
             }
         } else {
             // fetch bytecode
             let bc = func.bytecode();
-            self.run_bytecode(bc, stack_offset);
+            self.run_bytecode(bc, stack_ptr);
         }
 
         if self.vm.cli_args.debug_trace_calls {
@@ -146,10 +151,7 @@ impl<'vm> VMThread<'vm> {
 
                 let ret_ty = ir.sig.output.sub(&inner_subs);
 
-                let ret_ptr =
-                    unsafe { (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize) };
-
-                unsafe { print_value(ret_ty, ret_ptr, 0) }
+                unsafe { print_value(ret_ty, stack_ptr, 0) }
             } else {
                 print!("[?]");
             }
@@ -157,7 +159,7 @@ impl<'vm> VMThread<'vm> {
         }
     }
 
-    pub fn run_bytecode(&mut self, func: &FunctionBytecode<'vm>, stack_offset: u32) {
+    pub fn run_bytecode(&mut self, func: &FunctionBytecode<'vm>, stack: *mut u8) {
         let drops_base = self.drop_flags.len();
         if func.drops.len() > 0 {
             let bytes = (func.drops.len() - 1) / 8 + 1;
@@ -166,7 +168,6 @@ impl<'vm> VMThread<'vm> {
 
         unsafe {
             let mut pc = 0;
-            let stack = (self.stack.as_ptr() as *mut u8).offset(stack_offset as isize);
 
             loop {
                 let instr = &func.code[pc];
@@ -248,7 +249,7 @@ impl<'vm> VMThread<'vm> {
             let mut drop_thread = self.vm.make_thread();
             write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
 
-            drop_thread.call(glue.function(), 0);
+            drop_thread.call_root(glue.function());
         }
     }
 
@@ -273,7 +274,7 @@ impl<'vm> VMThread<'vm> {
             let mut drop_thread = self.vm.make_thread();
             write_stack(drop_thread.stack.as_mut_ptr() as _, Slot::new(0), slot_ptr);
 
-            drop_thread.call(glue.function(), 0);
+            drop_thread.call_root(glue.function());
         } else {
             *byte |= mask;
         }
@@ -669,7 +670,7 @@ impl<'vm> Function<'vm> {
         self.bytecode.store(bc as *const _ as _, Ordering::Release);
     }
 
-    fn compile_native(&self) -> Result<NativeFunc,String> {
+    fn compile_native(&self) -> Result<NativeFunc, String> {
         if let Some(native) = self.get_native() {
             Ok(native)
         } else {

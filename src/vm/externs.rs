@@ -1,4 +1,8 @@
-use super::{read_stack, write_stack, vm::{NativeFunc, VMThread}};
+use super::{
+    read_stack,
+    vm::{NativeFunc, VMThread},
+    write_stack,
+};
 use crate::{
     abi::POINTER_SIZE,
     items::{FunctionAbi, Item},
