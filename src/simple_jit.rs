@@ -9,9 +9,12 @@ static mut OUT: i32 = 0;
 
 // CALLEE-SAVED: r12, r13, r14, r15, rbx, rsp, rbp
 pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, String> {
+    // must be 8 mod 16 to maintain alignment
+    const FRAME_SIZE: i32 = 0x28;
+
     let mut ops = dynasmrt::x64::Assembler::new().unwrap();
     dynasm!(ops
-        ; sub rsp, 0x20
+        ; sub rsp, FRAME_SIZE
         ; mov [rsp + 8], rdi    // stack pointer
         ; mov [rsp + 16], rsi   // thread
     );
@@ -31,9 +34,20 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
             ; =>*label
         );
         match bc {
+            Instr::I8_Const(slot, n) => {
+                dynasm!(ops
+                    ; mov BYTE [rdi + slot.index() as i32], *n
+                );
+            }
             Instr::I32_Const(slot, n) => {
                 dynasm!(ops
                     ; mov DWORD [rdi + slot.index() as i32], *n
+                );
+            }
+            Instr::I64_Const(slot, n) => {
+                dynasm!(ops
+                    ; mov rax, QWORD *n
+                    ; mov [rdi + slot.index() as i32], rax
                 );
             }
             Instr::I32_Neg(dst, src) => {
@@ -188,12 +202,87 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                     ; mov [rdi + dst.index() as i32], eax
                 );
             }
+            Instr::MovSS8(dst, src) => {
+                dynasm!(ops
+                    ; mov rax, [rdi + src.index() as i32]
+                    ; mov [rdi + dst.index() as i32], rax
+                );
+            }
             Instr::MovSS16(dst, src) => {
                 dynasm!(ops
                     ; mov rax, [rdi + src.index() as i32]
                     ; mov [rdi + dst.index() as i32], rax
                     ; mov rax, [rdi + src.index() as i32 + 8]
                     ; mov [rdi + dst.index() as i32 + 8], rax
+                );
+            }
+            Instr::MovSS1N(dst, src, n) => {
+                assert!(*n < 8);
+                for i in 0..(*n as i32) {
+                    dynasm!(ops
+                        ; mov al, [rdi + src.index() as i32 + i]
+                        ; mov [rdi + dst.index() as i32 + i], al
+                    );
+                }
+            }
+            Instr::MovSS4N(dst, src, n) => {
+                assert!(*n < 8);
+                for i in 0..(*n as i32) {
+                    dynasm!(ops
+                        ; mov eax, [rdi + src.index() as i32 + i*4]
+                        ; mov [rdi + dst.index() as i32 + i*4], eax
+                    );
+                }
+            }
+            Instr::MovSS8N(dst, src, n) => {
+                assert!(*n < 8);
+                for i in 0..(*n as i32) {
+                    dynasm!(ops
+                        ; mov rax, [rdi + src.index() as i32 + i*8]
+                        ; mov [rdi + dst.index() as i32 + i*8], rax
+                    );
+                }
+            }
+            // copy TO pointer
+            Instr::MovPS1(dst, src, offset) => {
+                dynasm!(ops
+                    ; mov al, [rdi + src.index() as i32]
+                    ; mov rcx, [rdi + dst.index() as i32]
+                    ; mov [rcx + *offset], al
+                );
+            }
+            // copy FROM pointer
+            Instr::MovSP1(dst, src, offset) => {
+                dynasm!(ops
+                    ; mov rcx, [rdi + src.index() as i32]
+                    ; mov al, [rcx + *offset]
+                    ; mov [rdi + dst.index() as i32], al
+                );
+            }
+            Instr::MovSP4N(dst, src, offset, n) => {
+                assert!(*n < 8);
+                dynasm!(ops
+                    ; mov rcx, [rdi + src.index() as i32]
+                );
+                for i in 0..(*n as i32) {
+                    let offset_i = i * 4 + *offset as i32;
+                    dynasm!(ops
+                        ; mov eax, [rcx + offset_i]
+                        ; mov [rdi + dst.index() as i32 + offset_i], eax
+                    );
+                }
+            }
+            Instr::SlotAddr(dst, src) => {
+                dynasm!(ops
+                    ; lea rax, [rdi + src.index() as i32]
+                    ; mov [rdi + dst.index() as i32], rax
+                );
+            }
+            Instr::PointerOffset2(dst, src, n) => {
+                dynasm!(ops
+                    ; mov rax, [rdi + src.index() as i32]
+                    ; add rax, *n
+                    ; mov [rdi + dst.index() as i32], eax
                 );
             }
             Instr::Call(base, func) => {
@@ -216,7 +305,7 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
             }
             Instr::Return => {
                 dynasm!(ops
-                    ; add rsp, 0x20
+                    ; add rsp, FRAME_SIZE
                     ; ret
                 );
             }
@@ -234,6 +323,14 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                     ; jz =>target
                 );
             }
+            Instr::JumpT(offset, cond) => {
+                let target = labels[(pc as i32 + *offset) as usize];
+                dynasm!(ops
+                    ; mov al, [rdi + cond.index() as i32]
+                    ; test al, al
+                    ; jnz =>target
+                );
+            }
             _ => return Err(format!("nyi: {:?}", bc)),
         }
     }
@@ -246,11 +343,11 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
     let buf = ops.finalize().unwrap();
 
     /*{
-        print!("code: ");
+        eprint!("code: ");
         for x in buf.iter() {
-            print!("{:02x}",x);
+            eprint!("{:02x}",x);
         }
-        println!();
+        eprintln!();
     }*/
 
     let ptr = buf.as_ptr();
