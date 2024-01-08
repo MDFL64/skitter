@@ -104,7 +104,7 @@ impl<'vm> VMThread<'vm> {
 
             print!("CALL {}( ", func.source.debug_name());
 
-            if func.source.has_ir() && !native.is_some() {
+            if func.source.has_ir() {
                 let (ir, inner_subs) = func.source.ir(&func.subs);
 
                 let ret_ty = ir.sig.output.sub(&inner_subs);
@@ -146,7 +146,7 @@ impl<'vm> VMThread<'vm> {
 
             print!("RET  {} -> ", func.source.debug_name());
 
-            if func.source.has_ir() && !native.is_some() {
+            if func.source.has_ir() {
                 let (ir, inner_subs) = func.source.ir(&func.subs);
 
                 let ret_ty = ir.sig.output.sub(&inner_subs);
@@ -625,7 +625,8 @@ impl<'vm> FunctionSource<'vm> {
 
     pub fn has_ir(&self) -> bool {
         match self {
-            Self::Item(..) | Self::Closure(..) => true,
+            Self::Item(item) => item.func_has_ir(),
+            Self::Closure(..) => true,
             Self::RawBytecode(..) => false,
         }
     }

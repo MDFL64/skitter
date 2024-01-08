@@ -240,6 +240,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 ctor_for,
                 ir,
                 closures,
+                has_ir,
                 ..
             } => {
                 writer.write_byte('f' as u8);
@@ -247,6 +248,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 virtual_info.persist_write(writer);
                 ctor_for.map(|(x, y)| (x.0, y)).persist_write(writer);
                 extern_name.persist_write(writer);
+                has_ir.persist_write(writer);
 
                 let ir_block = write_item_ir(ir, closures, writer);
 
@@ -322,6 +324,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                 let virtual_info = Option::<VirtualInfo>::persist_read(reader);
                 let ctor_for = Persist::persist_read(reader);
                 let extern_name = Persist::persist_read(reader);
+                let has_ir = Persist::persist_read(reader);
 
                 let kind = ItemKind::Function {
                     ir: Default::default(),
@@ -330,6 +333,7 @@ impl<'vm> Persist<'vm> for Item<'vm> {
                     extern_name,
                     ctor_for,
                     closures: Default::default(),
+                    has_ir
                 };
                 ir = reader.read_byte_slice();
                 kind
@@ -454,6 +458,7 @@ pub enum ItemKind<'vm> {
         ctor_for: Option<(ItemId, VariantIndex)>,
         extern_name: OnceLock<(FunctionAbi, String)>,
         closures: Mutex<AHashMap<&'vm str, ClosureRef<'vm>>>,
+        has_ir: bool
     },
     /// Constants operate very similarly to functions, but are evaluated
     /// greedily when encountered in IR and converted directly to values.
@@ -677,6 +682,7 @@ impl<'vm> ItemKind<'vm> {
             extern_name: OnceLock::new(),
             ctor_for: None,
             closures: Default::default(),
+            has_ir: true
         }
     }
 
@@ -691,6 +697,7 @@ impl<'vm> ItemKind<'vm> {
             extern_name: OnceLock::new(),
             ctor_for: None,
             closures: Default::default(),
+            has_ir: true
         }
     }
 
@@ -702,6 +709,7 @@ impl<'vm> ItemKind<'vm> {
             extern_name: (abi, name).into(),
             ctor_for: None,
             closures: Default::default(),
+            has_ir: false
         }
     }
 
@@ -713,6 +721,7 @@ impl<'vm> ItemKind<'vm> {
             extern_name: Default::default(),
             ctor_for: Some((adt_id, variant)),
             closures: Default::default(),
+            has_ir: true
         }
     }
 
@@ -880,6 +889,15 @@ impl<'vm> Item<'vm> {
         let (ir, new_subs) = self.ir(subs);
 
         ir.sig.sub(&new_subs)
+    }
+
+    pub fn func_has_ir(&self) -> bool {
+        match &self.kind {
+            ItemKind::Function { has_ir, .. } => {
+                *has_ir
+            }
+            _ => panic!("item kind mismatch"),
+        }
     }
 
     /// Get the IR for a function OR a constant. Subs are used to find specialized IR for trait items.

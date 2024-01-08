@@ -67,9 +67,15 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
             Instr::I32_Add(dst, lhs, rhs) => {
                 dynasm!(ops
                     ; mov eax, [rdi + lhs.index() as i32]
-                    ; mov ecx, [rdi + rhs.index() as i32]
-                    ; add eax, ecx
+                    ; add eax, [rdi + rhs.index() as i32]
                     ; mov [rdi + dst.index() as i32], eax
+                );
+            }
+            Instr::I64_Add(dst, lhs, rhs) => {
+                dynasm!(ops
+                    ; mov rax, [rdi + lhs.index() as i32]
+                    ; add rax, [rdi + rhs.index() as i32]
+                    ; mov [rdi + dst.index() as i32], rax
                 );
             }
             Instr::I32_Sub(dst, lhs, rhs) => {
@@ -91,8 +97,7 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
             Instr::I32_And(dst, lhs, rhs) => {
                 dynasm!(ops
                     ; mov eax, [rdi + lhs.index() as i32]
-                    ; mov ecx, [rdi + rhs.index() as i32]
-                    ; and eax, ecx
+                    ; and eax, [rdi + rhs.index() as i32]
                     ; mov [rdi + dst.index() as i32], eax
                 );
             }
@@ -167,8 +172,7 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
             Instr::I32_S_Lt(dst, lhs, rhs) => {
                 dynasm!(ops
                     ; mov eax, [rdi + lhs.index() as i32]
-                    ; mov ecx, [rdi + rhs.index() as i32]
-                    ; sub eax, ecx
+                    ; sub eax, [rdi + rhs.index() as i32]
                     ; setl al
                     ; mov [rdi + dst.index() as i32], al
                 );
@@ -188,6 +192,46 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                     ; mov [rdi + dst.index() as i32], rax
                     ; sar rax, 63
                     ; mov [rdi + dst.index() as i32 + 8], rax
+                );
+            }
+            Instr::I64_U_Widen_8(dst, src) => {
+                dynasm!(ops
+                    ; movzx rax, BYTE [rdi + src.index() as i32]
+                    ; mov [rdi + dst.index() as i32], rax
+                );
+            }
+            Instr::I8_U_Lt(dst, lhs, rhs) => {
+                dynasm!(ops
+                    ; mov al, [rdi + lhs.index() as i32]
+                    ; mov cl, [rdi + rhs.index() as i32]
+                    ; sub al, cl
+                    ; setb al
+                    ; mov [rdi + dst.index() as i32], al
+                );
+            }
+            Instr::I8_U_LtEq(dst, lhs, rhs) => {
+                dynasm!(ops
+                    ; mov al, [rdi + lhs.index() as i32]
+                    ; mov cl, [rdi + rhs.index() as i32]
+                    ; sub al, cl
+                    ; setbe al
+                    ; mov [rdi + dst.index() as i32], al
+                );
+            }
+            Instr::I64_U_Lt(dst, lhs, rhs) => {
+                dynasm!(ops
+                    ; mov rax, [rdi + lhs.index() as i32]
+                    ; mov rcx, [rdi + rhs.index() as i32]
+                    ; sub rcx, rcx
+                    ; setb al
+                    ; mov [rdi + dst.index() as i32], al
+                );
+            }
+            Instr::Bool_Not(dst, src) => {
+                dynasm!(ops
+                    ; mov al, [rdi + src.index() as i32]
+                    ; xor al, 1
+                    ; mov [rdi + dst.index() as i32], al
                 );
             }
             Instr::MovSS1(dst, src) => {
@@ -272,6 +316,19 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                     );
                 }
             }
+            Instr::MovSP8N(dst, src, offset, n) => {
+                assert!(*n < 8);
+                dynasm!(ops
+                    ; mov rcx, [rdi + src.index() as i32]
+                );
+                for i in 0..(*n as i32) {
+                    let offset_i = i * 8 + *offset as i32;
+                    dynasm!(ops
+                        ; mov rax, [rcx + offset_i]
+                        ; mov [rdi + dst.index() as i32 + offset_i], rax
+                    );
+                }
+            }
             Instr::SlotAddr(dst, src) => {
                 dynasm!(ops
                     ; lea rax, [rdi + src.index() as i32]
@@ -282,7 +339,7 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                 dynasm!(ops
                     ; mov rax, [rdi + src.index() as i32]
                     ; add rax, *n
-                    ; mov [rdi + dst.index() as i32], eax
+                    ; mov [rdi + dst.index() as i32], rax
                 );
             }
             Instr::Call(base, func) => {
@@ -331,6 +388,15 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
                     ; jnz =>target
                 );
             }
+            Instr::I8_U_OverflowingAdd(dst,lhs,rhs) => {
+                dynasm!(ops
+                    ; mov al, [rdi + lhs.index() as i32]
+                    ; add al, [rdi + rhs.index() as i32]
+                    ; mov [rdi + dst.index() as i32], al
+                    ; setc al
+                    ; mov [rdi + dst.index() as i32 + 1], al
+                );
+            }
             _ => return Err(format!("nyi: {:?}", bc)),
         }
     }
@@ -342,13 +408,13 @@ pub fn compile<'vm>(bytecode: &'vm FunctionBytecode<'vm>) -> Result<NativeFunc, 
 
     let buf = ops.finalize().unwrap();
 
-    /*{
+    {
         eprint!("code: ");
         for x in buf.iter() {
             eprint!("{:02x}",x);
         }
         eprintln!();
-    }*/
+    }
 
     let ptr = buf.as_ptr();
     std::mem::forget(buf);

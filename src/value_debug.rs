@@ -2,7 +2,7 @@ use crate::{
     abi::POINTER_SIZE,
     items::AdtKind,
     types::{FloatWidth, IntSign, IntWidth, Type, TypeKind},
-    variants::Discriminant,
+    variants::{Discriminant, VariantIndex},
 };
 
 /// A debug utility for printing values at runtime.
@@ -33,10 +33,10 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
             let adt_info = item_ref.item.adt_info();
             let adt_layout = ty.layout();
 
-            let discriminant = match &adt_info.kind {
+            let variant = match &adt_info.kind {
                 AdtKind::Struct => {
                     print!("struct{{ ");
-                    None
+                    Some(VariantIndex::new(0))
                 }
                 AdtKind::Enum(e) => {
                     let disc = e.discriminant_internal;
@@ -45,16 +45,25 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
                     print_value(disc, ptr, 0);
                     print!("){{ ");
 
-                    match e.discriminant_internal.kind() {
+                    let disc = match disc.kind() {
                         TypeKind::Int(IntWidth::I32, IntSign::Unsigned) => {
                             let n: u32 = std::ptr::read(ptr as _);
-                            Some(Discriminant::new(n as _))
+                            Discriminant::new(n as _)
+                        }
+                        TypeKind::Int(IntWidth::I32, IntSign::Signed) => {
+                            let n: i32 = std::ptr::read(ptr as _);
+                            Discriminant::new(n as _)
                         }
                         _ => {
-                            print!("?");
-                            None
+                            panic!("can't read discriminant {}",disc);
                         }
-                    }
+                    };
+
+                    let variant = adt_info
+                        .index_for_discriminant(ty.vm(), disc)
+                        .expect("no variant index found");
+
+                    Some(variant)
                 }
                 AdtKind::Union => {
                     print!("union{{ ?");
@@ -62,10 +71,7 @@ pub unsafe fn print_value<'vm>(ty: Type<'vm>, ptr: *const u8, meta: usize) {
                 }
             };
 
-            if let Some(discriminant) = discriminant {
-                let variant = adt_info
-                    .index_for_discriminant(ty.vm(), discriminant)
-                    .expect("no variant index found");
+            if let Some(variant) = variant {
 
                 for (i, (ty, offset)) in adt_info
                     .variant_fields
