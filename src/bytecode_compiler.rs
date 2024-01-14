@@ -2524,6 +2524,7 @@ impl<'vm> CompilerStack<'vm> {
 
         let drop_id = match drop_info {
             DropInfo::Branch { fields, .. } => Some(self.register_drop_branch(slot, fields)),
+            DropInfo::Enum { glue, fields } => panic!("enum drop"),
             DropInfo::Leaf(glue) => Some(self.register_drop_leaf(slot, *glue)),
             DropInfo::None => None,
         };

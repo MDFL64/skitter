@@ -41,6 +41,10 @@ pub enum DropInfo<'vm> {
         glue: DropGlue<'vm>,
         fields: Vec<DropField<'vm>>,
     },
+    Enum {
+        glue: DropGlue<'vm>,
+        fields: Vec<DropField<'vm>>,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -101,10 +105,14 @@ impl<'vm> DropInfo<'vm> {
                 None
             };
 
+            let is_enum = adt_info.map(|info| info.is_enum()).unwrap_or(false);
+
             let glue = DropGlue::new(vm, drop_fn, &fields, disc_info, boxed_ty, debug_name);
 
             if drop_fn.is_some() {
                 DropInfo::Leaf(glue)
+            } else if is_enum {
+                DropInfo::Enum { glue, fields }
             } else {
                 DropInfo::Branch { glue, fields }
             }
@@ -129,6 +137,7 @@ impl<'vm> DropInfo<'vm> {
         match self {
             Self::Leaf(glue) => Some(glue),
             Self::Branch { glue, fields: _ } => Some(glue),
+            Self::Enum { glue, fields: _ } => Some(glue),
             Self::None => None,
         }
     }
